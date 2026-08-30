@@ -130,3 +130,5 @@ aios/
 MIT License. © 2026 Sturdy Ai.
 
 The Sturdy Ai AIOS guides walk you through the kit step by step (see the `os/guides/` folder).
+
+Production dashboard, API, and voice gateway: see `README-PLATFORM.md`.
