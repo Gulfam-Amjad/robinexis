@@ -1,10 +1,10 @@
 [build]
 builder = "NIXPACKS"
-buildCommand = "node scripts/railway.mjs api"
+buildCommand = "node ../../scripts/railway.mjs api"
 
 [deploy]
-preDeployCommand = "node scripts/railway.mjs migrate"
-startCommand = "npm run start -w @robinexis/api"
+preDeployCommand = "node ../../scripts/railway.mjs migrate"
+startCommand = "node dist/server.js"
 healthcheckPath = "/health"
 healthcheckTimeout = 30
 restartPolicyType = "ON_FAILURE"

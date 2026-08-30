@@ -1,6 +1,6 @@
 [build]
 builder = "NIXPACKS"
-buildCommand = "npm ci && npm run build:gateway"
+buildCommand = "node scripts/railway.mjs gateway"
 
 [deploy]
 startCommand = "npm run start -w @robinexis/voice-gateway"

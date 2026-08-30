@@ -18,6 +18,7 @@ token.json
 __MACOSX/
 __pycache__/
 node_modules/
+/dist/
 apps/*/dist/
 packages/*/dist/
 .claude/settings.local.json

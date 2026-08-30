@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
+// Vercel resolves the output directory from the repository root, so the bundle is
+// emitted to `<repo>/dist` rather than inside this workspace.
 export default defineConfig({
   plugins: [react()],
   envDir: repoRoot,
@@ -16,7 +18,8 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: "dist",
+    outDir: path.join(repoRoot, "dist"),
+    emptyOutDir: true,
     sourcemap: false,
     chunkSizeWarningLimit: 900,
   },

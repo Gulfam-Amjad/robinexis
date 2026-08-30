@@ -1,12 +1,14 @@
 # Railway + Vercel + Supabase runbook
 
-Create **three Railway services** from this repository (service root = repo root) and one **Vercel** project for the dashboard.
+Create **three Railway services** from this repository. Prefer **Root Directory = `/`** (repo root). If Railway imported npm workspaces and set Root Directory to `apps/api` (and similar), leave that: each app has its own `railway.toml` that installs from the monorepo root.
+
+Do **not** put the dashboard on Railway unless you need a fallback. Prefer Vercel for `@robinexis/web`.
 
 ## Services
 
-1. **gateway** — config `/railway.toml`, public domain, `$PORT`. Twilio Voice webhook: `{PUBLIC_BASE_URL}/twiml`. Media stream: `wss://{PUBLIC_HOST}/media-stream`.
-2. **api** — config `/deploy/railway/api.toml`, public domain. Set `API_PORT=$PORT`. Stripe/Twilio status: `{API_PUBLIC_BASE_URL}`.
-3. **worker** — config `/deploy/railway/worker.toml`, no public domain.
+1. **gateway** (`@robinexis/voice-gateway`) — public domain, `$PORT`. Twilio Voice webhook: `{PUBLIC_BASE_URL}/twiml`. Media stream: `wss://{PUBLIC_HOST}/media-stream`.
+2. **api** (`@robinexis/api`) — public domain. Set `API_PORT=$PORT`. Stripe/Twilio status: `{API_PUBLIC_BASE_URL}`.
+3. **worker** (`@robinexis/worker`) — no public domain.
 
 **Vercel** — Root Directory empty (repo root). Build uses `vercel.json`. Set `VITE_API_BASE_URL`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`. Do not put `DATABASE_URL` or service secrets on Vercel.
 

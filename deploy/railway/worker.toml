@@ -1,6 +1,6 @@
 [build]
 builder = "NIXPACKS"
-buildCommand = "npm ci && npm run build:worker"
+buildCommand = "node scripts/railway.mjs worker"
 
 [deploy]
 startCommand = "npm run start -w @robinexis/worker"

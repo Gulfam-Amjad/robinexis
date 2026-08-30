@@ -3,12 +3,9 @@ os
 .claude
 superpowers
 raw
-apps/api
-apps/worker
-apps/voice-gateway
-apps/demo-factory
 deploy
 docker-compose.yml
 railway.toml
+nixpacks.toml
 ngrok.exe
 ngrok.zip
