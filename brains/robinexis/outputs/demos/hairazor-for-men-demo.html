@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hairazor for Men — Demo</title>
+<style>
+  :root { --ink:#0f0f0f; --muted:#6b6b6b; --line:#e6e6e6; --accent:#1a4d5c; --bg:#f6f5f2; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+         color:var(--ink); background:var(--bg); -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:740px; margin:0 auto; padding:48px 24px 150px; }
+  .tag { font-size:12px; letter-spacing:.18em; text-transform:uppercase; color:var(--accent); font-weight:600; }
+  h1 { font-size:38px; margin:8px 0 4px; letter-spacing:-.02em; }
+  .sub { font-style:italic; color:var(--muted); margin:0 0 8px; }
+  .rating { color:var(--muted); font-size:15px; margin-bottom:28px; }
+  .rating b { color:var(--ink); }
+  .card { background:#fff; border:1px solid var(--line); border-radius:14px; padding:22px 24px; margin-bottom:16px; }
+  h2 { font-size:13px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted);
+       margin:0 0 14px; font-weight:600; }
+  .row { display:flex; justify-content:space-between; align-items:baseline;
+         padding:10px 0; border-bottom:1px solid #f2f2f2; font-size:16px; gap:16px; }
+  .row:last-child { border-bottom:0; }
+  .row .meta { color:var(--muted); font-size:14px; }
+  .price { font-weight:600; white-space:nowrap; color:var(--muted); font-size:14px; }
+  .loc { font-size:15px; line-height:1.5; }
+  .loc b { display:block; letter-spacing:.04em; }
+  .loc span { color:var(--muted); }
+  .note { background:#eaf1f3; border:1px solid #c5dae0; border-radius:14px;
+          padding:16px 20px; font-size:14.5px; line-height:1.55; color:#173842; }
+  a { color:inherit; }
+  footer { text-align:center; color:var(--muted); font-size:13px; margin-top:26px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="tag">Confidence for your business</div>
+    <h1>Hairazor for Men</h1>
+    <p class="sub">Always looking sharp for your next meeting</p>
+    <div class="rating">City of London · serving the City since <b>2000</b> · students save 10%</div>
+
+    <div class="card">
+      <h2>Services &amp; Prices</h2>
+      <div class="row"><span>Men's blow dry</span><span class="price">from £15</span></div>
+      <div class="row"><span>Wash, cut &amp; finish</span><span class="price">from £34</span></div>
+      <div class="row"><span>Crew cut <span class="meta">clippers only</span></span><span class="price">from £20</span></div>
+      <div class="row"><span>Young men <span class="meta">under 15</span></span><span class="price">from £20</span></div>
+      <div class="row"><span>Wash, re-style &amp; finish <span class="meta">long hair</span></span><span class="price">from £38</span></div>
+      <div class="row"><span>Beard trim <span class="meta">clippers</span></span><span class="price">from £10</span></div>
+      <div class="row"><span>Beard trim <span class="meta">scissors</span></span><span class="price">from £20</span></div>
+      <div class="row"><span>Colour treatments <span class="meta">consultation required</span></span><span class="price">from £25</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Find Us</h2>
+      <div class="loc"><b>THE CITY</b>22 Mason's Avenue, Coleman Street, London EC2V 5BT<br><span>Opposite the Butler's Head · 020 7606 0892</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Booking</h2>
+      <div class="row"><span>Hairazor app</span><span>on the App Store</span></div>
+      <div class="row"><span>By phone</span><span>020 7606 0892</span></div>
+    </div>
+
+    <div class="note">
+      <b>Try the voice agent →</b> tap the widget in the corner and talk to it like a customer.
+      Book a wash-cut-and-finish for Friday, ask what a beard trim costs, or say you're a student.
+      Ask it the opening hours and watch it <em>refuse to guess</em> and take your details instead —
+      it only states what's actually published. That's the point: it never invents.
+    </div>
+
+    <footer>Voice agent demo built by Robinexis</footer>
+  </div>
+
+  <elevenlabs-convai agent-id="agent_9601kyj2fj28ebx9ajce47pmbzdy"></elevenlabs-convai>
+  <script src="https://unpkg.com/@elevenlabs/convai-widget-embed" async type="text/javascript"></script>
+</body>
+</html>

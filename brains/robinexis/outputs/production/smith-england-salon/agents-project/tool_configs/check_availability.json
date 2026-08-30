@@ -1,0 +1,23 @@
+{
+  "id": "tool_9701m0cyjz3pez8vqwyxgs3k2ycm",
+  "name": "check_availability",
+  "description": "Check open appointment slots on Smith England Salon's booking calendar for a given service and date range. Always call this before offering any time to a caller.",
+  "type": "webhook",
+  "api_schema": {
+    "url": "https://api.cal.com/v2/slots",
+    "method": "GET",
+    "request_headers": {
+      "cal-api-version": "2024-09-04",
+      "Authorization": { "secret_id": "j9A5jiUYLyoKBuzzG1TW", "note": "ElevenLabs workspace secret 'smith_england_salon_calcom_auth_header' — never the raw key in this file" }
+    },
+    "query_params_schema": {
+      "properties": {
+        "username": { "type": "string", "description": "Always hammad-muntazir-9zpmnb (the Cal.com account this deployment writes to)." },
+        "eventTypeSlug": { "type": "string", "description": "The bookable service slug.", "enum": ["haircut-style", "colour", "blow-dry", "mens-cut-fade", "childrens-cut"] },
+        "start": { "type": "string", "description": "ISO 8601 start of the search window" },
+        "end": { "type": "string", "description": "ISO 8601 end of the search window" }
+      },
+      "required": ["username", "eventTypeSlug", "start", "end"]
+    }
+  }
+}

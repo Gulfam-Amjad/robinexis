@@ -1,0 +1,173 @@
+{
+    "agents": [
+        {
+            "name": "Demo — Barber East London — 2026-07-21",
+            "config": "agent_configs/barber-east-london.json",
+            "id": "agent_8901ky2h18eqf3tr6b1a3qy11q6m",
+            "version_id": "agtvrsn_7601kyj5vermfyrtq7wqs0mhqr61",
+            "branch_id": "agtbrch_7301ky2h1921epgb3jx706j0pn0n"
+        },
+        {
+            "name": "Demo — Pasha Barbers — 2026-07-27",
+            "config": "agent_configs/Demo-—-Pasha-Barbers-—-2026-07-27.json",
+            "id": "agent_8901kyj05k0bf8k867t7bp0r5tcy",
+            "version_id": "agtvrsn_7101kyt4ywxtfkhsrr7f08q65g77",
+            "branch_id": "agtbrch_9001kyj05kvre8srexcy8xh392hm"
+        },
+        {
+            "name": "Demo — Usta Barbers — 2026-07-27",
+            "config": "agent_configs/Demo-—-Usta-Barbers-—-2026-07-27.json",
+            "id": "agent_2301kyj0nf0zfz6t8sac667ewtbw",
+            "version_id": "agtvrsn_4401kyt2g4dteppvq4655yx8f9g3",
+            "branch_id": "agtbrch_7901kyj0nfnyfmjvdmx0ex4wxbft"
+        },
+        {
+            "config": "agent_configs/Demo-—-Ned's-Barbershop-—-2026-07-27.json",
+            "id": "agent_1901kyj24ddafpk8rcqj2nhzp0pt",
+            "version_id": "agtvrsn_1401kyj5vnk6eecvq1eezwtthqbj",
+            "branch_id": "agtbrch_7801kyj24e2gev9bq4p5gwmkh309"
+        },
+        {
+            "config": "agent_configs/Demo-—-Hairazor-for-Men-—-2026-07-27-1.json",
+            "id": "agent_9601kyj2fj28ebx9ajce47pmbzdy",
+            "version_id": "agtvrsn_0601kyj5vqm3ffwafgf7fsvfp6yr",
+            "branch_id": "agtbrch_4001kyj2fjnxfhzs5yycyw18wfkv"
+        },
+        {
+            "config": "agent_configs/Demo-—-MAN-OJ-—-2026-07-27-1.json",
+            "id": "agent_9101kyj2v49mfy2v93gjxtwe83sy",
+            "version_id": "agtvrsn_7301kyj5vsq5e8tre8y6y1n89sze",
+            "branch_id": "agtbrch_0101kyj2v50nevm9wfyaepdfxp2w"
+        },
+        {
+            "config": "agent_configs/Demo-—-Razor-&-Craft-Noble-Man-Barber-—-2026-07-27.json",
+            "id": "agent_2901kyj383zkehb9m3k3cbvtsn21",
+            "version_id": "agtvrsn_1301kysz8gh8ex9b087wy1n7bcmq",
+            "branch_id": "agtbrch_6301kyj384jzf9n8gtm57getfmfg"
+        },
+        {
+            "config": "agent_configs/Demo-—-Jack-Knife-Barbers-—-2026-07-27-1.json",
+            "id": "agent_9101kyj3he5ee708kgxeg6f3qy0x",
+            "version_id": "agtvrsn_6601kyttf9ygfcj8rzsarsn20f4g",
+            "branch_id": "agtbrch_3301kyj3hevnepmrhmadmzvvw3md"
+        },
+        {
+            "config": "agent_configs/Demo-—-The-Barba-London-—-2026-07-27-1.json",
+            "id": "agent_1601kyj3r3g2epvrga72hnb737rb",
+            "version_id": "agtvrsn_9401kyj5w0vnfn9ad6g9a878gnmh",
+            "branch_id": "agtbrch_1201kyj3r4c9eh6btgeq9ycwwgw5"
+        },
+        {
+            "config": "agent_configs/Demo-—-Bey-London-—-2026-07-27-1.json",
+            "id": "agent_7001kyj417f2ep4vyvpevbxhem2m",
+            "version_id": "agtvrsn_8601kyt3vvcnesab0kjb4h06xa45",
+            "branch_id": "agtbrch_8401kyj41cppe7h9v0b7kyr4yjcf"
+        },
+        {
+            "config": "agent_configs/Demo-—-Chequers-Hair-&-Beauty-—-2026-07-27.json",
+            "id": "agent_2901kyj473wgfcqtk0q3rh3m1zb9",
+            "version_id": "agtvrsn_9601kyttkarjeke8pcm86zpegbqt",
+            "branch_id": "agtbrch_4101kyj474ndf7ebnfp62hjkg747"
+        },
+        {
+            "config": "agent_configs/Demo-—-Blades-Hair-—-2026-07-27-1.json",
+            "id": "agent_4201kyj4gndpe9hvh1js0h8mb85c",
+            "version_id": "agtvrsn_0701kytw790ff2pt3fg4mnbawwkn",
+            "branch_id": "agtbrch_6001kyj4gp1jf73a17f65npmgq5k"
+        },
+        {
+            "config": "agent_configs/Demo-—-Brox-Barbers-—-2026-07-27-1.json",
+            "id": "agent_0001kyj4r6vte97brttbdm61tw4f",
+            "version_id": "agtvrsn_8101kytvnpzjf91bf6qprgmfaqw9",
+            "branch_id": "agtbrch_8001kyj4r7g7eebr6sn20et89q9e"
+        },
+        {
+            "config": "agent_configs/Demo-—-Flame-&-Steel-—-2026-07-27-1.json",
+            "id": "agent_0401kyj4xbz0eectbwmvbfg9d9wj",
+            "version_id": "agtvrsn_7301kyj5wb9debwsjsx6b60d8f53",
+            "branch_id": "agtbrch_6201kyj4xcnhfxsskfjpnryss61s"
+        },
+        {
+            "config": "agent_configs/Demo-—-Forever-Us-Hair-and-Beauty-—-2026-07-27-1.json",
+            "id": "agent_1701kyj53hdxf8j9zfv092g719h6",
+            "version_id": "agtvrsn_2501kyqff699egabzdqbvzabveht",
+            "branch_id": "agtbrch_0201kyj53j45f0trgq0dd5y5ktva"
+        },
+        {
+            "config": "agent_configs/Demo-—-STA-Studios-—-2026-07-27-1.json",
+            "id": "agent_5101kyj5dmb9e8pv47r22pxqx6qk",
+            "version_id": "agtvrsn_6501kyv2tfw4et4b5psyhzxha6r3",
+            "branch_id": "agtbrch_9701kyj5dn3je2fbdg7fse1s1358"
+        },
+        {
+            "config": "agent_configs/Demo-—-Samantha-Cusick-London-(Liverpool-Street)-—-2026-07-27.json",
+            "id": "agent_1201kyj5j1y4fn8rgygmrm05256c",
+            "version_id": "agtvrsn_8101kyqhpnnkfp2s6yt1nxh338dv",
+            "branch_id": "agtbrch_8801kyj5j2m7f0js8hb2epaff38s"
+        },
+        {
+            "config": "agent_configs/Demo-—-The-Cutting-Space-—-2026-07-27-1.json",
+            "id": "agent_5401kyj5vb4kebh9xpdxfs1es4fh",
+            "version_id": "agtvrsn_7801kyt41ecxe2av05hw84hr5qtr",
+            "branch_id": "agtbrch_1401kyj5vbpdfw1va6jg1n4w201a"
+        },
+        {
+            "config": "agent_configs/Demo-—-WB-Hairdressing-—-2026-07-27-1.json",
+            "id": "agent_3201kyj62sn7f83ry55cae883qws",
+            "version_id": "agtvrsn_8101kyt5h8mteksbkn1617989ecr",
+            "branch_id": "agtbrch_0801kyj62t6zfpqavjynzg23efvh"
+        },
+        {
+            "config": "agent_configs/Demo-—-Jonny's-Place-—-2026-07-27.json",
+            "id": "agent_9901kyj68e93etxs5pe4zp7mka3w",
+            "version_id": "agtvrsn_8501kytny742ecs95mcd9psse8rg",
+            "branch_id": "agtbrch_1501kyj68exbfnw8gp7mmwdcs0mz"
+        },
+        {
+            "config": "agent_configs/Demo-—-Blow-Dry-Express-(Monument)-—-2026-07-27.json",
+            "id": "agent_8701kyj6ew2wevcspdtgbpg5wvxf",
+            "version_id": "agtvrsn_3201kytr5r0jevvter7f7mwvejkf",
+            "branch_id": "agtbrch_2801kyj6ex4yegps30abq3f7r4hj"
+        },
+        {
+            "config": "agent_configs/Demo-—-Jolie-Hairdressing-—-2026-07-27-1.json",
+            "id": "agent_7301kyj6nj73fbyv0qd6yfy6m2ea"
+        },
+        {
+            "config": "agent_configs/Demo-—-Nicholson-&-Griffin-—-2026-07-27-1.json",
+            "id": "agent_9801kyj6tpgdfrzb5ajs7h1b4n9z"
+        },
+        {
+            "config": "agent_configs/Demo-—-Gielly-Green-—-2026-07-27-1.json",
+            "id": "agent_8001kyj6yxw3f4dtnjvavsh0jeqy"
+        },
+        {
+            "config": "agent_configs/Demo-—-ZERO81-Hair-Studio-(Liverpool-Street)-—-2026-07-27.json",
+            "id": "agent_7101kyj79g3mfd7r4wxfgf4wa2x5",
+            "version_id": "agtvrsn_8901kyt695g6exe8d0b0y3wj9q8m",
+            "branch_id": "agtbrch_4601kyj79gwne9fv50haj7x7wq4e"
+        },
+        {
+            "config": "agent_configs/Demo-—-Isar-Hair-—-2026-07-27-1.json",
+            "id": "agent_3401kyj7fwtffbpa7675b6fn01nq"
+        },
+        {
+            "config": "agent_configs/Demo-—-KIWe1-Hair-and-Beauty-—-2026-07-27-1.json",
+            "id": "agent_6301kyj7qfqhfvvvy30htby5qa9d"
+        },
+        {
+            "config": "agent_configs/Demo-—-Shiroma-Hairdressing-—-2026-07-27-1.json",
+            "id": "agent_8901kyj810cxe38rm9rmx6a0az76",
+            "version_id": "agtvrsn_7601kyv4madbesxtccnrb3yrhzxf",
+            "branch_id": "agtbrch_8901kyj811d9f5zank539nbfv79y"
+        },
+        {
+            "config": "agent_configs/Demo-—-R.W.-Wolf-Monument-—-2026-07-28-1.json",
+            "id": "agent_6701kykd3az1f79vvtxxqnm7798a"
+        },
+        {
+            "config": "agent_configs/Demo-—-Joe-In-The-City-—-2026-07-28-1.json",
+            "id": "agent_1601kykd6j9ce52s62jyhyp5p50b"
+        }
+    ]
+}

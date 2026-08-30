@@ -1,0 +1,6 @@
+{
+  "name": "@robinexis/demo-factory",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Sales-demo factory docs and checklist — runtime is /demo-build + ElevenLabs CLI, not this package."
+}

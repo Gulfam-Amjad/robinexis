@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Samantha Cusick London — Liverpool Street — Demo</title>
+<style>
+  :root { --ink:#211c1a; --muted:#8a807a; --line:#ece5df; --accent:#b98a6d; --bg:#f6f1ec; --blush:#f3e6dd; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+         color:var(--ink); background:var(--bg); -webkit-font-smoothing:antialiased; }
+  .hero { background:linear-gradient(160deg,#efe3d9 0%,#f6f1ec 60%); padding:56px 24px 30px; text-align:center; }
+  .wrap { max-width:740px; margin:0 auto; padding:0 24px 150px; }
+  .hero .wrap { padding-bottom:0; }
+  .tag { font-size:12px; letter-spacing:.22em; text-transform:uppercase; color:var(--accent); font-weight:600; }
+  h1 { font-size:40px; margin:10px 0 6px; letter-spacing:-.015em; font-weight:600; }
+  .sub { font-style:italic; color:var(--muted); margin:0 0 6px; font-size:17px; }
+  .quote { color:var(--ink); font-size:15px; max-width:460px; margin:14px auto 0; line-height:1.5; opacity:.75; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:16px; padding:24px 26px; margin-top:16px;
+          box-shadow:0 1px 0 rgba(0,0,0,.02); }
+  h2 { font-size:13px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted);
+       margin:0 0 16px; font-weight:600; }
+  .pills { display:flex; flex-wrap:wrap; gap:9px; }
+  .pill { background:var(--blush); border:1px solid #e7d3c4; color:#7a5137; border-radius:999px;
+          padding:7px 15px; font-size:14.5px; }
+  .row { display:flex; justify-content:space-between; align-items:baseline;
+         padding:11px 0; border-bottom:1px solid #f4efea; font-size:16px; gap:16px; }
+  .row:last-child { border-bottom:0; }
+  .row span:first-child { color:var(--muted); }
+  .hours { display:grid; grid-template-columns:1fr auto; gap:8px 16px; font-size:16px; }
+  .hours .d { color:var(--muted); }
+  .hours .closed { color:#b06a63; }
+  .svc { display:grid; grid-template-columns:1fr auto auto; gap:9px 14px; font-size:15.5px; align-items:baseline; }
+  .svc .nm { }
+  .svc .du { color:var(--muted); font-size:13.5px; white-space:nowrap; text-align:right; }
+  .svc .pr { font-weight:600; white-space:nowrap; text-align:right; }
+  .grp { grid-column:1/-1; font-size:11.5px; letter-spacing:.13em; text-transform:uppercase;
+         color:var(--accent); font-weight:600; margin-top:14px; padding-top:12px; border-top:1px solid var(--line); }
+  .grp:first-child { margin-top:0; padding-top:0; border-top:0; }
+  .free { color:#5c8a63; font-weight:600; }
+  .small { font-size:14px; color:var(--muted); line-height:1.6; margin-top:4px; }
+  .note { background:#f8ece2; border:1px solid #ecd6c4; border-radius:16px;
+          padding:18px 22px; font-size:14.5px; line-height:1.6; color:#6b4a35; margin-top:18px; }
+  .note b { color:#5a3c2a; }
+  a { color:inherit; }
+  footer { text-align:center; color:var(--muted); font-size:13px; margin-top:28px; }
+</style>
+</head>
+<body>
+  <div class="hero">
+    <div class="wrap">
+      <div class="tag">Samantha Cusick London</div>
+      <h1>Liverpool Street</h1>
+      <p class="sub">A design-led hair salon in the City of London</p>
+      <p class="quote">"The kind of salon you walk into and immediately want to take a photo of" — colour, cuts &amp; head spa, cocktails optional.</p>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="card">
+      <h2>Services</h2>
+      <div class="pills">
+        <span class="pill">Colour</span>
+        <span class="pill">Balayage</span>
+        <span class="pill">Grey Blending</span>
+        <span class="pill">Cut &amp; Styling</span>
+        <span class="pill">Hair Extensions</span>
+        <span class="pill">Wedding &amp; Bridal</span>
+        <span class="pill">Head Spa</span>
+        <span class="pill">Silent Appointments</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Price List</h2>
+      <div class="svc">
+
+        <div class="grp">Consultations</div>
+        <div class="nm">All consultations — colour, extensions, bridal, cutting</div><div class="du">15 min</div><div class="pr free">Free</div>
+        <div class="nm" style="grid-column:1/-1"><span class="small">In person or virtual · required before colour, extensions &amp; keratin · valid 6 months</span></div>
+
+        <div class="grp">Cut &amp; Styling</div>
+        <div class="nm">Wash, Cut &amp; Blow Dry</div><div class="du">60 min</div><div class="pr">from £76</div>
+        <div class="nm">Wash, Cut &amp; Blow Dry — long thick hair</div><div class="du">90 min</div><div class="pr">from £109</div>
+        <div class="nm">Restyle — Wash, Cut &amp; Blow Dry</div><div class="du">90 min</div><div class="pr">from £109</div>
+        <div class="nm">Curly Hair Cut</div><div class="du">90 min</div><div class="pr">£132</div>
+        <div class="nm">Blow Dry</div><div class="du">45 min</div><div class="pr">from £43</div>
+        <div class="nm">Blow Dry — extra long/thick or extensions</div><div class="du">60 min</div><div class="pr">from £54</div>
+        <div class="nm">Diffused Blow Dry (curly hair)</div><div class="du">45 min</div><div class="pr">from £43</div>
+        <div class="nm">Sparkly Blow Dry (+ hair tinsel)</div><div class="du">60 min</div><div class="pr">from £87</div>
+        <div class="nm">Mens Cut &amp; Finish</div><div class="du">60 min</div><div class="pr">from £56</div>
+        <div class="nm">Junior Blow-Dry</div><div class="du">45 min</div><div class="pr">£30</div>
+
+        <div class="grp">Balayage &amp; Freehand</div>
+        <div class="nm">Air Touch Balayage</div><div class="du">165 min</div><div class="pr">from £264</div>
+        <div class="nm">Air Touch Balayage w/ Base</div><div class="du">195 min</div><div class="pr">from £308</div>
+        <div class="nm">All Out Balayage</div><div class="du">135 min</div><div class="pr">from £204</div>
+        <div class="nm">All Out Balayage w/ Base</div><div class="du">135 min</div><div class="pr">from £248</div>
+        <div class="nm">Balayage Refresh</div><div class="du">105 min</div><div class="pr">from £171</div>
+        <div class="nm">Ecaille</div><div class="du">165 min</div><div class="pr">from £264</div>
+        <div class="nm">Halo / T-Section Balayage</div><div class="du">105 min</div><div class="pr">from £116</div>
+        <div class="nm">Face Frame (up to 12 foils)</div><div class="du">75 min</div><div class="pr">from £85</div>
+        <div class="nm">Reverse Balayage (Root Stretch)</div><div class="du">75 min</div><div class="pr">from £140</div>
+
+        <div class="grp">Highlights</div>
+        <div class="nm">Extra Full Head (Back 2 Back Foils)</div><div class="du">165 min</div><div class="pr">from £264</div>
+        <div class="nm">Full Head Highlights</div><div class="du">165 min</div><div class="pr">from £204</div>
+        <div class="nm">Full Head Highlights w/ Base</div><div class="du">165 min</div><div class="pr">from £248</div>
+        <div class="nm">Half Head Highlights</div><div class="du">135 min</div><div class="pr">from £153</div>
+        <div class="nm">T-Section Highlights</div><div class="du">105 min</div><div class="pr">from £109</div>
+
+        <div class="grp">Grey Blending</div>
+        <div class="nm">Air Touch Blending</div><div class="du">165 min</div><div class="pr">from £264</div>
+        <div class="nm">Full Head (Babylights / Lowlights)</div><div class="du">165 min</div><div class="pr">from £204</div>
+        <div class="nm">Half Head (Babylights / Lowlights)</div><div class="du">135 min</div><div class="pr">from £153</div>
+        <div class="nm">Refresh (Balayage / Foilyage)</div><div class="du">105 min</div><div class="pr">from £171</div>
+        <div class="nm">Soft “Stained” Coverage</div><div class="du">60 min</div><div class="pr">from £75</div>
+
+        <div class="grp">Global Colour &amp; Toners</div>
+        <div class="nm">Tint — Global</div><div class="du">90 min</div><div class="pr">from £113</div>
+        <div class="nm">Ultimate Tint Regrowth &amp; Colour Refresh</div><div class="du">90 min</div><div class="pr">from £113</div>
+        <div class="nm">Express Regrowth Tint (10 min gels)</div><div class="du">60 min</div><div class="pr">from £83</div>
+        <div class="nm">Gloss / Semi</div><div class="du">60 min</div><div class="pr">from £75</div>
+        <div class="nm">Toner + Blowdry</div><div class="du">60 min</div><div class="pr">from £78</div>
+        <div class="nm">Standalone Toner</div><div class="du">30 min</div><div class="pr">£54</div>
+
+        <div class="grp">Bleach &amp; Colour Correction</div>
+        <div class="nm">Bleach Regrowth 6–8 weeks</div><div class="du">105 min</div><div class="pr">from £150</div>
+        <div class="nm">Bleach Regrowth 8 weeks+</div><div class="du">135 min</div><div class="pr">from £206</div>
+        <div class="nm">Full Head Bleach / Virgin Bleach</div><div class="du">225 min</div><div class="pr">from £248</div>
+        <div class="nm">Virgin Boy Bleach</div><div class="du">105 min</div><div class="pr">from £209</div>
+
+        <div class="grp">Treatments &amp; Head Spa</div>
+        <div class="nm">The Curl Revival Ritual</div><div class="du">60 min</div><div class="pr">£139</div>
+        <div class="nm">Olaplex Curl Rebuilding Treatment</div><div class="du">60 min</div><div class="pr">£100</div>
+        <div class="nm">Olaplex Luxe Revival Blow-Dry</div><div class="du">60 min</div><div class="pr">from £98</div>
+        <div class="nm">The Scalp Facial</div><div class="du">60 min</div><div class="pr">£95</div>
+        <div class="nm">The Revival</div><div class="du">30 min</div><div class="pr">£75</div>
+        <div class="nm">The Bond Strength &amp; Repair Ritual</div><div class="du">30 min</div><div class="pr">£45</div>
+        <div class="nm">The Hard Water Detox</div><div class="du">15 min</div><div class="pr">£40</div>
+        <div class="nm">The Scalp Balance &amp; Hydration Boost</div><div class="du">15 min</div><div class="pr">£35</div>
+        <div class="nm">The Colour Bond Protect</div><div class="du">15 min</div><div class="pr">£30</div>
+        <div class="nm">The Shine &amp; Repair Boost</div><div class="du">15 min</div><div class="pr">£20</div>
+
+        <div class="grp">Brazilian / Keratin Blowdry</div>
+        <div class="nm">Short hair</div><div class="du">120 min</div><div class="pr">£250</div>
+        <div class="nm">Medium hair</div><div class="du">120 min</div><div class="pr">£300</div>
+        <div class="nm">Long hair</div><div class="du">150 min</div><div class="pr">£360</div>
+        <div class="nm">Extra long hair</div><div class="du">180 min</div><div class="pr">£432</div>
+
+        <div class="grp">Tape Extensions — application &amp; reapplication</div>
+        <div class="nm">Hair Filler (2 pairs)</div><div class="du">30 min</div><div class="pr">£70</div>
+        <div class="nm">Hair Filler+ (4 pairs)</div><div class="du">60 min</div><div class="pr">£140</div>
+        <div class="nm">Volume Boost (6 pairs)</div><div class="du">60 min</div><div class="pr">£200</div>
+        <div class="nm">Volume Boost Extra (8 pairs)</div><div class="du">90 min</div><div class="pr">£230</div>
+        <div class="nm">Boost+ (10 pairs)</div><div class="du">60 min</div><div class="pr">£260</div>
+        <div class="nm">Mega Volume &amp; Add Inches (15 pairs)</div><div class="du">120 min</div><div class="pr">£350</div>
+        <div class="nm">All Out Volume &amp; Add Inches (20 pairs)</div><div class="du">120 min</div><div class="pr">£420</div>
+        <div class="nm" style="grid-column:1/-1"><span class="small">Removal £30–£60 depending on size</span></div>
+
+        <div class="grp">Nano Bond Extensions — application &amp; reapplication</div>
+        <div class="nm">Filler+ (20–40 bonds)</div><div class="du">30 min</div><div class="pr">£70</div>
+        <div class="nm">Half Head (60–80 bonds)</div><div class="du">120 min</div><div class="pr">£280</div>
+        <div class="nm">Three Quarter Head (100–120 bonds)</div><div class="du">180 min</div><div class="pr">£420</div>
+        <div class="nm">Full Head (140–160 bonds)</div><div class="du">240 min</div><div class="pr">£560</div>
+        <div class="nm">Extra Full Head (160–200 bonds)</div><div class="du">300 min</div><div class="pr">£700</div>
+        <div class="nm" style="grid-column:1/-1"><span class="small">Removal £30–£90 depending on size</span></div>
+
+        <div class="grp">LA Weave Extensions — application &amp; refitting</div>
+        <div class="nm">Quarter Head (Nano Weft)</div><div class="du">60 min</div><div class="pr">£140</div>
+        <div class="nm">Half Head (Flat Half Weft)</div><div class="du">90 min</div><div class="pr">£210</div>
+        <div class="nm">Full Head (Flat Full Weft)</div><div class="du">120 min</div><div class="pr">£280</div>
+        <div class="nm">Extra Full Head (Super Weft)</div><div class="du">160 min</div><div class="pr">£350</div>
+        <div class="nm">Removal (all sizes)</div><div class="du">30 min</div><div class="pr">£70</div>
+
+        <div class="grp">Bridal &amp; Hair Up</div>
+        <div class="nm">1-Hour Wedding Hairstyle Trial</div><div class="du">60 min</div><div class="pr">from £79</div>
+        <div class="nm">2-Hour Wedding Hairstyle Trial</div><div class="du">120 min</div><div class="pr">from £157</div>
+        <div class="nm">1.5 Hour In-Salon Wedding Hairstyling</div><div class="du">90 min</div><div class="pr">from £118</div>
+        <div class="nm">2 Hour In-Salon Wedding Hairstyling</div><div class="du">120 min</div><div class="pr">from £160</div>
+        <div class="nm">Red Carpet Hairstyle or Hair Up</div><div class="du">60 min</div><div class="pr">from £87</div>
+
+        <div class="grp">Hair Tinsel</div>
+        <div class="nm">Up to 6 pieces</div><div class="du">15 min</div><div class="pr">£35</div>
+        <div class="nm">6 to 12 pieces</div><div class="du">15 min</div><div class="pr">£50</div>
+        <div class="nm">Removal</div><div class="du">30 min</div><div class="pr">£20</div>
+
+        <div class="grp">Silent Appointments</div>
+        <div class="nm">Wash, Cut &amp; Blow Dry</div><div class="du">60 min</div><div class="pr">from £76</div>
+        <div class="nm">Restyle</div><div class="du">90 min</div><div class="pr">from £109</div>
+        <div class="nm">Blow Dry</div><div class="du">45 min</div><div class="pr">from £43</div>
+        <div class="nm">Blow Dry &amp; Toner</div><div class="du">60 min</div><div class="pr">from £78</div>
+
+      </div>
+      <p class="small">“From” prices vary by stylist level. Lightening services require a toner, charged separately (£54). No deposit required to book.</p>
+    </div>
+
+    <div class="card">
+      <h2>Opening Hours</h2>
+      <div class="hours">
+        <span class="d">Tuesday – Thursday</span><span>9am – 8pm</span>
+        <span class="d">Friday</span><span>9am – 7pm</span>
+        <span class="d">Saturday</span><span>9am – 5pm</span>
+        <span class="d">Sunday – Monday</span><span class="closed">Closed</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Find Us</h2>
+      <div class="row"><span>Address</span><span>13 Old Broad Street, London, EC2N 1DW</span></div>
+      <div class="row"><span>Phone</span><span>0207 221 2227</span></div>
+      <div class="row"><span>WhatsApp</span><span>07862 126646</span></div>
+      <div class="row"><span>Booking</span><span>Online, app or in a moment — just ask</span></div>
+    </div>
+
+    <div class="note">
+      <b>Try the voice agent →</b> tap the widget in the corner and talk to it like a customer.
+      Ask what a full head of highlights costs, how long a keratin blowdry takes, or book a balayage
+      for Saturday morning. It knows the whole price list above — every service, price and duration —
+      and it knows a colour consultation comes first. It won't invent prices or availability.
+    </div>
+
+    <footer>Voice agent demo built by Robinexis</footer>
+  </div>
+
+  <elevenlabs-convai agent-id="agent_1201kyj5j1y4fn8rgygmrm05256c"></elevenlabs-convai>
+  <script src="https://unpkg.com/@elevenlabs/convai-widget-embed" async type="text/javascript"></script>
+</body>
+</html>

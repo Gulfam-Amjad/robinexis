@@ -1,0 +1,33 @@
+{
+  "name": "@robinexis/voice-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Twilio Media Streams: Groq Whisper STT → Groq Llama brain → ElevenLabs TTS",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsup",
+    "start": "node dist/server.js",
+    "start:source": "tsx src/server.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "dependencies": {
+    "@robinexis/brain": "*",
+    "@robinexis/database": "*",
+    "@robinexis/integrations": "*",
+    "@robinexis/knowledge": "*",
+    "dotenv": "^17.4.2",
+    "groq-sdk": "^1.6.0",
+    "twilio": "^6.1.0",
+    "ws": "8.21.3"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "@types/ws": "8.18.1",
+    "tsx": "4.23.12",
+    "typescript": "5.9.3"
+  }
+}

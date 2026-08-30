@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blades Hair — Demo</title>
+<style>
+  :root { --ink:#14171a; --muted:#767d84; --line:#e7e9ec; --accent:#b08d57; --bg:#f6f4f1; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+         color:var(--ink); background:var(--bg); -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:740px; margin:0 auto; padding:48px 24px 150px; }
+  .tag { font-size:12px; letter-spacing:.16em; text-transform:uppercase; color:var(--accent); font-weight:600; }
+  h1 { font-size:36px; margin:8px 0 4px; letter-spacing:-.02em; }
+  .sub { font-style:italic; color:var(--muted); margin:0 0 8px; }
+  .rating { color:var(--muted); font-size:15px; margin-bottom:28px; }
+  .rating b { color:var(--ink); }
+  .card { background:#fff; border:1px solid var(--line); border-radius:14px; padding:22px 24px; margin-bottom:16px; }
+  h2 { font-size:13px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted);
+       margin:0 0 14px; font-weight:600; }
+  .row { display:flex; justify-content:space-between; align-items:baseline;
+         padding:10px 0; border-bottom:1px solid #f2f0ec; font-size:16px; gap:16px; }
+  .row:last-child { border-bottom:0; }
+  .price { font-weight:600; white-space:nowrap; color:var(--ink); font-size:15px; }
+  .meta { color:var(--muted); font-size:14px; text-align:right; }
+  .pills { display:flex; flex-wrap:wrap; gap:8px; }
+  .pill { background:#f7f1e8; border:1px solid #e8d9c0; color:#6b5535; border-radius:999px;
+          padding:6px 13px; font-size:14px; }
+  .two { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media (max-width:560px){ .two{ grid-template-columns:1fr; } }
+  .loc { font-size:15px; line-height:1.5; }
+  .note { background:#f8f2e9; border:1px solid #eaddc2; border-radius:14px;
+          padding:16px 20px; font-size:14.5px; line-height:1.55; color:#5c4a2c; }
+  a { color:inherit; }
+  footer { text-align:center; color:var(--muted); font-size:13px; margin-top:26px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="tag">City of London</div>
+    <h1>Blades Hair</h1>
+    <p class="sub">Barbering &amp; hairdressing for men and women · Cullum Street, EC3</p>
+    <div class="rating">Book online 24/7 · Instant confirmation · <b>Mon–Fri 10am–7pm</b> · All men's treatments finished with a hot towel</div>
+
+    <div class="two">
+      <div class="card">
+        <h2>Gent's Hair — from</h2>
+        <div class="row"><span>Clipper cut</span><span class="price">£28</span></div>
+        <div class="row"><span>Shampoo &amp; clipper cut</span><span class="price">£30</span></div>
+        <div class="row"><span>Beard trim</span><span class="price">£20</span></div>
+        <div class="row"><span>Shampoo cut &amp; finish</span><span class="price">£40</span></div>
+        <div class="row"><span>Cut &amp; beard trim</span><span class="price">£57</span></div>
+        <div class="row"><span>Colour</span><span class="price">£50</span></div>
+        <div class="row"><span>Reshade</span><span class="price">£45</span></div>
+        <div class="row"><span>Cut &amp; colour</span><span class="price">£80</span></div>
+      </div>
+
+      <div class="card">
+        <h2>Ladies Hair — from</h2>
+        <div class="row"><span>Shampoo cut &amp; finish</span><span class="price">£68</span></div>
+        <div class="row"><span>Blow dry (short / medium / long)</span><span class="price">£39 / 44 / 49</span></div>
+        <div class="row"><span>Colour regrowth</span><span class="price">£66</span></div>
+        <div class="row"><span>Colour full head</span><span class="price">£95</span></div>
+        <div class="row"><span>T section</span><span class="price">£100</span></div>
+        <div class="row"><span>Highlights half head</span><span class="price">£115</span></div>
+        <div class="row"><span>Highlights full head</span><span class="price">£135</span></div>
+        <div class="row"><span>Re-style · Hair up · Correction</span><span class="price">on consultation</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>The Team</h2>
+      <div class="pills">
+        <span class="pill">Galyna</span>
+        <span class="pill">Cristina</span>
+        <span class="pill">Jana</span>
+        <span class="pill">Daiva</span>
+        <span class="pill">Denise</span>
+        <span class="pill">Stacey</span>
+        <span class="pill">Laima</span>
+      </div>
+      <div class="row" style="margin-top:14px"><span>Same price whichever stylist you choose</span><span class="meta">Colour &amp; highlights: Galyna, Jana or Denise</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Find Us</h2>
+      <div class="row"><span>Address</span><span>8 Cullum Street, EC3M 7JJ</span></div>
+      <div class="row"><span>Phone</span><span>020 7623 1994 · 020 7929 6680</span></div>
+      <div class="row"><span>Hours</span><span>Monday–Friday, 10am–7pm</span></div>
+    </div>
+
+    <div class="note">
+      <b>Try the voice agent →</b> tap the widget in the corner and talk to it like a customer.
+      Ask what full head highlights start from, book a clipper cut for Thursday, request Galyna by name,
+      or ask what a re-style costs. It knows the real menu, the team and who does colour — quotes every price
+      as a "from", and won't invent availability or an add-on it hasn't been told about.
+    </div>
+
+    <footer>Voice agent demo built by Robinexis</footer>
+  </div>
+
+  <elevenlabs-convai agent-id="agent_4201kyj4gndpe9hvh1js0h8mb85c"></elevenlabs-convai>
+  <script src="https://unpkg.com/@elevenlabs/convai-widget-embed" async type="text/javascript"></script>
+</body>
+</html>

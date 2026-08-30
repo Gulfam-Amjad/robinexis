@@ -1,0 +1,46 @@
+{
+  "id": "tool_2801m0cyqa0mey6rxz96tgfgxrkf",
+  "name": "create_booking",
+  "description": "Book a confirmed appointment on Smith England Salon's calendar. Only call this after check_availability has confirmed the slot is free AND the caller has explicitly confirmed the service, date, time, name, and email back to you.",
+  "type": "webhook",
+  "api_schema": {
+    "url": "https://api.cal.com/v2/bookings",
+    "method": "POST",
+    "request_headers": {
+      "cal-api-version": "2024-08-13",
+      "Authorization": { "secret_id": "j9A5jiUYLyoKBuzzG1TW", "note": "ElevenLabs workspace secret 'smith_england_salon_calcom_auth_header' — never the raw key in this file" },
+      "Content-Type": "application/json"
+    },
+    "request_body_schema": {
+      "type": "object",
+      "properties": {
+        "eventTypeSlug": { "type": "string", "description": "The confirmed service slug.", "enum": ["haircut-style", "colour", "blow-dry", "mens-cut-fade", "childrens-cut"] },
+        "username": { "type": "string", "description": "Always hammad-muntazir-9zpmnb (the Cal.com account this deployment writes to)." },
+        "start": { "type": "string", "description": "ISO 8601 confirmed slot start time — must be a value check_availability returned as free." },
+        "attendee": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string", "description": "Caller's full name, confirmed back letter-by-letter" },
+            "email": { "type": "string", "description": "Caller's email, confirmed back letter-by-letter" },
+            "timeZone": { "type": "string", "description": "Always Europe/London for this business" }
+          },
+          "required": ["name", "email", "timeZone"]
+        },
+        "bookingFieldsResponses": {
+          "type": "object",
+          "properties": {
+            "notes": { "type": "string", "description": "Any context from the call worth passing to the salon, e.g. caller's phone number" }
+          }
+        },
+        "metadata": {
+          "type": "object",
+          "description": "Idempotency guard — conversationId set to this call's ElevenLabs conversation id so a network retry can't double-book.",
+          "properties": {
+            "conversationId": { "type": "string" }
+          }
+        }
+      },
+      "required": ["eventTypeSlug", "username", "start", "attendee"]
+    }
+  }
+}

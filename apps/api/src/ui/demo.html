@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en" data-initial-tab="lab">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Robinexis — Agent Test Lab</title>
+  <link rel="stylesheet" href="/ui/dashboard.css" />
+</head>
+<body>
+  <div class="shell">
+    <header class="top">
+      <div>
+        <h1>Robinexis operator console</h1>
+        <p>Agent Test Lab — same console as <a href="/dashboard">/dashboard</a>. Secrets never appear here.</p>
+      </div>
+    </header>
+    <nav class="tabs" role="tablist">
+      <button type="button" role="tab" data-tab="overview">Overview</button>
+      <button type="button" role="tab" data-tab="systems">Systems</button>
+      <button type="button" role="tab" data-tab="calendar">Calendar</button>
+      <button type="button" role="tab" data-tab="lab" aria-selected="true">Test Lab</button>
+      <button type="button" role="tab" data-tab="activity">Activity</button>
+      <button type="button" role="tab" data-tab="clients">Clients &amp; jobs</button>
+    </nav>
+
+    <section class="panel" id="panel-overview" role="tabpanel">
+      <article>
+        <h2>Demo tenant</h2>
+        <div class="banner danger">Do not point <code>+447446868067</code> at this gateway. That number stays on ElevenLabs ConvAI (Option 1).</div>
+        <div class="banner">Cal.com account identity is still unverified. Treat bookings as sandbox until Will/Ed confirm ownership.</div>
+        <p>Tenant <code>robinexis-demo</code> · pipeline <strong>Groq Whisper → Groq Llama → ElevenLabs TTS</strong>. Booking is Cal.com (read-only slots on this console; the voice agent can book on a live call).</p>
+        <div class="cards" id="overview-cards"></div>
+      </article>
+    </section>
+
+    <section class="panel" id="panel-systems" role="tabpanel">
+      <article>
+        <h2>Live systems</h2>
+        <p>Configured flags plus a live gateway health check and Cal.com slot probe. Red means missing or unreachable — not a secret leak.</p>
+        <div class="cards" id="system-cards"></div>
+        <p class="muted" id="systems-meta"></p>
+      </article>
+    </section>
+
+    <section class="panel" id="panel-calendar" role="tabpanel">
+      <article>
+        <h2>Cal.com (read-only)</h2>
+        <p>Next 7 days of slots for the demo tenant. This page never creates, reschedules, or cancels bookings.</p>
+        <div class="row">
+          <div>
+            <label for="event-slug">Event type slug</label>
+            <select id="event-slug">
+              <option value="15min">15min</option>
+              <option value="30min">30min</option>
+            </select>
+          </div>
+          <button type="button" class="primary" id="calendar-refresh">Refresh slots</button>
+        </div>
+        <p class="muted" id="calendar-meta">Loading…</p>
+        <div id="calendar-slots"></div>
+      </article>
+    </section>
+
+    <section class="panel active" id="panel-lab" role="tabpanel">
+      <article>
+        <h2>Agent Test Lab</h2>
+        <p>Groq-gateway receptionist. Lab outbound From may be <code>+447446868067</code> (existing Twilio number). That does not change live inbound routing. Do not place a Pakistan call unless you intend to.</p>
+        <form id="demo-form">
+          <label for="phone">Phone number</label>
+          <div class="row">
+            <input id="phone" name="phone" type="tel" required placeholder="+447…" autocomplete="tel" />
+            <button type="submit" class="primary">Call Me Now</button>
+          </div>
+        </form>
+        <p id="status" role="status"></p>
+        <p class="muted" id="sid-line"></p>
+      </article>
+      <article>
+        <h2>Integration status</h2>
+        <ul class="flags" id="flags"></ul>
+        <p class="muted" id="geo-note"></p>
+        <p class="muted" id="gateway-line"></p>
+        <p class="muted" id="lab-from"></p>
+      </article>
+      <article>
+        <h2>Twilio probe (no call placed)</h2>
+        <pre id="twilio-check">loading…</pre>
+      </article>
+      <article>
+        <h2>Live call</h2>
+        <p class="muted" id="call-meta">Place a call to load transcript and tool history.</p>
+        <ul class="turns" id="transcript"></ul>
+      </article>
+      <article>
+        <h2>Tool history</h2>
+        <pre id="tools">[]</pre>
+      </article>
+    </section>
+
+    <section class="panel" id="panel-activity" role="tabpanel">
+      <article>
+        <h2>Recent demo calls</h2>
+        <p class="muted">From tenant <code>robinexis-demo</code>. Click a row for transcript and tools.</p>
+        <div id="activity-table"></div>
+      </article>
+      <article>
+        <h2>Selected call</h2>
+        <p class="muted" id="activity-meta">Pick a call.</p>
+        <ul class="turns" id="activity-transcript"></ul>
+        <pre id="activity-tools">[]</pre>
+      </article>
+    </section>
+
+    <section class="panel" id="panel-clients" role="tabpanel">
+      <article>
+        <h2>Operator access</h2>
+        <p>Locally, admin routes are open when <code>ADMIN_API_KEY</code> is unset. On Railway, paste the key (stored in this tab’s session only).</p>
+        <div class="admin-bar">
+          <div>
+            <label for="admin-key">Admin API key</label>
+            <input id="admin-key" type="password" autocomplete="off" placeholder="Bearer token" />
+          </div>
+          <button type="button" class="ghost" id="admin-save">Save for this tab</button>
+        </div>
+        <p class="muted" id="admin-status"></p>
+      </article>
+      <div class="two">
+        <article>
+          <h2>Clients</h2>
+          <div id="clients-list"></div>
+        </article>
+        <article>
+          <h2>Usage</h2>
+          <p class="muted" id="usage-meta">Select a client.</p>
+          <pre id="usage-json">{}</pre>
+        </article>
+      </div>
+      <article>
+        <h2>Outbound jobs</h2>
+        <div id="jobs-list"></div>
+      </article>
+    </section>
+  </div>
+  <script src="/ui/dashboard.js"></script>
+</body>
+</html>

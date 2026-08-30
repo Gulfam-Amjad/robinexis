@@ -1,0 +1,14 @@
+{
+  "name": "@robinexis/integrations",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": {
+    "@robinexis/brain": "*",
+    "@robinexis/database": "*",
+    "@robinexis/tool-contracts": "*",
+    "stripe": "^18.5.0",
+    "twilio": "^6.1.0"
+  }
+}

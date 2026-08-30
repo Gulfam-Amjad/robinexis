@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chequers Hair &amp; Beauty — Demo</title>
+<style>
+  :root { --ink:#1a1614; --muted:#7a736d; --line:#eae5e0; --accent:#a8823f; --bg:#f8f5f1; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+         color:var(--ink); background:var(--bg); -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:740px; margin:0 auto; padding:48px 24px 150px; }
+  .tag { font-size:12px; letter-spacing:.16em; text-transform:uppercase; color:var(--accent); font-weight:600; }
+  h1 { font-size:36px; margin:8px 0 4px; letter-spacing:-.02em; }
+  .sub { font-style:italic; color:var(--muted); margin:0 0 8px; }
+  .rating { color:var(--muted); font-size:15px; margin-bottom:28px; }
+  .rating b { color:var(--ink); }
+  .card { background:#fff; border:1px solid var(--line); border-radius:14px; padding:22px 24px; margin-bottom:16px; }
+  h2 { font-size:13px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted);
+       margin:0 0 6px; font-weight:600; }
+  .cat { font-size:12px; letter-spacing:.1em; text-transform:uppercase; color:var(--accent);
+         font-weight:600; margin:20px 0 6px; }
+  .row { display:flex; justify-content:space-between; align-items:baseline;
+         padding:8px 0; border-bottom:1px solid #f4f1ed; font-size:15px; gap:16px; }
+  .row:last-child { border-bottom:0; }
+  .price { font-weight:600; white-space:nowrap; }
+  .two { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media (max-width:560px){ .two{ grid-template-columns:1fr; } }
+  .team { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; }
+  @media (max-width:560px){ .team{ grid-template-columns:repeat(2,1fr); } }
+  .member { text-align:center; }
+  .member .av { width:52px; height:52px; border-radius:50%; margin:0 auto 8px;
+                background:#f6f0e6; border:1px solid #ecdfca; color:var(--accent);
+                font-weight:700; font-size:19px; display:flex; align-items:center; justify-content:center; }
+  .member b { display:block; font-size:16px; }
+  .member span { color:var(--muted); font-size:13px; line-height:1.4; }
+  .loc { font-size:15px; line-height:1.5; }
+  .loc b { display:block; letter-spacing:.04em; }
+  .loc span { color:var(--muted); }
+  .fromnote { color:var(--muted); font-size:13px; margin:2px 0 0; font-style:italic; }
+  .note { background:#faf4e8; border:1px solid #ecdcae; border-radius:14px;
+          padding:16px 20px; font-size:14.5px; line-height:1.55; color:#5a4712; }
+  footer { text-align:center; color:var(--muted); font-size:13px; margin-top:26px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="tag">Established 1989</div>
+    <h1>Chequers Hair &amp; Beauty</h1>
+    <p class="sub">Hair, beauty &amp; men's barbering · Leadenhall Market, City of London</p>
+    <div class="rating">Therapists trained to <b>CIBTAC Level 4</b> equivalent · Book online or by phone</div>
+
+    <div class="card">
+      <h2>Our Team</h2>
+      <div class="team">
+        <div class="member">
+          <div class="av">S</div>
+          <b>Siobhan</b>
+          <span>With Chequers since 2011<br>In the industry since 2005</span>
+        </div>
+        <div class="member">
+          <div class="av">S</div>
+          <b>Sue</b>
+          <span>With Chequers since 2014<br>In the industry since 1990</span>
+        </div>
+        <div class="member">
+          <div class="av">C</div>
+          <b>Chelsea</b>
+          <span>With Chequers since 2009<br>In the industry since 2007</span>
+        </div>
+        <div class="member">
+          <div class="av">E</div>
+          <b>Ellie</b>
+          <span>Part of the Chequers team</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Beauty Menu &amp; Prices</h2>
+      <p class="fromnote">All prices are "from" starting prices; exact cost &amp; appointment length confirmed at booking.</p>
+
+      <div class="cat">Waxing</div>
+      <div class="row"><span>Toes</span><span class="price">from £5</span></div>
+      <div class="row"><span>Fingers</span><span class="price">from £5</span></div>
+      <div class="row"><span>Between the eyebrows (glabella)</span><span class="price">from £5</span></div>
+      <div class="row"><span>Back of neck (women)</span><span class="price">from £12</span></div>
+      <div class="row"><span>Lip, or chin, or nostril</span><span class="price">from £13</span></div>
+      <div class="row"><span>Nose</span><span class="price">from £13</span></div>
+      <div class="row"><span>Hands (female)</span><span class="price">from £13</span></div>
+      <div class="row"><span>Chin or cheeks</span><span class="price">from £14</span></div>
+      <div class="row"><span>Back of upper leg or patch</span><span class="price">from £15</span></div>
+      <div class="row"><span>Anus</span><span class="price">from £18</span></div>
+      <div class="row"><span>Upper lip &amp; chin</span><span class="price">from £20</span></div>
+      <div class="row"><span>Underarm (Lycon hot)</span><span class="price">from £20</span></div>
+      <div class="row"><span>Stomach or buttocks</span><span class="price">from £20</span></div>
+      <div class="row"><span>Lower back</span><span class="price">from £21</span></div>
+      <div class="row"><span>Half arm (hand to elbow)</span><span class="price">from £21</span></div>
+      <div class="row"><span>¾ arm</span><span class="price">from £23</span></div>
+      <div class="row"><span>Half back (women)</span><span class="price">from £24</span></div>
+      <div class="row"><span>Upper lip, chin &amp; cheeks</span><span class="price">from £27</span></div>
+      <div class="row"><span>Half leg lower</span><span class="price">from £28</span></div>
+      <div class="row"><span>Full arm</span><span class="price">from £29</span></div>
+      <div class="row"><span>Half leg upper</span><span class="price">from £31</span></div>
+      <div class="row"><span>¾ leg</span><span class="price">from £34</span></div>
+      <div class="row"><span>Full back (women)</span><span class="price">from £38</span></div>
+      <div class="row"><span>Full leg</span><span class="price">from £40</span></div>
+      <div class="row"><span>Full body wax</span><span class="price">from £170</span></div>
+
+      <div class="cat">Brazilian / Intimate (Lycon Hot)</div>
+      <div class="row"><span>Bikini line</span><span class="price">from £26</span></div>
+      <div class="row"><span>Extended or G-string</span><span class="price">from £30</span></div>
+      <div class="row"><span>High extend</span><span class="price">from £40</span></div>
+      <div class="row"><span>The Brazilian</span><span class="price">from £46</span></div>
+      <div class="row"><span>All off / Hollywood</span><span class="price">from £48</span></div>
+
+      <div class="cat">Waxing Combos</div>
+      <div class="row"><span>Half leg &amp; bikini line (Tea Tree)</span><span class="price">from £48</span></div>
+      <div class="row"><span>Half leg lower &amp; bikini line (Lycon)</span><span class="price">from £55</span></div>
+      <div class="row"><span>Half leg upper &amp; bikini line (Lycon)</span><span class="price">from £57</span></div>
+      <div class="row"><span>Half leg lower + extended bikini</span><span class="price">from £58</span></div>
+      <div class="row"><span>Half leg upper + extended bikini</span><span class="price">from £61</span></div>
+      <div class="row"><span>Full leg &amp; bikini line (Lycon)</span><span class="price">from £64</span></div>
+      <div class="row"><span>Full leg + extended bikini</span><span class="price">from £70</span></div>
+      <div class="row"><span>Half leg lower + Hollywood</span><span class="price">from £71</span></div>
+      <div class="row"><span>Half leg lower + Brazilian</span><span class="price">from £74</span></div>
+      <div class="row"><span>Half leg upper + Brazilian</span><span class="price">from £77</span></div>
+      <div class="row"><span>Half leg upper + Hollywood</span><span class="price">from £79</span></div>
+      <div class="row"><span>Full leg &amp; high extended</span><span class="price">from £80</span></div>
+      <div class="row"><span>Full leg + Brazilian</span><span class="price">from £86</span></div>
+      <div class="row"><span>Full leg + Hollywood</span><span class="price">from £88</span></div>
+
+      <div class="cat">Threading</div>
+      <div class="row"><span>Lip</span><span class="price">from £13</span></div>
+      <div class="row"><span>Side of face or neck</span><span class="price">from £15</span></div>
+      <div class="row"><span>Lip &amp; chin</span><span class="price">from £19</span></div>
+      <div class="row"><span>Eyebrow</span><span class="price">from £19</span></div>
+      <div class="row"><span>Lip, chin &amp; cheeks</span><span class="price">from £27</span></div>
+      <div class="row"><span>Full face</span><span class="price">from £38</span></div>
+      <div class="row"><span>Full face &amp; eyebrows</span><span class="price">from £45</span></div>
+
+      <div class="cat">Eye Treatments</div>
+      <div class="row"><span>Eyebrow tint</span><span class="price">from £16</span></div>
+      <div class="row"><span>Eyebrow wax or shape</span><span class="price">from £19</span></div>
+      <div class="row"><span>Eyebrow threading</span><span class="price">from £19</span></div>
+      <div class="row"><span>Eyelash tint</span><span class="price">from £29</span></div>
+      <div class="row"><span>Eyebrow tint &amp; eyebrow wax</span><span class="price">from £29</span></div>
+      <div class="row"><span>Eyebrow tint &amp; thread</span><span class="price">from £29</span></div>
+      <div class="row"><span>Eyelash &amp; eyebrow tint</span><span class="price">from £35</span></div>
+
+      <div class="cat">Manicures</div>
+      <div class="row"><span>Removal only (shellac), hands</span><span class="price">from £18</span></div>
+      <div class="row"><span>Shellac application only</span><span class="price">from £25</span></div>
+      <div class="row"><span>Removal only (non-shellac), hands</span><span class="price">from £25</span></div>
+      <div class="row"><span>Vinylux file &amp; polish</span><span class="price">from £26</span></div>
+      <div class="row"><span>Full manicure (no polish)</span><span class="price">from £32</span></div>
+      <div class="row"><span>Vinylux full manicure</span><span class="price">from £36</span></div>
+      <div class="row"><span>Removal (shellac) with file &amp; polish</span><span class="price">from £36</span></div>
+      <div class="row"><span>Shellac full set</span><span class="price">from £43</span></div>
+      <div class="row"><span>Removal (non-shellac) with file &amp; polish</span><span class="price">from £46</span></div>
+      <div class="row"><span>Removal (shellac) &amp; full manicure</span><span class="price">from £46</span></div>
+      <div class="row"><span>Removal (shellac) + new set</span><span class="price">from £50</span></div>
+      <div class="row"><span>Removal (non-shellac) + new set</span><span class="price">from £57</span></div>
+
+      <div class="cat">Pedicures</div>
+      <div class="row"><span>Callus peel — 2 areas with pedicure</span><span class="price">from £24</span></div>
+      <div class="row"><span>CND mini pedicure</span><span class="price">from £28</span></div>
+      <div class="row"><span>Callus peel — 2 areas of the foot</span><span class="price">from £40</span></div>
+      <div class="row"><span>Removal only (non-shellac), feet</span><span class="price">from £25</span></div>
+      <div class="row"><span>CND spa pedicure without polish</span><span class="price">from £46</span></div>
+      <div class="row"><span>Pedi shellac full set</span><span class="price">from £48</span></div>
+      <div class="row"><span>CND spa pedicure</span><span class="price">from £52</span></div>
+      <div class="row"><span>Removal (shellac) feet + CND pedi no polish</span><span class="price">from £54</span></div>
+      <div class="row"><span>Pedi removal (shellac) + new set</span><span class="price">from £55</span></div>
+      <div class="row"><span>Pedi removal (non-shellac) + new set</span><span class="price">from £63</span></div>
+
+      <div class="cat">Spray Tanning (St. Tropez)</div>
+      <div class="row"><span>Half body</span><span class="price">from £38</span></div>
+      <div class="row"><span>Full body</span><span class="price">from £48</span></div>
+
+      <div class="cat">Electrolysis <span style="text-transform:none;font-weight:400;color:var(--muted)">· facial area, female clients · first-timers pre-book a consultation</span></div>
+      <div class="row"><span>Consultation</span><span class="price">FREE</span></div>
+      <div class="row"><span>1–15 mins</span><span class="price">from £30</span></div>
+      <div class="row"><span>16–20 mins</span><span class="price">from £38</span></div>
+      <div class="row"><span>21–30 mins</span><span class="price">from £42</span></div>
+
+      <div class="cat">Laser Hair Removal</div>
+      <div class="row"><span>Consultation + patch test <span style="color:var(--muted)">· area prices set at consultation</span></span><span class="price">FREE</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Men's Treatments &amp; Barber</h2>
+
+      <div class="cat">Barbering</div>
+      <div class="row"><span>Wash, Cut &amp; Finish</span><span class="price">from £33</span></div>
+      <div class="row"><span>Dry Cut</span><span class="price">from £30</span></div>
+      <div class="row"><span>Clipper Cut</span><span class="price">from £15</span></div>
+
+      <div class="cat">Men's Grooming &amp; Waxing</div>
+      <div class="row"><span>Ear or nose wax</span><span class="price">from £12</span></div>
+      <div class="row"><span>Tinted eyebrows</span><span class="price">from £15</span></div>
+      <div class="row"><span>Hands or abdomen wax</span><span class="price">from £16</span></div>
+      <div class="row"><span>Brow shape or wax</span><span class="price">from £19</span></div>
+      <div class="row"><span>Neck or shoulder wax</span><span class="price">from £20</span></div>
+      <div class="row"><span>Underarm wax</span><span class="price">from £20</span></div>
+      <div class="row"><span>Ears, nose &amp; between eyes wax</span><span class="price">from £20</span></div>
+      <div class="row"><span>Tinted eyelashes</span><span class="price">from £27</span></div>
+      <div class="row"><span>Half arm wax</span><span class="price">from £28</span></div>
+      <div class="row"><span>Gentlemen's Club hand &amp; nail care</span><span class="price">from £32</span></div>
+      <div class="row"><span>Tinted lashes &amp; brows</span><span class="price">from £32</span></div>
+      <div class="row"><span>Upper back inc. shoulders wax</span><span class="price">from £33</span></div>
+      <div class="row"><span>Chest wax</span><span class="price">from £34</span></div>
+      <div class="row"><span>Full arm wax</span><span class="price">from £39</span></div>
+      <div class="row"><span>Full back inc. shoulders wax</span><span class="price">from £45</span></div>
+      <div class="row"><span>Full leg wax (inc. toes)</span><span class="price">from £46</span></div>
+      <div class="row"><span>Executive foot care for men</span><span class="price">from £46</span></div>
+      <div class="row"><span>Chest, back &amp; shoulders wax</span><span class="price">from £63</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Opening Hours &amp; Contact</h2>
+      <div class="two">
+        <div class="loc"><b>BEAUTY</b><span>Mon–Tue 10–6 · Wed–Thu 10–7 · Fri 10–4</span></div>
+        <div class="loc"><b>MEN'S BARBER</b><span>Mon–Thu 8–6 · Fri 9–4</span></div>
+      </div>
+      <div class="row" style="margin-top:14px"><span>Address</span><span>53–54 Leadenhall Market, EC3V 1LT</span></div>
+      <div class="row"><span>Phone</span><span>020 7283 3051</span></div>
+    </div>
+
+    <div class="note">
+      <b>Try the voice agent →</b> tap the widget in the corner and talk to it like a customer.
+      Ask the price of a toes wax, book a CND spa pedicure for Wednesday, or ask who's on the team.
+      It only knows what's on this menu — it won't invent prices or availability.
+    </div>
+
+    <footer>Voice agent demo built by Robinexis</footer>
+  </div>
+
+  <elevenlabs-convai agent-id="agent_2901kyj473wgfcqtk0q3rh3m1zb9"></elevenlabs-convai>
+  <script src="https://unpkg.com/@elevenlabs/convai-widget-embed" async type="text/javascript"></script>
+</body>
+</html>

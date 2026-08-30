@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Isar Hair — Demo</title>
+<style>
+  :root { --ink:#161311; --muted:#736c64; --line:#e7e2da; --accent:#a9832f; --bg:#f6f3ee; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+         color:var(--ink); background:var(--bg); -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:740px; margin:0 auto; padding:48px 24px 150px; }
+  .tag { font-size:12px; letter-spacing:.16em; text-transform:uppercase; color:var(--accent); font-weight:600; }
+  h1 { font-size:36px; margin:8px 0 4px; letter-spacing:-.02em; }
+  .sub { font-style:italic; color:var(--muted); margin:0 0 8px; }
+  .rating { color:var(--muted); font-size:15px; margin-bottom:28px; }
+  .rating b { color:var(--ink); }
+  .card { background:#fff; border:1px solid var(--line); border-radius:14px; padding:22px 24px; margin-bottom:16px; }
+  h2 { font-size:13px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted);
+       margin:0 0 14px; font-weight:600; }
+  .row { display:flex; justify-content:space-between; align-items:baseline;
+         padding:10px 0; border-bottom:1px solid #f2f2f2; font-size:16px; gap:16px; }
+  .row:last-child { border-bottom:0; }
+  .row .meta { color:var(--muted); font-size:14px; }
+  .price { font-weight:600; white-space:nowrap; }
+  .loc { font-size:15px; line-height:1.5; }
+  .loc b { display:block; letter-spacing:.04em; }
+  .loc span { color:var(--muted); }
+  .note { background:#fbf5e6; border:1px solid #ecdcae; border-radius:14px;
+          padding:16px 20px; font-size:14.5px; line-height:1.55; color:#5a4712; }
+  a { color:inherit; }
+  footer { text-align:center; color:var(--muted); font-size:13px; margin-top:26px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="tag">Precision · Style · Personal Care</div>
+    <h1>Isar Hair</h1>
+    <p class="sub">Premium gents' grooming · 25+ years of the craft</p>
+    <div class="rating"><b>Liverpool Street</b> · 5 Cutler Street, London E1 7DJ</div>
+
+    <div class="card">
+      <h2>Services — prices</h2>
+      <div class="row"><span>Haircut with Wash</span><span class="price">£35</span></div>
+      <div class="row"><span>Skin Fade Haircut</span><span class="price">£35</span></div>
+      <div class="row"><span>Head Shave</span><span class="price">£35</span></div>
+      <div class="row"><span>Beard Trim</span><span class="price">£25</span></div>
+      <div class="row"><span>Clipper Cut</span><span class="price">£22.50</span></div>
+      <div class="row"><span>Razor Shave</span><span class="price">£22.50</span></div>
+      <div class="row"><span>Razor Shave / Beard Reshape</span><span class="price">£22.50</span></div>
+      <div class="row"><span>Skin Fade &amp; Shave <span class="meta">package</span></span><span class="price">£60</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Find Us</h2>
+      <div class="loc"><b>CUTLER STREET · LIVERPOOL STREET</b>5 Cutler Street, London E1 7DJ<br><span>Near Liverpool Street station</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Good to Know</h2>
+      <div class="row"><span>Opening hours</span><span>Mon–Sat 9am–7pm</span></div>
+      <div class="row"><span>Sunday</span><span>Closed · exclusive appointments on request</span></div>
+      <div class="row"><span>Booking</span><span>Call or leave your details</span></div>
+      <div class="row"><span>Phone</span><span>020 7247 6657</span></div>
+    </div>
+
+    <div class="note">
+      <b>Try the voice agent →</b> tap the widget in the corner and talk to it like a customer.
+      Ask the price of a skin fade, book a Saturday morning, or call after hours and leave a message.
+      It only knows what's published on this page — it won't invent prices, and it'll offer the team's help for anything it can't confirm.
+    </div>
+
+    <footer>Voice agent demo built by Robinexis</footer>
+  </div>
+
+  <elevenlabs-convai agent-id="agent_3401kyj7fwtffbpa7675b6fn01nq"></elevenlabs-convai>
+  <script src="https://unpkg.com/@elevenlabs/convai-widget-embed" async type="text/javascript"></script>
+</body>
+</html>

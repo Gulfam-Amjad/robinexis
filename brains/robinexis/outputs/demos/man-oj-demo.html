@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MAN-OJ — Demo</title>
+<style>
+  :root { --ink:#0f0f0f; --muted:#6b6b6b; --line:#e6e6e6; --accent:#8a6d3b; --bg:#f7f5f1; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+         color:var(--ink); background:var(--bg); -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:740px; margin:0 auto; padding:48px 24px 150px; }
+  .tag { font-size:12px; letter-spacing:.18em; text-transform:uppercase; color:var(--accent); font-weight:600; }
+  h1 { font-size:38px; margin:8px 0 4px; letter-spacing:-.02em; }
+  .sub { font-style:italic; color:var(--muted); margin:0 0 8px; }
+  .rating { color:var(--muted); font-size:15px; margin-bottom:28px; }
+  .rating b { color:var(--ink); }
+  .card { background:#fff; border:1px solid var(--line); border-radius:14px; padding:22px 24px; margin-bottom:16px; }
+  h2 { font-size:13px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted);
+       margin:0 0 14px; font-weight:600; }
+  .row { display:flex; justify-content:space-between; align-items:baseline;
+         padding:10px 0; border-bottom:1px solid #f2f2f2; font-size:16px; gap:16px; }
+  .row:last-child { border-bottom:0; }
+  .row .meta { color:var(--muted); font-size:14px; }
+  .price { font-weight:600; white-space:nowrap; color:var(--muted); font-size:14px; }
+  .loc { font-size:15px; line-height:1.5; margin-bottom:16px; }
+  .loc:last-child { margin-bottom:0; }
+  .loc b { display:block; letter-spacing:.04em; color:var(--accent); }
+  .loc span { color:var(--muted); }
+  .note { background:#f2ece0; border:1px solid #e0d3b8; border-radius:14px;
+          padding:16px 20px; font-size:14.5px; line-height:1.55; color:#5a4522; }
+  a { color:inherit; }
+  footer { text-align:center; color:var(--muted); font-size:13px; margin-top:26px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="tag">The Style Hub for the Modern Man &amp; Woman</div>
+    <h1>MAN-OJ</h1>
+    <p class="sub">Leave feeling fresh and revitalised</p>
+    <div class="rating">City of London · owner-operated · <b>20+</b> years of experience</div>
+
+    <div class="card">
+      <h2>Two Salons</h2>
+      <div class="loc"><b>MEN'S GROOMING</b>45-47 Queen Victoria Street, London EC4N 4SF<br><span>Mon–Fri 10am–8pm · 020 7236 7756</span></div>
+      <div class="loc"><b>COFFEE &amp; CUTS</b>Ludgate Broadway, London<br><span>Mon–Fri 9am–7:30pm · 020 7236 4801</span></div>
+    </div>
+
+    <div class="card">
+      <h2>What We Do</h2>
+      <div class="row"><span>Haircuts &amp; grooming for men</span><span class="price">book in</span></div>
+      <div class="row"><span>Hair salon for women</span><span class="price">book in</span></div>
+      <div class="row"><span>Earlier appointments <span class="meta">on request</span></span><span class="price">just ask</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Booking</h2>
+      <div class="row"><span>Online portal</span><span>man-oj.co.uk</span></div>
+      <div class="row"><span>By phone</span><span>020 7236 7756 · 020 7236 4801</span></div>
+    </div>
+
+    <div class="note">
+      <b>Try the voice agent →</b> tap the widget in the corner and talk to it like a customer.
+      Ask to book a cut, and watch it check <em>which</em> salon you mean. Ask what a haircut costs
+      and watch it <em>refuse to guess</em> and take your details instead — it only states what's
+      actually published, and it never books outside opening hours. That's the point: it never invents.
+    </div>
+
+    <footer>Voice agent demo built by Robinexis</footer>
+  </div>
+
+  <elevenlabs-convai agent-id="agent_9101kyj2v49mfy2v93gjxtwe83sy"></elevenlabs-convai>
+  <script src="https://unpkg.com/@elevenlabs/convai-widget-embed" async type="text/javascript"></script>
+</body>
+</html>

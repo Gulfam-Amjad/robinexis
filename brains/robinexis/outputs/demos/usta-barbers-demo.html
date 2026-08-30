@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Usta Barbers — Demo</title>
+<style>
+  :root { --ink:#0f0f0f; --muted:#6b6b6b; --line:#e6e6e6; --accent:#a8842b; --bg:#f6f5f2; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+         color:var(--ink); background:var(--bg); -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:740px; margin:0 auto; padding:48px 24px 150px; }
+  .tag { font-size:12px; letter-spacing:.18em; text-transform:uppercase; color:var(--accent); font-weight:600; }
+  h1 { font-size:38px; margin:8px 0 4px; letter-spacing:-.02em; }
+  .sub { font-style:italic; color:var(--muted); margin:0 0 8px; }
+  .rating { color:var(--muted); font-size:15px; margin-bottom:28px; }
+  .rating b { color:var(--ink); }
+  .card { background:#fff; border:1px solid var(--line); border-radius:14px; padding:22px 24px; margin-bottom:16px; }
+  h2 { font-size:13px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted);
+       margin:0 0 14px; font-weight:600; }
+  .row { display:flex; justify-content:space-between; align-items:baseline;
+         padding:10px 0; border-bottom:1px solid #f2f2f2; font-size:16px; gap:16px; }
+  .row:last-child { border-bottom:0; }
+  .row .meta { color:var(--muted); font-size:14px; }
+  .price { font-weight:600; white-space:nowrap; color:var(--muted); font-size:14px; }
+  .loc { font-size:15px; line-height:1.5; }
+  .loc b { display:block; letter-spacing:.04em; }
+  .loc span { color:var(--muted); }
+  .note { background:#fbf5e6; border:1px solid #ecdcae; border-radius:14px;
+          padding:16px 20px; font-size:14.5px; line-height:1.55; color:#5a4712; }
+  a { color:inherit; }
+  footer { text-align:center; color:var(--muted); font-size:13px; margin-top:26px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="tag">The Ultimate Turkish Barbering Experience</div>
+    <h1>Usta Barbers</h1>
+    <p class="sub">Masters of the blade · Turkish master barbering for discerning gentlemen</p>
+    <div class="rating">Moorgate, City of London · Book online or walk in</div>
+
+    <div class="card">
+      <h2>Services</h2>
+      <div class="row"><span>Scissors Hand <span class="meta">30 mins · scissor haircut · ear flaming · wash · hot towel · massage</span></span><span class="price">£42</span></div>
+      <div class="row"><span>Buzz Cut <span class="meta">30 mins · clipper cut · ear flaming · wash · hot towel · massage</span></span><span class="price">£30</span></div>
+      <div class="row"><span>Head Shave <span class="meta">30 mins · ear flaming · wash · hot towel · massage</span></span><span class="price">£30</span></div>
+      <div class="row"><span>Razor Sharp <span class="meta">30 mins · wet shave / beard trim · razor neckline · hot towel · massage</span></span><span class="price">£30</span></div>
+      <div class="row"><span>Prim &amp; Proper <span class="meta">45 mins · haircut · wet shave / beard trim · ear flaming · hot towel · massage</span></span><span class="price">£60</span></div>
+      <div class="row"><span>Usta Ultimate <span class="meta">1 hour · the full works · cut · shave · face &amp; eye mask · threading · hot towel · massage</span></span><span class="price">£72</span></div>
+      <div class="row"><span>Threading <span class="meta">quick add-on · face threading</span></span><span class="price">£15</span></div>
+      <div class="row"><span>Face Wax <span class="meta">quick add-on</span></span><span class="price">£15</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Meet the Team</h2>
+      <div class="row"><span>Figo</span><span class="price">★ 4.9</span></div>
+      <div class="row"><span>Billy</span><span class="price">★ 5.0</span></div>
+      <div class="row"><span>Teff</span><span class="price">★ 5.0</span></div>
+      <div class="row"><span>Erkan</span><span class="price">★ 5.0</span></div>
+      <div class="row"><span>Cem</span><span class="price">★ 5.0</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Find Us</h2>
+      <div class="loc"><b>MOORGATE</b>1A Telegraph Street, London<br><span>City of London · finance district</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Booking</h2>
+      <div class="row"><span>Online</span><span>via Fresha</span></div>
+      <div class="row"><span>Walk-ins</span><span>Welcome</span></div>
+    </div>
+
+    <div class="note">
+      <b>Try the voice agent →</b> tap the widget in the corner and talk to it like a customer.
+      Ask how long the Usta Ultimate takes, book a Saturday morning cut, or ask if you can just walk in.
+      It only knows what's published here — ask it the opening hours and watch it
+      <em>refuse to guess</em> and take your details instead. That's the point: it never invents.
+    </div>
+
+    <footer>Voice agent demo built by Robinexis</footer>
+  </div>
+
+  <elevenlabs-convai agent-id="agent_2301kyj0nf0zfz6t8sac667ewtbw"></elevenlabs-convai>
+  <script src="https://unpkg.com/@elevenlabs/convai-widget-embed" async type="text/javascript"></script>
+</body>
+</html>

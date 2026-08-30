@@ -1,0 +1,12 @@
+{
+  "name": "@robinexis/brain",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": {
+    "@robinexis/database": "*",
+    "@robinexis/tool-contracts": "*",
+    "groq-sdk": "^1.6.0"
+  }
+}

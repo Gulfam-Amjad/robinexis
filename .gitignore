@@ -1,0 +1,46 @@
+# ─── Sturdy AIOS .gitignore ───
+# A lean AIOS commits its skills, references, routing and config — NEVER secrets.
+
+# ── Secrets — NEVER commit (local-only) ──
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*-sa.json
+*service-account*.json
+credentials.json
+token.json
+
+# ── OS / editor noise ──
+.DS_Store
+*.log
+__MACOSX/
+__pycache__/
+node_modules/
+apps/*/dist/
+packages/*/dist/
+.claude/settings.local.json
+*.tsbuildinfo
+**/.vite/
+test-results/
+playwright-report/
+coverage/
+.vercel/
+
+# ── Local tunnel binaries ──
+ngrok.exe
+ngrok.zip
+ngrok
+
+# ── Obsidian volatile state (config is committed; workspace/cache is not) ──
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/cache/
+
+# ── Heavy raw media — lives in place inside its brain, but never pushed ──
+# (GitHub rejects >100 MB files; keep footage/exports local-only)
+brains/**/*.mp4
+brains/**/*.mov
+brains/**/*.wav
+brains/**/*.zip
