@@ -1,10 +1,9 @@
 [build]
 builder = "NIXPACKS"
-buildCommand = "node scripts/railway.mjs gateway"
+buildCommand = "node scripts/railway.mjs"
 
 [deploy]
-startCommand = "npm run start -w @robinexis/voice-gateway"
-healthcheckPath = "/health"
-healthcheckTimeout = 30
+preDeployCommand = "node scripts/railway.mjs predeploy"
+startCommand = "node scripts/railway.mjs start"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 3

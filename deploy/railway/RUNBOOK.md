@@ -1,6 +1,19 @@
 # Railway + Vercel + Supabase runbook
 
-Create **three Railway services** from this repository. Prefer **Root Directory = `/`** (repo root). If Railway imported npm workspaces and set Root Directory to `apps/api` (and similar), leave that: each app has its own `railway.toml` that installs from the monorepo root.
+Create **three Railway services** from this repository (API, voice gateway, worker). Prefer **Root Directory = `/`** (repo root).
+
+Because there is only one root `railway.toml`, **each service must set `RAILWAY_BUILD_TARGET`**:
+
+| Service | `RAILWAY_BUILD_TARGET` |
+|---|---|
+| `@robinexis/api` | `api` |
+| `@robinexis/voice-gateway` | `gateway` |
+| `@robinexis/worker` | `worker` |
+| `@robinexis/web` (optional fallback) | `web` |
+
+Do **not** leave the dashboard Build Command as `node scripts/railway.mjs gateway` on every service. Either clear the override so the repo `railway.toml` is used, or set the command to `node scripts/railway.mjs` and rely on `RAILWAY_BUILD_TARGET`.
+
+If Railway imported npm workspaces and set Root Directory to `apps/api` (and similar), leave that: each app has its own `railway.toml` that installs from the monorepo root.
 
 Do **not** put the dashboard on Railway unless you need a fallback. Prefer Vercel for `@robinexis/web`.
 
