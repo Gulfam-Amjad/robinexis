@@ -39,6 +39,23 @@ npm run db:seed
 
 The API service also runs `db:migrate` as `preDeployCommand`.
 
+## Bulk-loading variables (no manual typing)
+
+```bash
+node scripts/railway-vars.mjs
+```
+
+Reads the local gitignored `.env` and writes `.railway-vars/{api,gateway,worker,vercel}.env` (also gitignored). For each Railway service open **Variables → Raw Editor → ENV**, paste the matching file, and press **Update Variables**. Vercel's **Import .env** accepts `vercel.env` the same way.
+
+Anything the script cannot know is written as `TODO_…` so a half-configured service fails loudly. Replace before deploying:
+
+- `SUPABASE_JWT_SECRET` — Supabase → Project Settings → API → JWT Secret (API service only)
+- `VITE_SUPABASE_ANON_KEY` — Supabase → Project Settings → API → anon public key (Vercel only)
+- `WEB_ORIGIN` / `VITE_API_BASE_URL` / `PUBLIC_BASE_URL` / `API_PUBLIC_BASE_URL` — the Vercel and Railway public URLs, once the domains exist
+- `TWILIO_SANDBOX_PHONE_NUMBER`, `TWILIO_SMS_NUMBER`, `FRONT_DESK_PHONE_NUMBER` — a Twilio **test** number, never the live salon line `+447446868067`
+
+`REDIS_URL` is emitted as `${{Redis.REDIS_URL}}`; rename if the Redis service is not called `Redis`. `PORT` is injected by Railway, so no port variable is set (local fallbacks: API 8081, gateway 8080).
+
 ## Required Railway variables
 
 Shared: `DATABASE_URL`, `REDIS_URL`, `GROQ_API_KEY`, `ELEVENLABS_API_KEY`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_SANDBOX_PHONE_NUMBER`, `TWILIO_SMS_NUMBER`, `GEMINI_API_KEY`.
