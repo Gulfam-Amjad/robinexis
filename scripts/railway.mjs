@@ -26,11 +26,7 @@ function run(args) {
     cwd: root,
     stdio: "inherit",
     shell: process.platform === "win32",
-    env: {
-      ...process.env,
-      NPM_CONFIG_PRODUCTION: "false",
-      npm_config_production: "false",
-    },
+    env: { ...process.env, NPM_CONFIG_OMIT: "" },
   });
   if (result.error) {
     console.error("railway.mjs: failed to spawn npm:", result.error.message);

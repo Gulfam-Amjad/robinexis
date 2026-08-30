@@ -2,18 +2,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
+import { poolSsl } from "./env.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export async function migrate(databaseUrl: string) {
   const client = new pg.Client({
     connectionString: databaseUrl,
-    ssl:
-      process.env.DATABASE_SSL === "false"
-        ? undefined
-        : databaseUrl.includes("supabase")
-          ? { rejectUnauthorized: process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== "false" }
-          : undefined,
+    ssl: poolSsl(databaseUrl),
+    connectionTimeoutMillis: 8_000,
   });
   await client.connect();
   try {
