@@ -11,6 +11,10 @@ warnOnMissingConfig();
 
 const MEDIA_STREAM_PATH = "/media-stream";
 const BUILD_VERSION = process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 12) || process.env.BUILD_VERSION || "local";
+// Redis gives call-slot reservations a shared home across replicas. A single-replica
+// sandbox can run on the in-process fallback in RedisSessionCache, so REQUIRE_REDIS=false
+// is the explicit opt-out. Never set it on a multi-replica deployment.
+const REDIS_REQUIRED = process.env.REQUIRE_REDIS !== "false";
 
 function xmlEscape(s: string) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
@@ -60,7 +64,8 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === "/" || url.pathname === "/health") {
     const redisHealthy = await (await getRedis()).ping();
     const productionDependenciesOk =
-      !process.env.RAILWAY_ENVIRONMENT || (Boolean(process.env.DATABASE_URL) && redisHealthy);
+      !process.env.RAILWAY_ENVIRONMENT ||
+      (Boolean(process.env.DATABASE_URL) && (redisHealthy || !REDIS_REQUIRED));
     res.writeHead(productionDependenciesOk ? 200 : 503, { "Content-Type": "application/json" });
     res.end(
       JSON.stringify({
@@ -268,7 +273,10 @@ async function start() {
   const store = await getStore();
   if ((await store.listClients()).length === 0) await seedStore(store);
   if (process.env.RAILWAY_ENVIRONMENT && !(await (await getRedis()).ping())) {
-    throw new Error("Redis is required in production");
+    if (REDIS_REQUIRED) throw new Error("Redis is required in production");
+    structuredLog("redis_unavailable_single_replica", {
+      note: "REQUIRE_REDIS=false — call slots are reserved in-process only",
+    });
   }
   server.listen(config.port, () => {
     console.log(`[server] voice-gateway listening on :${config.port} (sandbox only — do not cut over +447446868067)`);
