@@ -170,9 +170,13 @@ export const api = {
     }),
   demoStatus: () => request<Record<string, unknown>>("/demo/status"),
   demoTwilioCheck: () => request<Record<string, unknown>>("/demo/twilio-check"),
-  demoCall: (phone: string) =>
-    request<{ ok: boolean; callSid: string }>("/demo/call", { method: "POST", body: JSON.stringify({ phone }) }),
-  demoCalls: (sid?: string) => request<unknown>(`/demo/calls${query({ sid })}`),
+  demoCall: (phone: string, clientId?: string) =>
+    request<{ ok: boolean; callSid: string }>("/demo/call", {
+      method: "POST",
+      body: JSON.stringify({ phone, clientId }),
+    }),
+  demoCalls: (sid?: string, clientId?: string) =>
+    request<unknown>(`/demo/calls${query({ sid, clientId })}`),
 };
 
 export function formatDate(value?: string, options?: Intl.DateTimeFormatOptions) {

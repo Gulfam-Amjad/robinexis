@@ -35,9 +35,9 @@ export function demoCallRateLimited(key: string, limit = 5, windowMs = 10 * 60 *
 
 export function assertDemoTenant(client: ClientConfig | undefined): client is ClientConfig {
   if (!client) return false;
-  if (client.id !== DEMO_CLIENT_ID && client.slug !== DEMO_CLIENT_ID) return false;
   if (!isGroqGatewayPipeline(client)) return false;
   if (!client.published) return false;
+  if (!client.enabledFeatures.includes("outbound")) return false;
   return true;
 }
 
@@ -77,8 +77,11 @@ export function publicBaseUrlConfigured(base = process.env.PUBLIC_BASE_URL || ""
   return !/example\.ngrok|your-|subdomain|changeme|<|>/.test(host);
 }
 
-export function constructedDemoTwimlUrl(base = process.env.PUBLIC_BASE_URL || ""): string {
-  return `${base.replace(/\/$/, "")}/twiml?direction=outbound&clientId=${encodeURIComponent(DEMO_CLIENT_ID)}`;
+export function constructedDemoTwimlUrl(
+  base = process.env.PUBLIC_BASE_URL || "",
+  clientId = DEMO_CLIENT_ID,
+): string {
+  return `${base.replace(/\/$/, "")}/twiml?direction=outbound&clientId=${encodeURIComponent(clientId)}`;
 }
 
 export function publicDemoCallView(call: CallSession): PublicDemoCallView {
@@ -227,7 +230,7 @@ export async function startSandboxDemoCall(opts: {
   const base = process.env.PUBLIC_BASE_URL || "";
   if (!publicBaseUrlConfigured(base)) return { ok: false, error: "public_base_url_not_configured", status: 503 };
 
-  const twimlUrl = constructedDemoTwimlUrl(base);
+  const twimlUrl = constructedDemoTwimlUrl(base, opts.client.id);
   try {
     const call = await placeOutboundCall({ to, from, twimlUrl });
     return { ok: true, callSid: call.sid };

@@ -521,7 +521,7 @@ describe("distributed call and outbound controls", () => {
 describe("dual pipeline and demo call", () => {
   it("keeps Smith England on elevenlabs-convai and demo on groq-gateway", async () => {
     const store = new MemoryStore();
-    const { client, demo } = await seedStore(store);
+    const { client, demo, blades } = await seedStore(store);
     expect(client.voicePipeline).toBe("elevenlabs-convai");
     expect(client.inboundNumbers).toEqual([]);
     expect(isGroqGatewayPipeline(client)).toBe(false);
@@ -531,6 +531,9 @@ describe("dual pipeline and demo call", () => {
     expect(await store.getPublishedClient("robinexis-demo")).toMatchObject({ slug: "robinexis-demo" });
     expect(assertDemoTenant(client)).toBe(false);
     expect(assertDemoTenant(demo)).toBe(true);
+    expect(blades.slug).toBe("blades-hair");
+    expect(blades.voicePipeline).toBe("groq-gateway");
+    expect(assertDemoTenant(blades)).toBe(true);
   });
 
   it("rejects invalid phones and missing public URL for demo outbound", async () => {

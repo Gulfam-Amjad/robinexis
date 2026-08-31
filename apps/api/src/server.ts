@@ -86,9 +86,11 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/demo/calls" && req.method === "GET") {
       if ((await store.listClients()).length === 0) await seedStore(store);
       const sid = (url.searchParams.get("sid") || "").trim();
+      const tenant =
+        (url.searchParams.get("clientId") || "").trim() || DEMO_CLIENT_ID;
       const limit = Math.min(20, Math.max(1, Number(url.searchParams.get("limit") || 8) || 8));
       if (sid) {
-        const call = await store.getCallByTwilioSid(DEMO_CLIENT_ID, sid);
+        const call = await store.getCallByTwilioSid(tenant, sid);
         if (!call) {
           send(res, 404, { ok: false, error: "not_found" });
           return;
@@ -96,21 +98,24 @@ const server = http.createServer(async (req, res) => {
         send(res, 200, { ok: true, call: publicDemoCallView(call) });
         return;
       }
-      const calls = (await store.listCallsForClient(DEMO_CLIENT_ID, limit)).map(publicDemoCallView);
+      const calls = (await store.listCallsForClient(tenant, limit)).map(publicDemoCallView);
       send(res, 200, { ok: true, calls });
       return;
     }
     if (url.pathname === "/demo/call" && req.method === "POST") {
       if ((await store.listClients()).length === 0) await seedStore(store);
       const ip = String(req.headers["x-forwarded-for"] ?? req.socket.remoteAddress ?? "local");
-      const body = JSON.parse((await readRaw(req)).toString() || "{}") as { phone?: string };
+      const body = JSON.parse((await readRaw(req)).toString() || "{}") as { phone?: string; clientId?: string };
       const phone = String(body.phone ?? "");
       if (demoCallRateLimited(`${ip}:${phone}`)) {
         send(res, 429, { ok: false, error: "rate_limited" });
         return;
       }
+      const requested = String(body.clientId ?? "").trim() || DEMO_CLIENT_ID;
       const client =
-        (await store.getPublishedClient(DEMO_CLIENT_ID)) ?? (await store.getClientBySlug(DEMO_CLIENT_ID));
+        (await store.getPublishedClient(requested)) ??
+        (await store.getClient(requested)) ??
+        (await store.getClientBySlug(requested));
       if (!client) {
         send(res, 503, { ok: false, error: "demo_tenant_missing" });
         return;

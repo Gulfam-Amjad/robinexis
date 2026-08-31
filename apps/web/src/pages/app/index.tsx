@@ -396,18 +396,19 @@ const phoneSchema = z.object({ phone: z.string().regex(/^\+[1-9]\d{7,14}$/, "Use
 export function PlaygroundPage() {
   const [callSid, setCallSid] = useState("");
   const { push } = useToast();
+  const { activeClientId, activeClient } = useClient();
   const { register, handleSubmit, formState: { errors } } = useForm<z.infer<typeof phoneSchema>>({ resolver: zodResolver(phoneSchema) });
   const status = useQuery({ queryKey: ["demo-status"], queryFn: api.demoStatus, retry: false });
   const twilio = useQuery({ queryKey: ["twilio-check"], queryFn: api.demoTwilioCheck, retry: false });
   const call = useMutation({
-    mutationFn: ({ phone }: z.infer<typeof phoneSchema>) => api.demoCall(phone),
+    mutationFn: ({ phone }: z.infer<typeof phoneSchema>) => api.demoCall(phone, activeClientId || undefined),
     onSuccess: (data) => { setCallSid(data.callSid); push({ title: "Your phone should ring shortly", message: `Call ${data.callSid} started.`, tone: "success" }); },
     onError: (error) => push({ title: "Couldn’t place the call", message: error.message, tone: "error" }),
   });
-  const callLog = useQuery({ queryKey: ["demo-call", callSid], queryFn: () => api.demoCalls(callSid), enabled: Boolean(callSid), refetchInterval: callSid ? 4000 : false });
+  const callLog = useQuery({ queryKey: ["demo-call", callSid, activeClientId], queryFn: () => api.demoCalls(callSid, activeClientId || undefined), enabled: Boolean(callSid), refetchInterval: callSid ? 4000 : false });
   return (
     <>
-      <PageHeader eyebrow="Agent playground" title="Hear the experience for yourself" description="Place a safe sandbox call, try realistic customer questions, and inspect what the agent did." />
+      <PageHeader eyebrow="Agent playground" title="Hear the experience for yourself" description={`Place a sandbox call to test ${activeClient?.businessName || "the selected agent"}. No live inbound routing is changed.`} />
       <div className="playground-layout">
         <Card className="call-me-card">
           <div className="call-me-visual"><span><PhoneCall /></span><i className="ring-one" /><i className="ring-two" /></div>
