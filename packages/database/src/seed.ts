@@ -10,7 +10,6 @@ export const BLADES_HAIR_ID = "client_blades_hair";
 const callingWindow = { tz: "Europe/London", startHour: 8, endHour: 21, skipSunday: true } as const;
 
 export function smithEnglandSeed(): ClientConfig {
-  const production = Boolean(process.env.RAILWAY_ENVIRONMENT);
   return {
     id: SMITH_ENGLAND_ID,
     slug: "smith-england-salon",
@@ -54,8 +53,8 @@ export function smithEnglandSeed(): ClientConfig {
     maxConcurrentCalls: 4,
     outboundRatePerHour: 20,
     firstCampaignRequiresApproval: true,
-    published: !production,
-    serviceStatus: production ? "incomplete" : "trialing",
+    published: false,
+    serviceStatus: "incomplete",
   };
 }
 
