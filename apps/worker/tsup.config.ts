@@ -13,5 +13,5 @@ export default defineConfig({
   minify: false,
   outDir: "dist",
   noExternal: [/^@robinexis\//],
-  external: ["pg", "pg-native"],
+  skipNodeModulesBundle: true,
 });
