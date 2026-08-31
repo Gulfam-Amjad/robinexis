@@ -44,6 +44,7 @@
   "devDependencies": {
     "@exodus/bytes": "^1.15.1",
     "@playwright/test": "^1.62.1",
+    "@railway/cli": "^5.45.10",
     "jsdom": "^30.0.1",
     "railway": "^3.11.0",
     "tsup": "^8.5.0",

@@ -50,7 +50,7 @@ export default defineRailway(() => {
   const api = service("@robinexis/api", {
     source,
     build: "node scripts/railway.mjs api",
-    start: "node scripts/railway.mjs migrate && npm run start -w @robinexis/api",
+    start: "node scripts/railway.mjs migrate && node scripts/railway.mjs start",
     healthcheck: "/health",
     healthcheckTimeout: 30,
     env: {

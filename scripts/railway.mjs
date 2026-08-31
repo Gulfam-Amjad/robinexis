@@ -21,6 +21,13 @@ const starts = {
   web: ["run", "start", "-w", "@robinexis/web"],
 };
 
+const artifacts = {
+  api: "apps/api/dist/server.js",
+  gateway: "apps/voice-gateway/dist/server.js",
+  worker: "apps/worker/dist/index.js",
+  web: "dist/index.html",
+};
+
 function run(args) {
   const result = spawnSync(npm, args, {
     cwd: root,
@@ -84,7 +91,17 @@ if (!service) {
 
 console.log(`railway.mjs: ${action} ${service}`);
 
+function ensureBuilt() {
+  const artifact = artifacts[service];
+  if (artifact && existsSync(path.join(root, artifact))) return;
+  console.log(`railway.mjs: ${artifact} missing after image copy, rebuilding`);
+  ensureInstall();
+  run(builds[service]);
+  if (service === "api") run(["run", "build:migrate"]);
+}
+
 if (action === "start") {
+  ensureBuilt();
   run(starts[service]);
   process.exit(0);
 }

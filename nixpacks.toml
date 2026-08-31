@@ -3,3 +3,13 @@ NIXPACKS_NODE_VERSION = "24"
 
 [phases.install]
 cmds = ["npm ci --include=dev"]
+
+# Nixpacks recopies the git tree after build, which drops dist/. Start
+# rebuilds if needed; keep the compiled trees in the build cache too.
+[phases.build]
+cacheDirectories = [
+  "apps/api/dist",
+  "apps/voice-gateway/dist",
+  "apps/worker/dist",
+  "packages/database/dist",
+]

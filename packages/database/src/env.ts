@@ -1,6 +1,11 @@
 import { config as loadEnv } from "dotenv";
+import dns from "node:dns";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+// Railway trial/hobby IPv6 egress is off by default. Supabase AAAA records then
+// fail with ENETUNREACH on 5432. Prefer IPv4 unless the platform has IPv6.
+dns.setDefaultResultOrder("ipv4first");
 
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(packageDir, "../../..");
