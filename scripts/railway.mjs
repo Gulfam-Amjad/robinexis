@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -27,6 +27,43 @@ const artifacts = {
   worker: "apps/worker/dist/index.js",
   web: "dist/index.html",
 };
+
+const stashRoot = "/opt/robinexis-dist";
+const stashDirs = {
+  api: ["apps/api/dist", "packages/database/dist"],
+  gateway: ["apps/voice-gateway/dist"],
+  worker: ["apps/worker/dist"],
+  web: ["dist"],
+};
+
+function stashBuilt() {
+  if (process.platform === "win32") return;
+  const dirs = stashDirs[service] || [];
+  for (const dir of dirs) {
+    const from = path.join(root, dir);
+    if (!existsSync(from)) continue;
+    const to = path.join(stashRoot, dir);
+    mkdirSync(path.dirname(to), { recursive: true });
+    cpSync(from, to, { recursive: true });
+  }
+  console.log("railway.mjs: stashed dist outside /app so Nixpacks recopy cannot wipe it");
+}
+
+function restoreStash() {
+  if (process.platform === "win32") return false;
+  const dirs = stashDirs[service] || [];
+  let restored = false;
+  for (const dir of dirs) {
+    const from = path.join(stashRoot, dir);
+    if (!existsSync(from)) continue;
+    const to = path.join(root, dir);
+    mkdirSync(path.dirname(to), { recursive: true });
+    cpSync(from, to, { recursive: true });
+    restored = true;
+  }
+  if (restored) console.log("railway.mjs: restored dist from /opt/robinexis-dist");
+  return restored;
+}
 
 function run(args) {
   const result = spawnSync(npm, args, {
@@ -94,10 +131,9 @@ console.log(`railway.mjs: ${action} ${service}`);
 function ensureBuilt() {
   const artifact = artifacts[service];
   if (artifact && existsSync(path.join(root, artifact))) return;
-  console.log(`railway.mjs: ${artifact} missing after image copy, rebuilding`);
-  ensureInstall();
-  run(builds[service]);
-  if (service === "api") run(["run", "build:migrate"]);
+  if (restoreStash() && artifact && existsSync(path.join(root, artifact))) return;
+  console.error(`railway.mjs: ${artifact} missing and stash empty — refusing to tsup at runtime (OOM on hobby)`);
+  process.exit(1);
 }
 
 if (action === "start") {
@@ -109,3 +145,4 @@ if (action === "start") {
 ensureInstall();
 run(builds[service]);
 if (service === "api") run(["run", "build:migrate"]);
+stashBuilt();
