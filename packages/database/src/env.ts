@@ -29,10 +29,13 @@ export function databaseUrlFromEnv(): string | undefined {
 
 export function poolSsl(databaseUrl: string) {
   if (process.env.DATABASE_SSL === "false") return undefined;
-  const needsSsl =
-    process.env.DATABASE_SSL === "true" ||
-    databaseUrl.includes("supabase.co") ||
-    databaseUrl.includes("pooler.supabase.com");
+  const isSupabase =
+    databaseUrl.includes("supabase.co") || databaseUrl.includes("pooler.supabase.com");
+  const needsSsl = process.env.DATABASE_SSL === "true" || isSupabase;
   if (!needsSsl) return undefined;
-  return { rejectUnauthorized: process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== "false" };
+  const explicit = process.env.DATABASE_SSL_REJECT_UNAUTHORIZED;
+  if (explicit) return { rejectUnauthorized: explicit !== "false" };
+  // Supabase's pooler serves a chain Node's trust store cannot verify
+  // ("self-signed certificate in certificate chain"). Traffic stays encrypted.
+  return { rejectUnauthorized: !isSupabase };
 }

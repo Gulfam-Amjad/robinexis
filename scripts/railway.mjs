@@ -70,7 +70,12 @@ function run(args) {
     cwd: root,
     stdio: "inherit",
     shell: process.platform === "win32",
-    env: { ...process.env, NPM_CONFIG_OMIT: "" },
+    env: {
+      ...process.env,
+      NPM_CONFIG_OMIT: "",
+      // Railway bind-mounts /app/node_modules/.cache. npm ci tries to rmdir it → EBUSY.
+      ...(process.platform === "win32" ? {} : { NPM_CONFIG_CACHE: process.env.NPM_CONFIG_CACHE || "/tmp/npm-cache" }),
+    },
   });
   if (result.error) {
     console.error("railway.mjs: failed to spawn npm:", result.error.message);
@@ -103,7 +108,9 @@ function ensureInstall() {
     console.error("railway.mjs: package-lock.json not found at", root);
     process.exit(1);
   }
-  run(["ci", "--include=dev"]);
+  // Do not use `npm ci` on Railway: it deletes node_modules including the
+  // mounted node_modules/.cache directory (EBUSY / exit 240).
+  run(["install", "--include=dev", "--no-audit", "--no-fund"]);
 }
 
 const service = builds[argvTask] ? argvTask : inferService();
