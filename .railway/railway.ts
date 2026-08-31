@@ -26,13 +26,14 @@ export default defineRailway(() => {
     ELEVENLABS_API_KEY: preserve(),
     TWILIO_ACCOUNT_SID: preserve(),
     TWILIO_AUTH_TOKEN: preserve(),
-    TWILIO_SANDBOX_PHONE_NUMBER: preserve(),
+    TWILIO_SANDBOX_PHONE_NUMBER: "+15555550199",
     CALCOM_API_KEY: preserve(),
     CALCOM_USERNAME: preserve(),
   };
 
   const data = {
     NODE_ENV: "production",
+    NODE_VERSION: "24",
     DATABASE_SSL: "true",
     REQUIRE_DATABASE: "true",
     REDIS_URL: cache.env.REDIS_URL,
@@ -60,9 +61,10 @@ export default defineRailway(() => {
       RAG_TOP_K: "5",
       RAG_MIN_SIMILARITY: "0.55",
       RAG_EMBEDDING_DIMENSIONS: "768",
-      WEB_ORIGIN: preserve(),
-      SUPABASE_URL: preserve(),
+      WEB_ORIGIN: "https://robinexis-pink.vercel.app",
+      SUPABASE_URL: "https://cdbcbzvhzdiwwcrmxjgi.supabase.co",
       SUPABASE_JWT_SECRET: preserve(),
+      SUPABASE_JWT_KEY_ID: "01130f21-cdc6-49c9-8739-a41e4beed5c2",
     },
   });
 
@@ -79,8 +81,8 @@ export default defineRailway(() => {
       STT_PROVIDER: "groq",
       VAD_ENERGY_THRESHOLD: "500",
       VAD_SILENCE_MS: "500",
-      FRONT_DESK_PHONE_NUMBER: preserve(),
-      FALLBACK_VOICEMAIL_URL: preserve(),
+      FRONT_DESK_PHONE_NUMBER: "+15555550199",
+      FALLBACK_VOICEMAIL_URL: "",
     },
   });
 
@@ -93,9 +95,9 @@ export default defineRailway(() => {
       RAILWAY_BUILD_TARGET: "worker",
       WORKER_POLL_MS: "15000",
       DATA_RETENTION_DAYS: "90",
-      PUBLIC_BASE_URL: preserve(),
-      API_PUBLIC_BASE_URL: preserve(),
-      TWILIO_SMS_NUMBER: preserve(),
+      PUBLIC_BASE_URL: gateway.env.PUBLIC_BASE_URL,
+      API_PUBLIC_BASE_URL: api.env.API_PUBLIC_BASE_URL,
+      TWILIO_SMS_NUMBER: "+15555550199",
     },
   });
 

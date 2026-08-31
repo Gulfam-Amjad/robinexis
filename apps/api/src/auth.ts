@@ -19,14 +19,17 @@ function skipAuthEnabled() {
 }
 
 export function corsHeaders(origin: string | undefined): Record<string, string> {
-  const allow = origin && allowedOrigins.includes(origin) ? origin : allowedOrigins[0] || "";
-  return {
-    "Access-Control-Allow-Origin": allow,
+  const headers: Record<string, string> = {
     "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept",
     "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };
+  // Never advertise an allowed origin for a different/unknown caller.
+  if (origin && allowedOrigins.includes(origin)) {
+    headers["Access-Control-Allow-Origin"] = origin;
+  }
+  return headers;
 }
 
 export function applyCors(req: http.IncomingMessage, res: http.ServerResponse) {

@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=24"
   },
   "workspaces": [
     "apps/api",
@@ -45,6 +45,7 @@
     "@exodus/bytes": "^1.15.1",
     "@playwright/test": "^1.62.1",
     "jsdom": "^30.0.1",
+    "railway": "^3.11.0",
     "tsup": "^8.5.0",
     "tsx": "4.23.12",
     "typescript": "5.9.3",

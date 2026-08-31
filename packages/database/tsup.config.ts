@@ -4,7 +4,7 @@ export default defineConfig({
   entry: { migrate: "src/migrate.cli.ts" },
   format: ["esm"],
   platform: "node",
-  target: "node22",
+  target: "node24",
   sourcemap: true,
   clean: true,
   dts: false,

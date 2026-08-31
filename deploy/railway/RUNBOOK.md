@@ -3,10 +3,10 @@
 `railway.toml` is **deprecated**. New Railway services ignore it. Project shape lives in `.railway/railway.ts`.
 
 ```bash
-npx railway login
-npx railway link
-npx railway config plan
-npx railway config apply
+npx @railway/cli login
+npx @railway/cli link
+npx @railway/cli config plan
+npx @railway/cli config apply
 ```
 
 That creates **Redis + API + voice gateway + worker** from `Gulfam-Amjad/robinexis` (Root Directory `/`). Do **not** add `@robinexis/web` on Railway — that is Vercel.
@@ -49,7 +49,7 @@ node scripts/railway-vars.mjs
 
 Reads the local gitignored `.env` and writes `.railway-vars/{api,gateway,worker,vercel}.env` (also gitignored). For each Railway service open **Variables → Raw Editor → ENV**, paste the matching file, and press **Update Variables**. Vercel's **Import .env** accepts `vercel.env` the same way.
 
-Anything the script cannot know is written as `TODO_…` so a half-configured service fails loudly. Replace before deploying:
+Anything the script cannot know is left empty and listed in the command output. Fill it before deploying:
 
 - `SUPABASE_JWT_SECRET` — Supabase → Project Settings → API → JWT Secret (API service only)
 - `VITE_SUPABASE_ANON_KEY` — Supabase → Project Settings → API → anon public key (Vercel only)
