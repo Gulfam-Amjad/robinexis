@@ -3,11 +3,12 @@
 `railway.toml` is **deprecated**. New Railway services ignore it. Project shape lives in `.railway/railway.ts`.
 
 ```bash
-npx @railway/cli login
-npx @railway/cli link
-npx @railway/cli config plan
-npx @railway/cli config apply
+npx @railway/cli login              # once, interactive
+node scripts/railway-setup.mjs      # preview (config plan)
+node scripts/railway-setup.mjs --apply
 ```
+
+`railway-setup.mjs` applies `.railway/railway.ts`, pushes the secrets from `.railway-vars/*.env`, generates the API and gateway domains, and writes the API URL back into `.railway-vars/vercel.env`.
 
 That creates **Redis + API + voice gateway + worker** from `Gulfam-Amjad/robinexis` (Root Directory `/`). Do **not** add `@robinexis/web` on Railway — that is Vercel.
 
