@@ -1,21 +1,23 @@
 # Railway + Vercel + Supabase runbook
 
-Create **three Railway services** from this repository (API, voice gateway, worker). Prefer **Root Directory = `/`** (repo root).
+`railway.toml` is **deprecated**. New Railway services ignore it. Project shape lives in `.railway/railway.ts`.
 
-Because there is only one root `railway.toml`, **each service must set `RAILWAY_BUILD_TARGET`**:
+```bash
+npx railway login
+npx railway link
+npx railway config plan
+npx railway config apply
+```
 
-| Service | `RAILWAY_BUILD_TARGET` |
-|---|---|
-| `@robinexis/api` | `api` |
-| `@robinexis/voice-gateway` | `gateway` |
-| `@robinexis/worker` | `worker` |
-| `@robinexis/web` (optional fallback) | `web` |
+That creates **Redis + API + voice gateway + worker** from `Gulfam-Amjad/robinexis` (Root Directory `/`). Do **not** add `@robinexis/web` on Railway — that is Vercel.
 
-Do **not** leave the dashboard Build Command as `node scripts/railway.mjs gateway` on every service. Either clear the override so the repo `railway.toml` is used, or set the command to `node scripts/railway.mjs` and rely on `RAILWAY_BUILD_TARGET`.
+Until `config apply` has run, you can still click **Deploy** on a service created in the dashboard, but you **must** set Build Command and `RAILWAY_BUILD_TARGET` yourself — git will not apply the old toml files.
 
-If Railway imported npm workspaces and set Root Directory to `apps/api` (and similar), leave that: each app has its own `railway.toml` that installs from the monorepo root.
-
-Do **not** put the dashboard on Railway unless you need a fallback. Prefer Vercel for `@robinexis/web`.
+| Service | Build | Start | `RAILWAY_BUILD_TARGET` |
+|---|---|---|---|
+| `@robinexis/api` | `node scripts/railway.mjs api` | `node scripts/railway.mjs migrate && npm run start -w @robinexis/api` | `api` |
+| `@robinexis/voice-gateway` | `node scripts/railway.mjs gateway` | `npm run start -w @robinexis/voice-gateway` | `gateway` |
+| `@robinexis/worker` | `node scripts/railway.mjs worker` | `npm run start -w @robinexis/worker` | `worker` |
 
 ## Services
 
@@ -37,7 +39,7 @@ npm run db:migrate
 npm run db:seed
 ```
 
-The API service also runs `db:migrate` as `preDeployCommand`.
+The API start command runs `node scripts/railway.mjs migrate` before the server.
 
 ## Bulk-loading variables (no manual typing)
 

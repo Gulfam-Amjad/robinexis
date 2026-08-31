@@ -46,7 +46,7 @@ This repository holds **two things in one git repo**:
 | Half | What it is | Lives in |
 |---|---|---|
 | **The AIOS vault** | An Obsidian-compatible knowledge + workflow system ("operating system" for the two founders, Will and Ed Robinson). Holds skills, brains (wikis), references, decisions. | Root `.md` files, `os/`, `brains/`, `raw/`, `.claude/`, `.obsidian/` |
-| **The production platform** | A TypeScript monorepo that runs the actual telephone voice agent — a multi-tenant Node.js system. | `apps/`, `packages/`, `deploy/`, `docker-compose.yml`, `railway.toml` |
+| **The production platform** | A TypeScript monorepo that runs the actual telephone voice agent — a multi-tenant Node.js system. | `apps/`, `packages/`, `deploy/`, `docker-compose.yml`, `.railway/railway.ts` |
 
 They coexist on purpose: the vault is the sales/knowledge brain, the monorepo is the product. One repo = one backup = both halves in context every session.
 
@@ -104,7 +104,7 @@ robinexis-aios/
 | `tsconfig.json` | Single strict TS config for the whole monorepo, `noEmit: true`, NodeNext modules. |
 | `vitest.config.ts` | Test runner config — only picks up `packages/evaluations/**/*.test.ts`. |
 | `docker-compose.yml` | Local Postgres 16 + Redis 7 with healthchecks. |
-| `railway.toml` | Railway config for the **gateway** service. |
+| `.railway/railway.ts` | Railway Infrastructure as Code for API, voice gateway, worker, and Redis. |
 | `.env.example` | Every env var with placeholders. Copy to `.env`. |
 | `.gitignore` | Blocks `.env*`, keys, PEMs, service accounts, `node_modules/`, `dist/`, heavy media in brains. |
 
@@ -920,15 +920,13 @@ Then open `http://localhost:8081/demo`, enter an E.164 number, and press **Call 
 
 ### Services
 
-| Service | Config file | Start command | Public domain | Healthcheck |
+| Service | Config | Start command | Public domain | Healthcheck |
 |---|---|---|---|---|
-| gateway | `/railway.toml` | `npm run start -w @robinexis/voice-gateway` | yes | `/health` (30 s) |
-| api | `/deploy/railway/api.toml` | `npm run start -w @robinexis/api` | yes (`API_PORT=$PORT`) | `/health` (30 s) |
-| worker | `/deploy/railway/worker.toml` | `npm run start -w @robinexis/worker` | no | — |
+| gateway | `.railway/railway.ts` | `npm run start -w @robinexis/voice-gateway` | yes | `/health` (30 s) |
+| api | `.railway/railway.ts` | `node scripts/railway.mjs migrate && npm run start -w @robinexis/api` | yes (`PORT` from Railway) | `/health` (30 s) |
+| worker | `.railway/railway.ts` | `npm run start -w @robinexis/worker` | no | — |
 
-All three: NIXPACKS, `buildCommand = "npm ci && npm run verify"` — **a failing test blocks the deploy**. Restart policy `ON_FAILURE`, max 3 retries.
-
-Attach one Railway Postgres and one Redis; share `DATABASE_URL` and `REDIS_URL` with all three services. Run `npm run db:migrate` then `npm run db:seed` once.
+All three: NIXPACKS, `buildCommand = "node scripts/railway.mjs <api|gateway|worker>"`. Restart policy is set in the dashboard / IaC apply. Postgres is **Supabase**, not Railway Postgres; Redis is a Railway plugin referenced as `Redis`.
 
 The production hostname `robinexis-aios-production.up.railway.app` must be preserved.
 

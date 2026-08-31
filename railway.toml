@@ -1,9 +1,0 @@
-[build]
-builder = "NIXPACKS"
-buildCommand = "node scripts/railway.mjs"
-
-[deploy]
-preDeployCommand = "node scripts/railway.mjs predeploy"
-startCommand = "node scripts/railway.mjs start"
-restartPolicyType = "ON_FAILURE"
-restartPolicyMaxRetries = 3
