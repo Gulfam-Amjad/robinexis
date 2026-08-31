@@ -15,7 +15,10 @@ const adminEmails = (process.env.ADMIN_EMAILS || "gulfamamjad633@gmail.com")
   .filter(Boolean);
 
 function skipAuthEnabled() {
-  return process.env.SKIP_AUTH === "true" && !isProductionRuntime();
+  if (process.env.SKIP_AUTH !== "true") return false;
+  if (!isProductionRuntime()) return true;
+  // Testing only. Anyone who can load the Vercel URL can mutate production data.
+  return process.env.ALLOW_INSECURE_SKIP_AUTH === "true";
 }
 
 export function corsHeaders(origin: string | undefined): Record<string, string> {

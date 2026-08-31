@@ -49,9 +49,9 @@ export default function App() {
   return (
     <Suspense fallback={<div className="not-found">Loading…</div>}>
       <Routes>
-        <Route path="/" element={<LandingPage />} />
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/signup" element={<SignupPage />} />
+        <Route path="/" element={AUTH_REQUIRED ? <LandingPage /> : <Navigate to="/app" replace />} />
+        <Route path="/login" element={AUTH_REQUIRED ? <LoginPage /> : <Navigate to="/app" replace />} />
+        <Route path="/signup" element={AUTH_REQUIRED ? <SignupPage /> : <Navigate to="/app" replace />} />
         <Route path="/pricing" element={<PricingPage />} />
         <Route element={<RequireSession />}>
           <Route path="/app" element={<AppShell />}>
