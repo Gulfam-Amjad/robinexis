@@ -46,15 +46,16 @@ Retired 1 September 2026:
 
 - Railway service: `@robinexis/voice-gateway`
 - Service ID: `652fb60c-b080-4129-a2f8-806ed68046a0`
-- Last deployment: `c752a7dc-e207-46c1-b501-6a339499f317`
+- Last successful deployment: `c752a7dc-e207-46c1-b501-6a339499f317`
+- Final stopped deployment: `d1424787-a954-4972-8c80-947b2277b412` (`FAILED`, stopped)
 - Last domain: `https://robinexisvoice-gateway-production.up.railway.app`
-- Retirement action: scaled region `us-west2` from one replica to zero; service was not deleted.
+- Retirement action: stopped the deployment and disconnected its GitHub source; service was not deleted.
 
 Do not restore this during an ordinary API rollback. If an emergency audio rollback is explicitly approved:
 
 1. Restore the removed `apps/voice-gateway` code from git history.
-2. Restore its old Railway source/build/start variables and secrets from Railway history.
-3. Scale `us-west2` back to one and verify its `/health`.
+2. Reconnect `Gulfam-Amjad/robinexis` only after restoring the gateway code at a rollback commit.
+3. Restore its old Railway build/start variables and secrets from Railway history, redeploy, and verify `/health`.
 4. Only then change a sandbox Twilio number. Never move `+447446868067` without a separate controlled cutover.
 
 The current voice rollback is safer: select the previous ElevenLabs agent version and leave Twilio routing unchanged.

@@ -61,4 +61,4 @@ Grep the recent history with: `grep "^## \[" log.md | tail -10`
 - Selected Aria (`otEZTNYp6sT9oCdsbsRe`) with `eleven_flash_v2`: ordinary first audio measured 1.31s and interruption at 1.76s. Conversational AI rejected `eleven_flash_v2_5`; Clarice measured 1.54s and Katie 8.83s.
 - All nine greeting, rushed-caller, facts, disclosure, phone and booking-tool gates passed across the final staging runs.
 - Verified Cal.com booking `dVokNc7HjqvjyA8w87Kw4H` was idempotent across duplicate requests, then cancelled immediately.
-- Removed the Railway raw-audio/WebSocket/Groq gateway and outbound worker route from the active codebase. Railway gateway deployment `c752a7dc-e207-46c1-b501-6a339499f317` remains preserved but scaled to zero; API `/health` and authenticated booking REST tools remain active.
+- Removed the Railway raw-audio/WebSocket/Groq gateway and outbound worker route from the active codebase. Railway gateway service `652fb60c-b080-4129-a2f8-806ed68046a0` remains preserved with its deployment stopped and GitHub source disconnected; API `/health` and authenticated booking REST tools remain active.
