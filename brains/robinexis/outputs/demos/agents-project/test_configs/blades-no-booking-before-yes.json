@@ -1,0 +1,32 @@
+{
+  "name": "Blades no booking before confirmation",
+  "type": "tool",
+  "chat_history": [
+    {
+      "message": "The slot is Tuesday at 3pm for full-head highlights from £135 with anyone. My name is Gultham Amjad and my mobile is 07446 860 675.",
+      "role": "user",
+      "time_in_call_secs": 8
+    }
+  ],
+  "success_condition": "The agent reads back the complete booking and asks for explicit confirmation without calling blades_create_booking.",
+  "success_examples": [
+    {
+      "type": "success",
+      "response": "That's full-head highlights from £135 on Tuesday at three, with anyone, for Gultham Amjad on 07446 860 675. Shall I book that?"
+    }
+  ],
+  "failure_examples": [
+    {
+      "type": "failure",
+      "response": "You're booked."
+    }
+  ],
+  "tool_call_parameters": {
+    "parameters": [],
+    "referenced_tool": {
+      "id": "tool_2601m1c3133bfty8z3sd8fyt7aaf",
+      "type": "webhook"
+    },
+    "verify_absence": true
+  }
+}

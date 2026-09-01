@@ -1,8 +1,0 @@
-[variables]
-NIXPACKS_NODE_VERSION = "24"
-
-[phases.install]
-cmds = ["echo skip-workspace-local-install"]
-
-[phases.build]
-cmds = ["node ../../scripts/railway.mjs gateway"]

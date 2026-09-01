@@ -79,7 +79,7 @@ export const TOOL_DEFINITIONS = [
   {
     name: "create_booking",
     description:
-      "Create a confirmed appointment. Call only after the caller explicitly confirmed service, time, name, and contact. Always pass an idempotencyKey.",
+      "Create a confirmed appointment. Call only after the caller explicitly confirmed service, time, name, and mobile. attendeeEmail is optional — omit it if they did not give one. Always pass attendeePhone and an idempotencyKey.",
     input_schema: {
       type: "object",
       properties: {
@@ -97,7 +97,6 @@ export const TOOL_DEFINITIONS = [
         "eventTypeSlug",
         "start",
         "attendeeName",
-        "attendeeEmail",
         "idempotencyKey",
         "callerConfirmed",
       ],
@@ -147,7 +146,8 @@ export const TOOL_DEFINITIONS = [
   },
   {
     name: "transfer_to_human",
-    description: "Connect the call to the client team when requested or when escalation conditions are met.",
+    description:
+      "Connect to a human only if the caller insists after you offered to book, they are distressed, or a tool failed. Never use this to finish a booking — call create_booking instead.",
     input_schema: {
       type: "object",
       properties: {

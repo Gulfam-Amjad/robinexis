@@ -1,29 +1,31 @@
 ---
 created: 2026-08-29
 type: reference
-tags: [production, platform, groq, twilio]
-status: scaffolding
+tags: [production, platform, elevenlabs, twilio, railway, calcom]
+status: active
 ---
 
-# Robinexis production platform (self-hosted)
+# Robinexis production voice platform
 
 The 25 August 2026 Developer Implementation Brief is the contract. Smith England is **tenant config**, not a second codebase.
 
-## Two stacks — do not mix on the live number
+## Active Blades architecture
 
-| Path | Brain | Number | Role now |
-|---|---|---|---|
-| Option 1 — ElevenLabs Conversational AI | ElevenLabs STT + brain + TTS | `+447446868067` | **Live — do not change routing** |
-| Option 2 — `apps/voice-gateway` | Groq Whisper STT + Groq Llama + ElevenLabs TTS | `TWILIO_SANDBOX_PHONE_NUMBER` + tenant `robinexis-demo` | Local Demo Call at API `GET /demo` |
+`Caller → Twilio +447446868067 → ElevenLabs agent → authenticated Railway REST → Cal.com`
 
-Pointing the live salon/Robinexis number at custom `/twiml` while ElevenLabs still owns the webhook will drop or split calls.
+ElevenLabs owns speech, interruption, turn taking and the agent response. Railway has no audio, TwiML or WebSocket path. It keeps `/health`, the two Blades booking endpoints, product/admin APIs and non-voice background jobs.
 
-Local test: `GET /demo` on the API (`:8081`) posts to `POST /demo/call`, which places an outbound call from the sandbox number only. Embedding on robinexis.com is deferred until that site’s source is available.
+The old Groq/Whisper voice gateway and outbound “Call Me Now” route were retired on 1 September 2026. The Railway service remains scaled to zero solely for rollback.
 
 ## Cal.com
 
-The **demo** tenant uses sandbox `CALCOM_USERNAME` / `CALCOM_API_KEY` via credential refs. Do not attach the live salon calendar to `robinexis-demo`. Smith England live Cal.com remains on the ElevenLabs agent tools, not this seed.
+The live ElevenLabs tools call:
 
-## Local run
+- `POST /api/v1/voice-tools/check-availability`
+- `POST /api/v1/voice-tools/create-booking`
 
-See repo root `README-PLATFORM.md`.
+Both require `x-voice-tool-secret`. Booking revalidates the slot and requires explicit confirmation, a stable ElevenLabs conversation ID and an idempotency key derived from conversation plus slot.
+
+## Operations
+
+See `deploy/railway/RUNBOOK.md`. Test the receptionist through the ElevenLabs widget/share link, not an outbound Railway call.

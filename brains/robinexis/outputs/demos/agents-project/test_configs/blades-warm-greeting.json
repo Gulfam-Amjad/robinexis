@@ -1,0 +1,24 @@
+{
+  "name": "Blades warm greeting",
+  "type": "llm",
+  "chat_history": [
+    {
+      "message": "Hi there.",
+      "role": "user",
+      "time_in_call_secs": 1
+    }
+  ],
+  "success_condition": "The response is warm and natural and invites the caller to speak without demanding a name, mobile or booking details. It need not repeat Blades Hair or Sophie's name because the first message already identified both.",
+  "success_examples": [
+    {
+      "type": "success",
+      "response": "Hi there, you've reached Sophie at Blades Hair. How can I help today?"
+    }
+  ],
+  "failure_examples": [
+    {
+      "type": "failure",
+      "response": "State your full name, phone number and requested service."
+    }
+  ]
+}

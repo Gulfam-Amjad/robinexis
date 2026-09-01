@@ -9,7 +9,6 @@ import {
   type PlatformStore,
 } from "@robinexis/database";
 import {
-  buildDemoLabStatus,
   calcom,
   probeCalcomForClient,
   publicClientView,
@@ -176,19 +175,15 @@ function analytics(calls: CallSession[]) {
   };
 }
 
-function integrationList(status: Record<string, unknown>, calendar: Record<string, unknown>) {
-  const gateway = (status.gateway || {}) as Record<string, unknown>;
+function integrationList(client: ClientConfig, calendar: Record<string, unknown>) {
   const now = new Date().toISOString();
   return [
-    { id: "twilio", name: "Twilio", connected: Boolean(status.twilioConfigured), detail: String(status.labFrom || ""), lastCheckedAt: now },
-    { id: "groq", name: "Groq", connected: Boolean(status.groqConfigured), detail: "Whisper STT and conversational LLM", lastCheckedAt: now },
-    { id: "elevenlabs", name: "ElevenLabs", connected: Boolean(status.elevenLabsConfigured), detail: "Text to speech", lastCheckedAt: now },
+    { id: "twilio", name: "Twilio", connected: Boolean(client.phone), detail: "Inbound calls route directly to ElevenLabs", lastCheckedAt: now },
+    { id: "elevenlabs", name: "ElevenLabs", connected: client.voicePipeline === "elevenlabs-convai", detail: "Realtime speech, barge-in and agent conversation", lastCheckedAt: now },
     { id: "calcom", name: "Cal.com", connected: Boolean(calendar.ok), detail: calendar.ok ? `${calendar.slotCount || 0} slots available` : String(calendar.error || "Not connected"), lastCheckedAt: String(calendar.probedAt || now) },
     { id: "gemini", name: "Gemini", connected: Boolean(process.env.GEMINI_API_KEY), detail: "Knowledge embeddings", lastCheckedAt: now },
-    { id: "stripe", name: "Stripe", connected: Boolean(status.stripeConfigured), detail: "Billing webhook", lastCheckedAt: now },
-    { id: "gateway", name: "Voice gateway", connected: Boolean(gateway.reachable), detail: String(gateway.architecture || gateway.error || ""), lastCheckedAt: now },
+    { id: "stripe", name: "Stripe", connected: Boolean(process.env.STRIPE_SECRET_KEY), detail: "Billing webhook", lastCheckedAt: now },
     { id: "database", name: "PostgreSQL", connected: Boolean(process.env.DATABASE_URL), detail: "Tenant data and pgvector", lastCheckedAt: now },
-    { id: "redis", name: "Redis", connected: Boolean(process.env.REDIS_URL), detail: "Live sessions and concurrency", lastCheckedAt: now },
   ];
 }
 
@@ -221,7 +216,7 @@ function createClient(body: Partial<ClientConfig>): ClientConfig {
     email: body.email || "",
     transferNumber: body.transferNumber || "",
     voiceId: body.voiceId || process.env.ELEVENLABS_VOICE_ID || "",
-    voicePipeline: body.voicePipeline === "elevenlabs-convai" ? "elevenlabs-convai" : "groq-gateway",
+    voicePipeline: "elevenlabs-convai",
     services: body.services || [],
     staff: body.staff || [],
     hours: body.hours,
@@ -268,9 +263,7 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
     const clients = await store.listClients();
     const selected = clients.find((item) => item.id === clientId(url)) || clients[0];
     const calls = selected ? await store.listCallsForClient(selected.id, 8) : [];
-    const [status, calendar] = selected
-      ? await Promise.all([buildDemoLabStatus({ client: selected }), probeCalcomForClient({ client: selected })])
-      : [{}, {}];
+    const calendar = selected ? await probeCalcomForClient({ client: selected }) : {};
     send(res, 200, {
       clients: clients.map((item) => safeEditableClient(item)),
       client: selected ? safeEditableClient(selected) : null,
@@ -278,7 +271,7 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       features: selected?.enabledFeatures || [],
       summary: analytics(calls),
       recentCalls: calls,
-      integrations: integrationList(status, calendar),
+      integrations: selected ? integrationList(selected, calendar) : [],
     });
     return true;
   }
@@ -555,11 +548,8 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
   if (route === "/integrations/status" && req.method === "GET") {
     const client = await requireClient(ctx, clientId(url));
     if (!client) return true;
-    const [status, calendar] = await Promise.all([
-      buildDemoLabStatus({ client }),
-      probeCalcomForClient({ client }),
-    ]);
-    send(res, 200, { items: integrationList(status, calendar) });
+    const calendar = await probeCalcomForClient({ client });
+    send(res, 200, { items: integrationList(client, calendar) });
     return true;
   }
 

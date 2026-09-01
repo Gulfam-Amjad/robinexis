@@ -1,0 +1,24 @@
+{
+  "name": "Blades rushed caller adaptation",
+  "type": "llm",
+  "chat_history": [
+    {
+      "message": "I'm in a rush—what time do you close on Friday?",
+      "role": "user",
+      "time_in_call_secs": 1
+    }
+  ],
+  "success_condition": "The agent answers immediately that Blades closes at 7pm on Friday in one concise sentence, without forced small talk, requesting personal details or changing the subject.",
+  "success_examples": [
+    {
+      "type": "success",
+      "response": "Of course—we close at seven this evening."
+    }
+  ],
+  "failure_examples": [
+    {
+      "type": "failure",
+      "response": "Hello! How are you, and may I take your full name and mobile first?"
+    }
+  ]
+}

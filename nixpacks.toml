@@ -12,7 +12,6 @@ cmds = ["npm install --include=dev --no-audit --no-fund"]
 [phases.build]
 cacheDirectories = [
   "apps/api/dist",
-  "apps/voice-gateway/dist",
   "apps/worker/dist",
   "packages/database/dist",
 ]

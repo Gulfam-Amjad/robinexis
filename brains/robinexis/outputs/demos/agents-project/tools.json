@@ -1,3 +1,14 @@
 {
-    "tools": []
+    "tools": [
+        {
+            "type": "webhook",
+            "config": "tool_configs/blades_check_availability.json",
+            "id": "tool_1601m1c1vbdheaptfewv2sxnb9q4"
+        },
+        {
+            "type": "webhook",
+            "config": "tool_configs/blades_create_booking.json",
+            "id": "tool_2601m1c3133bfty8z3sd8fyt7aaf"
+        }
+    ]
 }

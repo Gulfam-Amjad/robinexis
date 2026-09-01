@@ -10,17 +10,14 @@ import {
 } from "@robinexis/database";
 import {
   applyOutboundStatus,
-  buildDemoLabStatus,
-  demoCallRateLimited,
   handleStripeWebhook,
   probeCalcomForClient,
   publicDemoCallView,
-  startSandboxDemoCall,
   validateTwilioWebhook,
-  verifyTwilioLab,
 } from "@robinexis/integrations";
 import { applyCors, describeAuthMode, isAdmin } from "./auth.js";
 import { handleProductRoute } from "./productRoutes.js";
+import { runVoiceTool, voiceToolAuthorized } from "./voiceToolRoutes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 loadEnv({ path: path.resolve(__dirname, "../../../.env") });
@@ -64,17 +61,6 @@ const server = http.createServer(async (req, res) => {
       send(res, 200, { status: "ok", service: "api", buildVersion: BUILD_VERSION });
       return;
     }
-    if (url.pathname === "/demo/status" && req.method === "GET") {
-      if ((await store.listClients()).length === 0) await seedStore(store);
-      const client =
-        (await store.getPublishedClient(DEMO_CLIENT_ID)) ?? (await store.getClientBySlug(DEMO_CLIENT_ID));
-      send(res, 200, await buildDemoLabStatus({ client }));
-      return;
-    }
-    if (url.pathname === "/demo/twilio-check" && req.method === "GET") {
-      send(res, 200, await verifyTwilioLab());
-      return;
-    }
     if (url.pathname === "/demo/calendar" && req.method === "GET") {
       if ((await store.listClients()).length === 0) await seedStore(store);
       const client =
@@ -100,32 +86,6 @@ const server = http.createServer(async (req, res) => {
       }
       const calls = (await store.listCallsForClient(tenant, limit)).map(publicDemoCallView);
       send(res, 200, { ok: true, calls });
-      return;
-    }
-    if (url.pathname === "/demo/call" && req.method === "POST") {
-      if ((await store.listClients()).length === 0) await seedStore(store);
-      const ip = String(req.headers["x-forwarded-for"] ?? req.socket.remoteAddress ?? "local");
-      const body = JSON.parse((await readRaw(req)).toString() || "{}") as { phone?: string; clientId?: string };
-      const phone = String(body.phone ?? "");
-      if (demoCallRateLimited(`${ip}:${phone}`)) {
-        send(res, 429, { ok: false, error: "rate_limited" });
-        return;
-      }
-      const requested = String(body.clientId ?? "").trim() || DEMO_CLIENT_ID;
-      const client =
-        (await store.getPublishedClient(requested)) ??
-        (await store.getClient(requested)) ??
-        (await store.getClientBySlug(requested));
-      if (!client) {
-        send(res, 503, { ok: false, error: "demo_tenant_missing" });
-        return;
-      }
-      const result = await startSandboxDemoCall({ phone, client });
-      send(
-        res,
-        result.ok ? 200 : result.status,
-        result.ok ? { ok: true, callSid: result.callSid } : { ok: false, error: result.error },
-      );
       return;
     }
     if (url.pathname === "/webhooks/twilio/status" && req.method === "POST") {
@@ -158,6 +118,23 @@ const server = http.createServer(async (req, res) => {
       const secret = process.env.STRIPE_WEBHOOK_SECRET ?? "";
       const result = await handleStripeWebhook({ store, rawBody: raw, signature: sig, webhookSecret: secret });
       send(res, result.ok ? 200 : 400, result);
+      return;
+    }
+    const voiceToolMatch = url.pathname.match(
+      /^\/api\/v1\/voice-tools\/(check-availability|create-booking)$/,
+    );
+    if (voiceToolMatch && req.method === "POST") {
+      if (!voiceToolAuthorized(req.headers["x-voice-tool-secret"])) {
+        send(res, 401, { ok: false, error: "unauthorized" });
+        return;
+      }
+      const input = JSON.parse((await readRaw(req)).toString() || "{}") as Record<string, unknown>;
+      const result = await runVoiceTool(
+        store,
+        voiceToolMatch[1] as "check-availability" | "create-booking",
+        input,
+      );
+      send(res, result.status, result.body);
       return;
     }
     if (url.pathname === "/api/v1" || url.pathname.startsWith("/api/v1/")) {

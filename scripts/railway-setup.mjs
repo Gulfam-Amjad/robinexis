@@ -1,6 +1,6 @@
 // One-command Railway setup. Applies .railway/railway.ts (services, Redis, build and
 // start commands, non-secret variables), pushes the secret variables from
-// .railway-vars/*.env, and generates public domains for the API and gateway.
+// .railway-vars/*.env, and generates the public API domain.
 //
 //   node scripts/railway-setup.mjs            # preview only (railway config plan)
 //   node scripts/railway-setup.mjs --apply    # apply, push secrets, generate domains
@@ -21,10 +21,9 @@ const PROJECT_ID = process.env.RAILWAY_PROJECT_ID || "8658606d-ca2e-48d2-954b-0a
 const ENVIRONMENT = process.env.RAILWAY_ENVIRONMENT_NAME || "production";
 
 // Service names must match .railway/railway.ts exactly — worker.env references the
-// other two by name via ${{@robinexis/api.API_PUBLIC_BASE_URL}}.
+// API variables are referenced by Railway's public-domain variable.
 const services = [
   { file: "api", name: "@robinexis/api", domain: true },
-  { file: "gateway", name: "@robinexis/voice-gateway", domain: true },
   { file: "worker", name: "@robinexis/worker", domain: false },
 ];
 
@@ -143,5 +142,5 @@ if (domains.api) {
 
 console.log("\nDone. Remaining manual steps:");
 console.log("  1. Vercel → Settings → Environment Variables → Import .railway-vars/vercel.env, then redeploy.");
-console.log("  2. Point the Twilio webhook at {gateway domain}/twiml when you go live.");
+console.log("  2. Keep Twilio pointed directly at ElevenLabs; Railway is REST/database only.");
 console.log("  3. Rotate the Supabase password and JWT secret, then re-run railway-vars.mjs + this script.");

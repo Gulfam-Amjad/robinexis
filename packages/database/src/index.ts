@@ -6,6 +6,7 @@ export { getStore, getRedis } from "./store.js";
 export { migrate } from "./migrate.js";
 export { loadDatabaseEnv, databaseUrlFromEnv, isProductionRuntime } from "./env.js";
 export { smithEnglandSeed, robinexisDemoSeed, bladesHairSeed, seedStore, SMITH_ENGLAND_ID, DEMO_CLIENT_ID, BLADES_HAIR_ID } from "./seed.js";
+export { RECEPTIONIST_PLAYBOOK, frozenClientPrompt } from "./receptionistPlaybook.js";
 export {
   isAiServiceEnabled,
   isGroqGatewayPipeline,

@@ -1,0 +1,24 @@
+{
+  "name": "Blades FAQ brevity",
+  "type": "llm",
+  "chat_history": [
+    {
+      "message": "How much are full-head highlights, and who can do them?",
+      "role": "user",
+      "time_in_call_secs": 1
+    }
+  ],
+  "success_condition": "The response says full-head highlights start FROM £135, names only Galyna, Jana or Denise for colour/highlights, and stays to one or two short sentences. No follow-up question is required; if one is asked, there is at most one.",
+  "success_examples": [
+    {
+      "type": "success",
+      "response": "Full-head highlights start from £135, with Galyna, Jana or Denise. Shall I check the diary for you?"
+    }
+  ],
+  "failure_examples": [
+    {
+      "type": "failure",
+      "response": "The exact price is £135 and any stylist can do them. Let me tell you all about every service we offer."
+    }
+  ]
+}

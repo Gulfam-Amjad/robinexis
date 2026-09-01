@@ -2,6 +2,7 @@ import type { ClientConfig, PromptVersion } from "./types.js";
 import type { PlatformStore } from "./memory.js";
 import { getStore } from "./store.js";
 import { newId } from "./memory.js";
+import { frozenClientPrompt } from "./receptionistPlaybook.js";
 
 export const SMITH_ENGLAND_ID = "client_smith_england";
 export const DEMO_CLIENT_ID = "robinexis-demo";
@@ -71,7 +72,7 @@ export function robinexisDemoSeed(): ClientConfig {
     email: "demo@robinexis.invalid",
     transferNumber: process.env.FRONT_DESK_PHONE_NUMBER || "+15555550100",
     voiceId: process.env.ELEVENLABS_VOICE_ID || "L4so9SudEsIYzE9j4qlR",
-    voicePipeline: "groq-gateway",
+    voicePipeline: "elevenlabs-convai",
     services: [
       { slug: "15min", title: "15 min meeting", durationMinutes: 15 },
       { slug: "30min", title: "30 min meeting", durationMinutes: 30 },
@@ -81,7 +82,7 @@ export function robinexisDemoSeed(): ClientConfig {
       "This is a sandbox receptionist. Never invent prices or hours.",
       "Never invent availability; only offer slots from check_availability.",
     ],
-    publishedFacts: ["Robinexis Option 2 demo: Groq Whisper, Groq Llama, ElevenLabs TTS, sandbox Cal.com."],
+    publishedFacts: ["Voice demos use ElevenLabs directly; Railway provides REST booking actions only."],
     unknownTopics: ["opening hours", "prices"],
     calendar: {
       provider: "calcom",
@@ -89,15 +90,15 @@ export function robinexisDemoSeed(): ClientConfig {
       credentialRef: "CALCOM_API_KEY",
     },
     calendarNoteMode: "summary",
-    enabledFeatures: ["inbound", "booking", "transfer", "outbound"],
-    inboundNumbers: sandbox ? [sandbox] : [],
+    enabledFeatures: ["booking"],
+    inboundNumbers: [],
     outboundCallerId: sandbox || undefined,
     callingWindow,
     maxConcurrentCalls: 2,
     outboundRatePerHour: 30,
     firstCampaignRequiresApproval: false,
-    published: true,
-    serviceStatus: "trialing",
+    published: false,
+    serviceStatus: "incomplete",
   };
 }
 
@@ -110,14 +111,15 @@ export function bladesHairSeed(): ClientConfig {
     businessName: "Blades Hair",
     role: "voice receptionist",
     greeting:
-      "Hi, you've reached Blades Hair on Cullum Street — I can get you booked in or answer any questions. What can I do for you?",
-    tone: "warm, professional and easy-going, like a well-liked member of the front desk; British phrasing; one or two sentences then a question",
+      "Hi, thanks for calling Blades Hair on Cullum Street — you're through to Sophie. How are you today?",
+    tone:
+      "warm, attentive and naturally British; adapt to chatty, rushed, confused or frustrated callers; one to three short sentences and one clear question at a time",
     location: "8 Cullum Street, London, EC3M 7JJ",
     phone: "020 7623 1994",
     email: "info@bladeshair.co.uk",
-    transferNumber: process.env.FRONT_DESK_PHONE_NUMBER || "02079296680",
+    transferNumber: process.env.FRONT_DESK_PHONE_NUMBER || "+442079296680",
     voiceId: process.env.ELEVENLABS_VOICE_ID || "L4so9SudEsIYzE9j4qlR",
-    voicePipeline: "groq-gateway",
+    voicePipeline: "elevenlabs-convai",
     hours: "Monday to Friday, 10:00am–7:00pm. Closed weekends unless the team confirms otherwise.",
     prices:
       "All prices are FROM prices. Ladies: shampoo cut & finish from £68; blow dry short/medium/long from £39/£44/£49; highlights full/half/T-section from £135/£115/£100; colour full head/regrowth from £95/£66. Gents: shampoo cut & finish from £40; shampoo & clipper from £30; clipper cut from £28; cut & beard from £57; beard trim from £20; cut & colour from £80; colour from £50; reshade from £45. Re-style, hair up, and colour correction are priced at consultation.",
@@ -130,7 +132,9 @@ export function bladesHairSeed(): ClientConfig {
       "Never invent availability; only offer slots from check_availability.",
       "Always say FROM before any price. Never quote a price as the exact final cost.",
       "Colour and highlights only with Galyna, Jana, or Denise. Never promise a named stylist is free.",
-      "Confirm service, stylist preference, day/time, from-price, name and mobile before locking a booking.",
+      "Confirm service, day/time, from-price, name and mobile before locking a booking. Email is optional.",
+      "State the FROM price and wait for agreement before collecting final booking details.",
+      "Never transfer to finish a booking. Book it yourself; transfer only if they insist on a person after you offered to book.",
     ],
     publishedFacts: [
       "Blades Hair is a barbering and hairdressing salon for men and women in the City of London.",
@@ -149,9 +153,8 @@ export function bladesHairSeed(): ClientConfig {
       credentialRef: "CALCOM_API_KEY",
     },
     calendarNoteMode: "summary",
-    enabledFeatures: ["inbound", "booking", "transfer", "outbound"],
-    inboundNumbers: sandbox ? [sandbox] : [],
-    outboundCallerId: sandbox || undefined,
+    enabledFeatures: ["inbound", "booking", "transfer"],
+    inboundNumbers: ["+447446868067"],
     callingWindow,
     maxConcurrentCalls: 2,
     outboundRatePerHour: 20,
@@ -188,13 +191,19 @@ export async function seedStore(store: PlatformStore) {
   await publishPrompt(
     store,
     demo,
-    `Robinexis demo receptionist on the groq-gateway pipeline. Book via sandbox Cal.com only. Never invent hours, prices, or calendar slots.`,
+    frozenClientPrompt(
+      demo,
+      `You are the voice receptionist for Robinexis Demo. Book via check_availability then create_booking after the caller confirms. Never invent hours, prices, or calendar slots.`,
+    ),
   );
   const blades = bladesHairSeed();
   await publishPrompt(
     store,
     blades,
-    `You are the voice receptionist for Blades Hair, 8 Cullum Street, London EC3M 7JJ. Open Monday to Friday 10am–7pm. Book via check_availability then create_booking only after the caller confirms. Always say FROM before any price. Colour/highlights with Galyna, Jana or Denise only. Never invent slots, extras, or weekend hours. Capture name and mobile if you cannot book.`,
+    frozenClientPrompt(
+      blades,
+      `You are the voice receptionist for Blades Hair, 8 Cullum Street, London EC3M 7JJ. Open Monday to Friday 10am–7pm. Book via check_availability then create_booking only after the caller confirms. Always say FROM before any price. Colour/highlights with Galyna, Jana or Denise only. Never invent slots, extras, or weekend hours.`,
+    ),
   );
   return { store, client, prompt, demo, blades };
 }

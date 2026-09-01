@@ -9,21 +9,18 @@ const argvTask = process.argv[2];
 
 const builds = {
   api: ["run", "build:api"],
-  gateway: ["run", "build:gateway"],
   worker: ["run", "build:worker"],
   web: ["run", "build:web"],
 };
 
 const starts = {
   api: ["run", "start", "-w", "@robinexis/api"],
-  gateway: ["run", "start", "-w", "@robinexis/voice-gateway"],
   worker: ["run", "start", "-w", "@robinexis/worker"],
   web: ["run", "start", "-w", "@robinexis/web"],
 };
 
 const artifacts = {
   api: "apps/api/dist/server.js",
-  gateway: "apps/voice-gateway/dist/server.js",
   worker: "apps/worker/dist/index.js",
   web: "dist/index.html",
 };
@@ -31,7 +28,6 @@ const artifacts = {
 const stashRoot = "/opt/robinexis-dist";
 const stashDirs = {
   api: ["apps/api/dist", "packages/database/dist"],
-  gateway: ["apps/voice-gateway/dist"],
   worker: ["apps/worker/dist"],
   web: ["dist"],
 };
@@ -92,7 +88,6 @@ function inferService() {
   const explicit = (process.env.RAILWAY_BUILD_TARGET || "").trim().toLowerCase();
   if (builds[explicit]) return explicit;
   const name = (process.env.RAILWAY_SERVICE_NAME || "").toLowerCase();
-  if (name.includes("gateway") || name.includes("voice")) return "gateway";
   if (name.includes("worker")) return "worker";
   if (name.includes("web")) return "web";
   if (name.includes("api")) return "api";
@@ -128,7 +123,7 @@ if (action === "predeploy") {
 
 if (!service) {
   console.error(
-    "railway.mjs: cannot tell which service to build. Set RAILWAY_BUILD_TARGET to api, gateway, worker, or web.",
+    "railway.mjs: cannot tell which service to build. Set RAILWAY_BUILD_TARGET to api, worker, or web.",
   );
   process.exit(1);
 }

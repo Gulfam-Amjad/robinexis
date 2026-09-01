@@ -3,6 +3,9 @@
 > Generated: 2026-08-29 · Scope: every folder, file, flow, contract, env var, and known gap in this repository.
 > This is a **reference document**. Nothing here changes behaviour — it describes what already exists in the code.
 
+> [!warning] Architecture changed on 2026-09-01
+> The voice-gateway, Groq/Whisper audio path, outbound “Call Me Now” path and Redis session runtime described below are retired historical architecture. The active Blades path is `Caller → Twilio → ElevenLabs → Railway REST → Cal.com`. Railway keeps `/health`, authenticated booking tools, product APIs, Stripe reconciliation and retention. See `deploy/railway/RUNBOOK.md` for the current deployment source of truth.
+
 ---
 
 ## Table of contents

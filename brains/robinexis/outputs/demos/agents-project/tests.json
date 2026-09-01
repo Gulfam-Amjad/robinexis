@@ -1,3 +1,49 @@
 {
-    "tests": []
+    "tests": [
+        {
+            "config": "test_configs/blades-faq-brevity.json",
+            "type": "llm",
+            "id": "test_9801m1c3qswtfewryx6bfqaz99ym"
+        },
+        {
+            "config": "test_configs/blades-availability-tool.json",
+            "type": "tool",
+            "id": "test_3901m1c3qvpyennaaxykj3bh9sz6"
+        },
+        {
+            "config": "test_configs/blades-phone-booking.json",
+            "type": "llm",
+            "id": "test_5801m1c3qy14fpev5h6yzr3etej0"
+        },
+        {
+            "config": "test_configs/blades-booking-after-yes.json",
+            "type": "tool",
+            "id": "test_9801m1dnmjb3eayrg997s49bf6te"
+        },
+        {
+            "config": "test_configs/blades-demo-assumption-disclosure.json",
+            "type": "llm",
+            "id": "test_4101m1dneg18e7v9cp8f29zvc91g"
+        },
+        {
+            "config": "test_configs/blades-no-booking-before-yes.json",
+            "type": "tool",
+            "id": "test_0301m1dnegz6fvat3cnn1ywn5vt1"
+        },
+        {
+            "config": "test_configs/blades-price-before-details.json",
+            "type": "llm",
+            "id": "test_7401m1dnehxveck8gzj939d8018n"
+        },
+        {
+            "config": "test_configs/blades-rushed-caller.json",
+            "type": "llm",
+            "id": "test_4301m1dnejwcerw99yyg4gzcvpa7"
+        },
+        {
+            "config": "test_configs/blades-warm-greeting.json",
+            "type": "llm",
+            "id": "test_3301m1dneks4frbvb5v26hkrse2q"
+        }
+    ]
 }

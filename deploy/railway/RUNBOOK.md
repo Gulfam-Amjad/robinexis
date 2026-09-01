@@ -1,80 +1,60 @@
-# Railway + Vercel + Supabase runbook
+# Railway REST API runbook
 
-`railway.toml` is **deprecated**. New Railway services ignore it. Project shape lives in `.railway/railway.ts`.
+Twilio and ElevenLabs communicate directly for live speech. Railway never receives raw audio and has no WebSocket or TwiML role.
 
-```bash
-npx @railway/cli login              # once, interactive
-node scripts/railway-setup.mjs      # preview (config plan)
-node scripts/railway-setup.mjs --apply
+```text
+Caller → Twilio → ElevenLabs → authenticated Railway REST → Cal.com
 ```
 
-`railway-setup.mjs` applies `.railway/railway.ts`, pushes the secrets from `.railway-vars/*.env`, generates the API and gateway domains, and writes the API URL back into `.railway-vars/vercel.env`.
+## Active services
 
-That creates **Redis + API + voice gateway + worker** from `Gulfam-Amjad/robinexis` (Root Directory `/`). Do **not** add `@robinexis/web` on Railway — that is Vercel.
-
-Until `config apply` has run, you can still click **Deploy** on a service created in the dashboard, but you **must** set Build Command and `RAILWAY_BUILD_TARGET` yourself — git will not apply the old toml files.
-
-| Service | Build | Start | `RAILWAY_BUILD_TARGET` |
+| Service | Purpose | Build | Start |
 |---|---|---|---|
-| `@robinexis/api` | `node scripts/railway.mjs api` | `node scripts/railway.mjs migrate && npm run start -w @robinexis/api` | `api` |
-| `@robinexis/voice-gateway` | `node scripts/railway.mjs gateway` | `npm run start -w @robinexis/voice-gateway` | `gateway` |
-| `@robinexis/worker` | `node scripts/railway.mjs worker` | `npm run start -w @robinexis/worker` | `worker` |
+| `@robinexis/api` | `/health`, authenticated Blades tools, product/Stripe APIs | `node scripts/railway.mjs api` | `node scripts/railway.mjs migrate && node scripts/railway.mjs start` |
+| `@robinexis/worker` | Stripe reconciliation and data retention only | `node scripts/railway.mjs worker` | `npm run start -w @robinexis/worker` |
 
-## Services
+The public API is `https://robinexisapi-production-3836.up.railway.app`.
 
-1. **gateway** (`@robinexis/voice-gateway`) — public domain, `$PORT`. Twilio Voice webhook: `{PUBLIC_BASE_URL}/twiml`. Media stream: `wss://{PUBLIC_HOST}/media-stream`.
-2. **api** (`@robinexis/api`) — public domain. Set `API_PORT=$PORT`. Stripe/Twilio status: `{API_PUBLIC_BASE_URL}`.
-3. **worker** (`@robinexis/worker`) — no public domain.
+- `GET /health`
+- `POST /api/v1/voice-tools/check-availability`
+- `POST /api/v1/voice-tools/create-booking`
 
-**Vercel** — Root Directory empty (repo root). Build uses `vercel.json`. Set `VITE_API_BASE_URL`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`. Do not put `DATABASE_URL` or service secrets on Vercel.
+Both booking routes require `x-voice-tool-secret`. Keep `VOICE_TOOL_SECRET`, `CALCOM_API_KEY`, `CALCOM_USERNAME` and database credentials on Railway only.
 
-## Data
-
-- **Supabase Postgres** with the `vector` extension enabled. Share `DATABASE_URL` (session/direct URI, typically port 5432) with all Railway services. Enable SSL (`DATABASE_SSL=true` is implied for supabase hosts).
-- **Railway Redis** shared as `REDIS_URL`. The voice gateway requires Redis in production.
-
-Run once after the database is reachable:
-
-```bash
-npm run db:migrate
-npm run db:seed
-```
-
-The API start command runs `node scripts/railway.mjs migrate` before the server.
-
-## Bulk-loading variables (no manual typing)
+## Deploy
 
 ```bash
 node scripts/railway-vars.mjs
+node scripts/railway-setup.mjs
+node scripts/railway-setup.mjs --apply
 ```
 
-Reads the local gitignored `.env` and writes `.railway-vars/{api,gateway,worker,vercel}.env` (also gitignored). For each Railway service open **Variables → Raw Editor → ENV**, paste the matching file, and press **Update Variables**. Vercel's **Import .env** accepts `vercel.env` the same way.
+Review the IaC plan before applying it. `.railway/railway.ts` now describes only the active API and worker. The retired gateway service is intentionally retained outside IaC as a rollback shell; do not let a config apply delete it.
 
-Anything the script cannot know is left empty and listed in the command output. Fill it before deploying:
+## Verify
 
-- `SUPABASE_JWT_SECRET` — Supabase → Project Settings → API → JWT Secret (API service only)
-- `VITE_SUPABASE_ANON_KEY` — Supabase → Project Settings → API → anon public key (Vercel only)
-- `WEB_ORIGIN` / `VITE_API_BASE_URL` / `PUBLIC_BASE_URL` / `API_PUBLIC_BASE_URL` — the Vercel and Railway public URLs, once the domains exist
-- `TWILIO_SANDBOX_PHONE_NUMBER`, `TWILIO_SMS_NUMBER`, `FRONT_DESK_PHONE_NUMBER` — a Twilio **test** number, never the live salon line `+447446868067`
+1. `GET /health` returns `status: ok`, `service: api` and a build version.
+2. An invalid `x-voice-tool-secret` receives `401`.
+3. Availability returns only Cal.com slots.
+4. Booking requires the system conversation ID, explicit confirmation and a still-free slot.
+5. Repeating the same conversation/slot returns the original booking UID.
+6. Twilio `+447446868067` remains assigned to ElevenLabs, not Railway.
 
-`REDIS_URL` is emitted as `${{Redis.REDIS_URL}}`; rename if the Redis service is not called `Redis`. `PORT` is injected by Railway, so no port variable is set (local fallbacks: API 8081, gateway 8080).
+## Retired gateway rollback
 
-## Required Railway variables
+Retired 1 September 2026:
 
-Shared: `DATABASE_URL`, `REDIS_URL`, `GROQ_API_KEY`, `ELEVENLABS_API_KEY`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_SANDBOX_PHONE_NUMBER`, `TWILIO_SMS_NUMBER`, `GEMINI_API_KEY`.
+- Railway service: `@robinexis/voice-gateway`
+- Service ID: `652fb60c-b080-4129-a2f8-806ed68046a0`
+- Last deployment: `c752a7dc-e207-46c1-b501-6a339499f317`
+- Last domain: `https://robinexisvoice-gateway-production.up.railway.app`
+- Retirement action: scaled region `us-west2` from one replica to zero; service was not deleted.
 
-Gateway: `PUBLIC_BASE_URL`, `FRONT_DESK_PHONE_NUMBER`, `FALLBACK_VOICEMAIL_URL`.
+Do not restore this during an ordinary API rollback. If an emergency audio rollback is explicitly approved:
 
-API: `API_PUBLIC_BASE_URL`, `WEB_ORIGIN` (Vercel origin), `SUPABASE_URL`, `SUPABASE_JWT_SECRET`, `ADMIN_EMAILS=gulfamamjad633@gmail.com`.
+1. Restore the removed `apps/voice-gateway` code from git history.
+2. Restore its old Railway source/build/start variables and secrets from Railway history.
+3. Scale `us-west2` back to one and verify its `/health`.
+4. Only then change a sandbox Twilio number. Never move `+447446868067` without a separate controlled cutover.
 
-Worker: `PUBLIC_BASE_URL`, `API_PUBLIC_BASE_URL`, `DATA_RETENTION_DAYS`.
-
-Never set `SKIP_AUTH=true` on Railway. Do not point the live salon number `+447446868067` at this gateway.
-
-## Verification
-
-Gateway `/health` must include `service`, `buildVersion`, and `architecture`. API `/health` must include `service` and `buildVersion`.
-
-## Rollback
-
-Use Railway’s previous successful deployment. Do not change customer Twilio routing during a code rollback.
+The current voice rollback is safer: select the previous ElevenLabs agent version and leave Twilio routing unchanged.

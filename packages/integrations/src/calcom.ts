@@ -20,23 +20,39 @@ export function maskCalcomUsername(username: string): string {
 }
 
 async function calcomFetch(tenant: CalcomTenant, path: string, calApiVersion: string, init?: RequestInit) {
-  const res = await fetch(`${CALCOM_BASE}${path}`, {
-    ...init,
-    headers: {
-      ...init?.headers,
-      Authorization: `Bearer ${tenant.apiKey}`,
-      "cal-api-version": calApiVersion,
-    },
-  });
-  const text = await res.text();
-  let json: unknown;
-  try {
-    json = text ? JSON.parse(text) : undefined;
-  } catch {
-    json = text;
+  const method = init?.method ?? "GET";
+  const attempts = method === "GET" ? 2 : 1;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      const timeout = AbortSignal.timeout(Number(process.env.CALCOM_TIMEOUT_MS) || 8_000);
+      const signal = init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
+      const res = await fetch(`${CALCOM_BASE}${path}`, {
+        ...init,
+        signal,
+        headers: {
+          ...init?.headers,
+          Authorization: `Bearer ${tenant.apiKey}`,
+          "cal-api-version": calApiVersion,
+        },
+      });
+      const text = await res.text();
+      let json: unknown;
+      try {
+        json = text ? JSON.parse(text) : undefined;
+      } catch {
+        json = text;
+      }
+      if (res.ok) return json;
+      lastError = new Error(`Cal.com ${method} ${path} -> HTTP ${res.status}: ${text}`);
+      if (res.status < 500 || attempt === attempts - 1) throw lastError;
+    } catch (error) {
+      lastError = error;
+      if (attempt === attempts - 1) throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
   }
-  if (!res.ok) throw new Error(`Cal.com ${init?.method ?? "GET"} ${path} -> HTTP ${res.status}: ${text}`);
-  return json;
+  throw lastError;
 }
 
 /**

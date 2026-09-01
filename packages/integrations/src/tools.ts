@@ -2,6 +2,7 @@ import type { ToolExecutor } from "@robinexis/brain";
 import type { PlatformStore } from "@robinexis/database";
 import { newId } from "@robinexis/database";
 import { requiredFieldsFor, type CallOutcome, type ToolName } from "@robinexis/tool-contracts";
+import { guestEmailFromPhone, normalizeSpokenPhone } from "./phone.js";
 import * as calcom from "./calcom.js";
 import { appendVerifiedCalendarNote } from "./calendarNotes.js";
 import type { FakeCalendar } from "./fakeCalendar.js";
@@ -176,13 +177,30 @@ export function createToolExecutor(opts: {
       }
       case "create_booking": {
         if (input.callerConfirmed !== true) throw new Error("caller_confirmation_required");
+        const phone = normalizeSpokenPhone(String(input.attendeePhone || call.contactPhone || ""));
+        let attendeeEmail = String(input.attendeeEmail || "").trim();
+        if (!attendeeEmail) {
+          if (!opts.calendar && live.apiKey) {
+            const account = await calcom.fetchAccountEmail(live).catch(() => undefined);
+            if (account?.includes("@")) {
+              const [local, domain] = account.split("@");
+              const digits = phone.replace(/\D/g, "") || "unknown";
+              attendeeEmail = `${local}+${digits}@${domain}`;
+            }
+          }
+          if (!attendeeEmail) attendeeEmail = guestEmailFromPhone(phone);
+        }
+        const notesParts = [
+          input.notes ? String(input.notes) : "",
+          phone ? `Mobile: ${phone}` : "",
+        ].filter(Boolean);
         const payload = {
           eventTypeSlug: String(input.eventTypeSlug),
           start: String(input.start),
           attendeeName: String(input.attendeeName),
-          attendeeEmail: String(input.attendeeEmail),
+          attendeeEmail,
           attendeeTimeZone: input.attendeeTimeZone ? String(input.attendeeTimeZone) : undefined,
-          notes: input.notes ? String(input.notes) : undefined,
+          notes: notesParts.length ? notesParts.join("\n") : undefined,
           conversationId: call.id,
         };
         if (!cal && (!live.apiKey || !live.username)) throw new Error("calendar_not_configured");
@@ -190,6 +208,8 @@ export function createToolExecutor(opts: {
           ? cal.create({ ...payload, attendeeName: payload.attendeeName })
           : await calcom.createBooking(live, payload);
         if (result.uid) call.appointmentId = result.uid;
+        if (phone) call.collected.attendeePhone = phone;
+        if (attendeeEmail) call.collected.attendeeEmail = attendeeEmail;
         return result;
       }
       case "reschedule_booking": {

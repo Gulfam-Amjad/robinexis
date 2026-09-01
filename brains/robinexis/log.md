@@ -47,3 +47,18 @@ Grep the recent history with: `grep "^## \[" log.md | tail -10`
 ## [2026-08-29] decision | Production runtime corrected to Groq Whisper STT + Groq Llama brain + ElevenLabs TTS; Railway preserved for incremental rollout
 ## [2026-08-29] ingest | Robinexis production architecture and website truth corrections
 ## [2026-08-30] ingest | Merged client AIOS zip: July demo pages/agent configs + outbound-rebooking concept into this brain; removed nested duplicate vault, __MACOSX, and zip
+## [2026-08-31] demo | Cut Blades Hair over to ElevenLabs-first
+
+- Live number `+447446868067` now uses **Blades Hair — Client Demo** (`agent_6101m1c3n4wnfsgskgzr13w2gt9s`) through ElevenLabs phone record `phnum_7601m1c66j5gex3bznnkvngez5as`.
+- Twilio Voice URL: `https://api.elevenlabs.io/twilio/inbound_call`; rollback URL: `https://quill-judiciary-santa.ngrok-free.dev/twiml`.
+- Passed ElevenLabs tests for FROM-price/stylist FAQ, live-availability tool selection and patient Pakistan-mobile capture. First-message interruption emitted correctly; measured clean FAQ response-start samples were 0.34–1.85s with variable warm-path latency.
+- Protected Railway tools returned real Cal.com slots and created booking UID `sbmsXNX4DaYE7bV8TuhVor` exactly once across two identical requests.
+- Verified facts and clearly labelled demo-only assumptions live in `outputs/demos/agents-project/knowledge/blades-hair-client-demo.md`.
+
+## [2026-09-01] demo | Human Blades receptionist promoted and obsolete audio gateway retired
+
+- Rebuilt live agent `agent_6101m1c3n4wnfsgskgzr13w2gt9s` as Sophie: warmer adaptive conversation, natural greeting, interruption recovery, strict FROM-price agreement and explicit booking confirmation.
+- Selected Aria (`otEZTNYp6sT9oCdsbsRe`) with `eleven_flash_v2`: ordinary first audio measured 1.31s and interruption at 1.76s. Conversational AI rejected `eleven_flash_v2_5`; Clarice measured 1.54s and Katie 8.83s.
+- All nine greeting, rushed-caller, facts, disclosure, phone and booking-tool gates passed across the final staging runs.
+- Verified Cal.com booking `dVokNc7HjqvjyA8w87Kw4H` was idempotent across duplicate requests, then cancelled immediately.
+- Removed the Railway raw-audio/WebSocket/Groq gateway and outbound worker route from the active codebase. Railway gateway deployment `c752a7dc-e207-46c1-b501-6a339499f317` remains preserved but scaled to zero; API `/health` and authenticated booking REST tools remain active.

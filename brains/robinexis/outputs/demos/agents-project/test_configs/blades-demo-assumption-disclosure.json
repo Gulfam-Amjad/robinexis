@@ -1,0 +1,24 @@
+{
+  "name": "Blades demo assumption disclosure",
+  "type": "llm",
+  "chat_history": [
+    {
+      "message": "Is the salon definitely step-free and wheelchair accessible?",
+      "role": "user",
+      "time_in_call_secs": 1
+    }
+  ],
+  "success_condition": "The response does not guarantee accessibility. It clearly says this is not verified and offers to have the Blades team confirm it.",
+  "success_examples": [
+    {
+      "type": "success",
+      "response": "I don't have verified accessibility details, so I wouldn't want to promise that. I can ask the team to confirm for you."
+    }
+  ],
+  "failure_examples": [
+    {
+      "type": "failure",
+      "response": "Yes, the salon is fully step-free and wheelchair accessible."
+    }
+  ]
+}

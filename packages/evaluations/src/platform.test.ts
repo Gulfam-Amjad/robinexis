@@ -23,19 +23,13 @@ import {
 import {
   FakeCalendar,
   applyOutboundStatus,
-  assertDemoTenant,
   createToolExecutor,
-  demoOutboundFrom,
   finishCall,
   inCallingWindow,
-  isValidE164,
-  LIVE_SALON_NUMBER,
   maskCalcomUsername,
   publicCalcomProbe,
   publicClientView,
   publicDemoCallView,
-  sandboxFromIsLiveSalon,
-  startSandboxDemoCall,
   validateTwilioWebhook,
 } from "@robinexis/integrations";
 import { describe, expect, it } from "vitest";
@@ -66,6 +60,8 @@ describe("prompt compiler", () => {
     expect(inbound).toMatch(/check_availability/);
     expect(inbound).toMatch(/never invent/i);
     expect(inbound).toMatch(/INBOUND/);
+    expect(inbound).toMatch(/Never ask for a US \+1 example/);
+    expect(inbound).toMatch(/Do not transfer_to_human to finish a booking/);
     const outbound = compilePrompt({ client, direction: "outbound", objective: "appointment-reminder" });
     expect(outbound).toMatch(/OUTBOUND/);
     expect(outbound).toMatch(/voicemail/);
@@ -76,6 +72,7 @@ describe("access control", () => {
   it("maps Stripe statuses and gates outbound on past_due", async () => {
     expect(stripeStatusToLocal("active")).toBe("active");
     const { client } = await seedStore(new MemoryStore());
+    client.published = true;
     client.serviceStatus = "canceled";
     expect(isAiServiceEnabled(client).inbound).toBe(false);
     client.serviceStatus = "past_due";
@@ -173,6 +170,21 @@ describe("text brain + fake calendar", () => {
     });
     expect(first.ok && second.ok).toBe(true);
     if (first.ok && second.ok) expect(second.data).toEqual(first.data);
+
+    const noEmail = await exec({
+      name: "create_booking",
+      input: {
+        eventTypeSlug: "haircut-style",
+        start: "2026-09-01T11:00:00.000Z",
+        attendeeName: "Colson",
+        attendeePhone: "07911123456",
+        idempotencyKey: "book-phone-only",
+        callerConfirmed: true,
+      },
+      call: emptyCall(client.id, prompt.id),
+      client,
+    });
+    expect(noEmail.ok).toBe(true);
   });
 
   it("unknown prices hand off honestly via get_business_info", async () => {
@@ -518,50 +530,21 @@ describe("distributed call and outbound controls", () => {
   });
 });
 
-describe("dual pipeline and demo call", () => {
-  it("keeps Smith England on elevenlabs-convai and demo on groq-gateway", async () => {
+describe("ElevenLabs-first tenants and call views", () => {
+  it("keeps all seeded voice tenants off the retired gateway", async () => {
     const store = new MemoryStore();
     const { client, demo, blades } = await seedStore(store);
     expect(client.voicePipeline).toBe("elevenlabs-convai");
     expect(client.inboundNumbers).toEqual([]);
     expect(isGroqGatewayPipeline(client)).toBe(false);
     expect(demo.id).toBe("robinexis-demo");
-    expect(demo.voicePipeline).toBe("groq-gateway");
-    expect(isGroqGatewayPipeline(demo)).toBe(true);
-    expect(await store.getPublishedClient("robinexis-demo")).toMatchObject({ slug: "robinexis-demo" });
-    expect(assertDemoTenant(client)).toBe(false);
-    expect(assertDemoTenant(demo)).toBe(true);
+    expect(demo.voicePipeline).toBe("elevenlabs-convai");
+    expect(isGroqGatewayPipeline(demo)).toBe(false);
+    expect(await store.getPublishedClient("robinexis-demo")).toBeUndefined();
     expect(blades.slug).toBe("blades-hair");
-    expect(blades.voicePipeline).toBe("groq-gateway");
-    expect(assertDemoTenant(blades)).toBe(true);
-  });
-
-  it("rejects invalid phones and missing public URL for demo outbound", async () => {
-    const store = new MemoryStore();
-    const { demo } = await seedStore(store);
-    expect(isValidE164("923001234567")).toBe(false);
-    expect(isValidE164("+923001234567")).toBe(true);
-    const bad = await startSandboxDemoCall({ phone: "not-a-number", client: demo });
-    expect(bad).toEqual({ ok: false, error: "invalid_phone", status: 400 });
-    const previousFrom = process.env.TWILIO_SANDBOX_PHONE_NUMBER;
-    const previousPhone = process.env.TWILIO_PHONE_NUMBER;
-    const previousBase = process.env.PUBLIC_BASE_URL;
-    delete process.env.TWILIO_SANDBOX_PHONE_NUMBER;
-    delete process.env.TWILIO_PHONE_NUMBER;
-    expect(demoOutboundFrom()).toBe(LIVE_SALON_NUMBER);
-    process.env.TWILIO_SANDBOX_PHONE_NUMBER = "+447446868067";
-    delete process.env.PUBLIC_BASE_URL;
-    const missingBase = await startSandboxDemoCall({ phone: "+441234567890", client: demo });
-    expect(missingBase).toMatchObject({ ok: false, error: "public_base_url_not_configured" });
-    process.env.PUBLIC_BASE_URL = "https://example.ngrok.io";
-    const placeholderBase = await startSandboxDemoCall({ phone: "+441234567890", client: demo });
-    expect(placeholderBase).toMatchObject({ ok: false, error: "public_base_url_not_configured" });
-    if (previousFrom === undefined) delete process.env.TWILIO_SANDBOX_PHONE_NUMBER;
-    else process.env.TWILIO_SANDBOX_PHONE_NUMBER = previousFrom;
-    if (previousPhone === undefined) delete process.env.TWILIO_PHONE_NUMBER;
-    else process.env.TWILIO_PHONE_NUMBER = previousPhone;
-    if (previousBase === undefined) delete process.env.PUBLIC_BASE_URL;
-    else process.env.PUBLIC_BASE_URL = previousBase;
+    expect(blades.voicePipeline).toBe("elevenlabs-convai");
+    expect(blades.inboundNumbers).toEqual(["+447446868067"]);
+    expect(demo.inboundNumbers).toEqual([]);
   });
 
   it("looks up demo calls by Twilio SID and redacts to the public lab view", async () => {
@@ -579,13 +562,6 @@ describe("dual pipeline and demo call", () => {
       twilioCallSid: "CA123sandbox",
       transcript: call.transcript,
     });
-    const previous = process.env.TWILIO_SANDBOX_PHONE_NUMBER;
-    process.env.TWILIO_SANDBOX_PHONE_NUMBER = "+447446868067";
-    expect(sandboxFromIsLiveSalon()).toBe(true);
-    process.env.TWILIO_SANDBOX_PHONE_NUMBER = "+15555550199";
-    expect(sandboxFromIsLiveSalon()).toBe(false);
-    if (previous === undefined) delete process.env.TWILIO_SANDBOX_PHONE_NUMBER;
-    else process.env.TWILIO_SANDBOX_PHONE_NUMBER = previous;
   });
 });
 

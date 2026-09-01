@@ -8,6 +8,6 @@
     "esModuleInterop": true,
     "noEmit": true
   },
-  "include": ["packages/**/*.ts", "apps/api/**/*.ts", "apps/worker/**/*.ts", "apps/voice-gateway/**/*.ts"],
+  "include": ["packages/**/*.ts", "apps/api/**/*.ts", "apps/worker/**/*.ts"],
   "exclude": ["**/dist", "**/tsup.config.ts"]
 }

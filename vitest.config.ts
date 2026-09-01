@@ -4,7 +4,8 @@ export default defineConfig({
   test: {
     include: [
       "packages/evaluations/**/*.test.ts",
-      "apps/voice-gateway/src/**/*.test.ts",
+      "packages/integrations/src/**/*.test.ts",
+      "apps/api/src/**/*.test.ts",
     ],
     environment: "node",
   },

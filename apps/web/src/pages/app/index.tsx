@@ -391,54 +391,34 @@ export function AgentDetailPage() {
   );
 }
 
-const phoneSchema = z.object({ phone: z.string().regex(/^\+[1-9]\d{7,14}$/, "Use E.164 format, for example +447700900000") });
-
 export function PlaygroundPage() {
-  const [callSid, setCallSid] = useState("");
-  const { push } = useToast();
-  const { activeClientId, activeClient } = useClient();
-  const { register, handleSubmit, formState: { errors } } = useForm<z.infer<typeof phoneSchema>>({ resolver: zodResolver(phoneSchema) });
-  const status = useQuery({ queryKey: ["demo-status"], queryFn: api.demoStatus, retry: false });
-  const twilio = useQuery({ queryKey: ["twilio-check"], queryFn: api.demoTwilioCheck, retry: false });
-  const call = useMutation({
-    mutationFn: ({ phone }: z.infer<typeof phoneSchema>) => api.demoCall(phone, activeClientId || undefined),
-    onSuccess: (data) => { setCallSid(data.callSid); push({ title: "Your phone should ring shortly", message: `Call ${data.callSid} started.`, tone: "success" }); },
-    onError: (error) => push({ title: "Couldn’t place the call", message: error.message, tone: "error" }),
-  });
-  const callLog = useQuery({ queryKey: ["demo-call", callSid, activeClientId], queryFn: () => api.demoCalls(callSid, activeClientId || undefined), enabled: Boolean(callSid), refetchInterval: callSid ? 4000 : false });
   return (
     <>
-      <PageHeader eyebrow="Agent playground" title="Hear the experience for yourself" description={`Place a sandbox call to test ${activeClient?.businessName || "the selected agent"}. No live inbound routing is changed.`} />
+      <PageHeader eyebrow="Agent playground" title="Talk to the Blades receptionist" description="Use the native ElevenLabs realtime experience—the same conversation engine that answers the salon number." />
       <div className="playground-layout">
         <Card className="call-me-card">
           <div className="call-me-visual"><span><PhoneCall /></span><i className="ring-one" /><i className="ring-two" /></div>
-          <h2>Call me now</h2><p>We’ll place a sandbox call to your phone. No customer configuration or live number is changed.</p>
-          <form onSubmit={handleSubmit((values) => call.mutate(values))}><Field label="Your mobile number" error={errors.phone?.message}><input placeholder="+447700900000" {...register("phone")} /></Field><Button className="full-button" disabled={call.isPending}>{call.isPending ? "Starting call…" : "Call me"} <PhoneCall size={16} /></Button></form>
-          <div className="sandbox-note"><ShieldCheck /> Sandbox only · Rate limits apply</div>
+          <h2>Start the live voice demo</h2><p>ElevenLabs handles speech, interruption and audio directly; Railway is used only when checking or creating a booking.</p>
+          <a className="button button-primary button-md full-button" href="https://elevenlabs.io/app/talk-to?agent_id=agent_6101m1c3n4wnfsgskgzr13w2gt9s" target="_blank" rel="noreferrer">Talk to Sophie <PhoneCall size={16} /></a>
+          <div className="sandbox-note"><ShieldCheck /> Native realtime voice · No outbound gateway</div>
         </Card>
         <div className="test-column">
           <Card className="panel">
-            <SectionHeading title="Connection checklist" description="Live readiness for this test environment" action={<button aria-label="Refresh connection checks" className="icon-button" onClick={() => { status.refetch(); twilio.refetch(); }}><RefreshCw size={16} /></button>} />
-            {(status.error || twilio.error) && <div className="compact-alert" role="alert">One or more sandbox services need configuration. Refresh after updating the server environment.</div>}
+            <SectionHeading title="Live architecture" description="The fast production path used by this demo" />
             <div className="check-list">
-              <StatusCheck label="API and voice gateway" ready={!status.error && status.isSuccess} loading={status.isLoading} />
-              <StatusCheck label="Twilio sandbox" ready={!twilio.error && twilio.isSuccess} loading={twilio.isLoading} />
-              <StatusCheck label="Outbound call route" ready={!status.error && !twilio.error} loading={status.isLoading || twilio.isLoading} />
+              <span><CheckCircle2 /><strong>Twilio → ElevenLabs</strong><Badge tone="success">Direct</Badge></span>
+              <span><CheckCircle2 /><strong>Speech and interruption</strong><Badge tone="success">ElevenLabs</Badge></span>
+              <span><CheckCircle2 /><strong>Cal.com booking tools</strong><Badge tone="success">Railway REST</Badge></span>
             </div>
           </Card>
           <Card className="panel scenario-card">
             <SectionHeading title="Try these scenarios" description="Listen for confirmation and honest handoffs." />
             <div className="scenario-grid">{["Book me in Thursday afternoon", "What are your prices?", "I need to change my appointment", "Can I speak to a person?"].map((text) => <button aria-label={`Copy scenario: ${text}`} key={text} onClick={() => navigator.clipboard.writeText(text)}><MessageCircleMore />{text}<Copy size={14} /></button>)}</div>
           </Card>
-          {callSid && <Card className="panel"><SectionHeading title="Live call trace" description={`Tracking ${callSid}`} />{callLog.isLoading ? <SkeletonRows /> : callLog.error ? <ErrorState error={callLog.error} onRetry={() => callLog.refetch()} /> : <pre className="json-preview">{JSON.stringify(callLog.data, null, 2)}</pre>}</Card>}
         </div>
       </div>
     </>
   );
-}
-
-function StatusCheck({ label, ready, loading }: { label: string; ready: boolean; loading: boolean }) {
-  return <span>{loading ? <Clock3 className="spin" /> : ready ? <CheckCircle2 /> : <XCircle className="danger-icon" />}<strong>{label}</strong><Badge tone={loading ? "neutral" : ready ? "success" : "danger"}>{loading ? "Checking" : ready ? "Ready" : "Needs setup"}</Badge></span>;
 }
 
 export function CallsPage() {

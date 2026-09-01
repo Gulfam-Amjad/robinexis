@@ -9,7 +9,6 @@
     "apps/api",
     "apps/web",
     "apps/worker",
-    "apps/voice-gateway",
     "packages/api-contracts",
     "packages/brain",
     "packages/database",
@@ -25,21 +24,18 @@
     "typecheck": "tsc -p tsconfig.json && npm run typecheck -w @robinexis/web",
     "build:web": "npm run build -w @robinexis/web",
     "build:api": "npm run build -w @robinexis/api",
-    "build:gateway": "npm run build -w @robinexis/voice-gateway",
     "build:worker": "npm run build -w @robinexis/worker",
     "build:migrate": "npm run build:migrate -w @robinexis/database",
-    "build:backend": "npm run build:api && npm run build:gateway && npm run build:worker && npm run build:migrate",
+    "build:backend": "npm run build:api && npm run build:worker && npm run build:migrate",
     "build": "npm run typecheck && npm run build:web && npm run build:backend",
     "verify": "npm run build && npm test && npm run test:web",
     "dev:web": "npm run dev -w @robinexis/web",
     "dev:api": "npm run dev -w @robinexis/api",
-    "dev:gateway": "npm run dev -w @robinexis/voice-gateway",
     "dev:worker": "npm run dev -w @robinexis/worker",
     "db:migrate": "tsx packages/database/src/migrate.cli.ts",
     "db:seed": "tsx packages/database/src/seed.ts",
     "check:calcom": "tsx packages/integrations/src/verifyCalendar.ts",
-    "check:brain": "tsx packages/brain/src/verifyBrain.ts",
-    "check:tts": "tsx apps/voice-gateway/src/verifyTts.ts"
+    "check:brain": "tsx packages/brain/src/verifyBrain.ts"
   },
   "devDependencies": {
     "@exodus/bytes": "^1.15.1",
@@ -50,6 +46,7 @@
     "tsup": "^8.5.0",
     "tsx": "4.23.12",
     "typescript": "5.9.3",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "ws": "^8.21.3"
   }
 }
