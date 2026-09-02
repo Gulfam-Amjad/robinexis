@@ -50,11 +50,11 @@ export function calcomTenantFromClient(
   resolveSecret: (reference: string) => string | undefined = (ref) => process.env[ref],
 ): CalcomTenant {
   const apiKey = client?.calendar.credentialRef
-    ? resolveSecret(client.calendar.credentialRef) ?? process.env.CALCOM_API_KEY ?? ""
-    : process.env.CALCOM_API_KEY ?? "";
+    ? resolveSecret(client.calendar.credentialRef) ?? ""
+    : "";
   return {
     apiKey,
-    username: client?.calendar.username || process.env.CALCOM_USERNAME || "",
+    username: client?.calendar.username || "",
   };
 }
 

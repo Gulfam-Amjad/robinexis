@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import {
   BLADES_HAIR_ID,
+  isAiServiceEnabled,
   newId,
   type CallSession,
   type PlatformStore,
@@ -77,6 +78,16 @@ export async function runVoiceTool(
   const client = await store.getPublishedClient(clientId);
   if (!client) {
     return { status: 404, body: { ok: false, error: "client_not_found" } };
+  }
+  const access = isAiServiceEnabled(client);
+  if (!access.inbound) {
+    return {
+      status: 403,
+      body: { ok: false, error: "service_unavailable", reason: access.reason },
+    };
+  }
+  if (!client.enabledFeatures.includes("booking")) {
+    return { status: 403, body: { ok: false, error: "booking_not_enabled" } };
   }
 
   const eventTypeSlug = String(input.eventTypeSlug || "");

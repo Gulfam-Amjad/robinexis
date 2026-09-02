@@ -10,6 +10,7 @@ import {
 } from "@robinexis/database";
 import {
   calcom,
+  calcomTenantFromClient,
   probeCalcomForClient,
   publicClientView,
 } from "@robinexis/integrations";
@@ -139,49 +140,6 @@ function filterCalls(calls: CallSession[], url: URL): CallSession[] {
   });
 }
 
-function analytics(calls: CallSession[]) {
-  const outcomeCounts: Record<string, number> = {};
-  let bookings = 0;
-  let transfers = 0;
-  let toolErrors = 0;
-  let inbound = 0;
-  let outbound = 0;
-  for (const call of calls) {
-    if (call.direction === "inbound") inbound += 1;
-    else outbound += 1;
-    if (call.outcome) outcomeCounts[call.outcome] = (outcomeCounts[call.outcome] || 0) + 1;
-    if (call.outcome === "transferred") transfers += 1;
-    if (call.toolHistory.some((tool) => tool.name === "create_booking" && !tool.error)) bookings += 1;
-    toolErrors += call.toolHistory.filter((tool) => tool.error).length;
-  }
-  const completed = calls.filter((call) => call.status === "completed" || call.status === "transferred").length;
-  const minutesUsed = Math.round(
-    calls.reduce((total, call) => {
-      const start = new Date(call.createdAt).getTime();
-      const finish = new Date(call.updatedAt).getTime();
-      return total + Math.max(0, finish - start) / 60_000;
-    }, 0),
-  );
-  const bookingRate = calls.length ? (bookings / calls.length) * 100 : 0;
-  return {
-    totalCalls: calls.length,
-    answeredCalls: completed,
-    bookedAppointments: bookings,
-    transferredCalls: transfers,
-    minutesUsed,
-    completedCalls: completed,
-    completionRate: calls.length ? completed / calls.length : 0,
-    bookings,
-    bookingRate,
-    transfers,
-    transferRate: calls.length ? transfers / calls.length : 0,
-    toolErrors,
-    inbound,
-    outbound,
-    outcomeCounts,
-  };
-}
-
 function integrationList(client: ClientConfig, calendar: Record<string, unknown>) {
   const now = new Date().toISOString();
   return [
@@ -295,13 +253,29 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
     const clients = (await store.listClients()).filter((item) => canAccessClient(actor, item.id));
     const selected = clients.find((item) => item.id === clientId(url)) || clients[0];
     const calls = selected ? await store.listCallsForClient(selected.id, 8) : [];
+    const to = new Date().toISOString();
+    const from = new Date(Date.parse(to) - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const periodSummary = selected
+      ? await store.getAnalyticsSummary(selected.id, { from, to })
+      : undefined;
     const calendar = selected ? await probeCalcomForClient({ client: selected }) : {};
     send(res, 200, {
       clients: clients.map((item) => safeEditableClient(item)),
       client: selected ? safeEditableClient(selected) : null,
       access: selected ? isAiServiceEnabled(selected) : null,
       features: selected?.enabledFeatures || [],
-      summary: analytics(calls),
+      summary: periodSummary ? {
+        totalCalls: periodSummary.totalCalls,
+        answeredCalls: periodSummary.completedCalls + periodSummary.transferredCalls,
+        bookedAppointments: periodSummary.bookedCalls,
+        transferredCalls: periodSummary.transferredCalls,
+        minutesUsed: Math.round(periodSummary.totalMinutes),
+        bookingRate: periodSummary.totalCalls
+          ? (periodSummary.bookedCalls / periodSummary.totalCalls) * 100
+          : 0,
+        inbound: periodSummary.inboundCalls,
+        outbound: periodSummary.outboundCalls,
+      } : undefined,
       recentCalls: calls,
       integrations: selected ? integrationList(selected, calendar) : [],
       actor: {
@@ -513,12 +487,7 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
   if (route === "/calendar/bookings" && req.method === "GET") {
     const client = await requireClient(ctx, clientId(url));
     if (!client) return true;
-    const tenant = {
-      apiKey: client.calendar.credentialRef
-        ? process.env[client.calendar.credentialRef] || ""
-        : process.env.CALCOM_API_KEY || "",
-      username: client.calendar.username || process.env.CALCOM_USERNAME || "",
-    };
+    const tenant = calcomTenantFromClient(client);
     if (!tenant.apiKey || !tenant.username) {
       send(res, 200, { items: [], configured: Boolean(tenant.apiKey && tenant.username) });
     } else {
@@ -547,12 +516,7 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       send(res, 400, { error: "explicit_confirmation_required" });
       return true;
     }
-    const tenant = {
-      apiKey: client.calendar.credentialRef
-        ? process.env[client.calendar.credentialRef] || ""
-        : process.env.CALCOM_API_KEY || "",
-      username: client.calendar.username || process.env.CALCOM_USERNAME || "",
-    };
+    const tenant = calcomTenantFromClient(client);
     const result = calendarAction[2] === "cancel"
       ? await calcom.cancelBooking(tenant, calendarAction[1])
       : await calcom.rescheduleBooking(tenant, {

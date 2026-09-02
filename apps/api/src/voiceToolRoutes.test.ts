@@ -44,6 +44,58 @@ describe("ElevenLabs voice tool routes", () => {
     });
   });
 
+  it("supports a second published tenant selected by its server-bound secret", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    const blades = await store.getClient(BLADES_HAIR_ID);
+    await store.upsertClient({
+      ...blades!,
+      id: "client_second",
+      slug: "second-salon",
+      businessName: "Second Salon",
+      elevenlabsAgentId: "agent_second",
+    });
+    const calendar = new FakeCalendar(["2026-09-02T11:00:00.000Z"]);
+    const result = await runVoiceTool(
+      store,
+      "check-availability",
+      {
+        clientId: BLADES_HAIR_ID,
+        eventTypeSlug: "30min",
+        start: "2026-09-02T00:00:00.000Z",
+        end: "2026-09-03T00:00:00.000Z",
+        conversationId: "conv_second",
+      },
+      { store, calendar, clientId: "client_second" },
+    );
+    expect(result).toEqual({
+      status: 200,
+      body: { ok: true, slots: ["2026-09-02T11:00:00.000Z"] },
+    });
+  });
+
+  it("blocks booking tools when tenant service access is inactive", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    const client = await store.getClient(BLADES_HAIR_ID);
+    await store.upsertClient({ ...client!, serviceStatus: "canceled" });
+    const result = await runVoiceTool(
+      store,
+      "check-availability",
+      {
+        eventTypeSlug: "30min",
+        start: "2026-09-02T00:00:00.000Z",
+        end: "2026-09-03T00:00:00.000Z",
+        conversationId: "conv_inactive",
+      },
+      { store, calendar: new FakeCalendar() },
+    );
+    expect(result).toEqual({
+      status: 403,
+      body: { ok: false, error: "service_unavailable", reason: "canceled" },
+    });
+  });
+
   it("books once with name and mobile but no email", async () => {
     const store = new MemoryStore();
     await seedStore(store);

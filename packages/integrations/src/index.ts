@@ -8,6 +8,7 @@ export { inCallingWindow, COMPLIANCE_NOTES } from "./compliance.js";
 export { placeOutboundCall, twilioClient, validateTwilioWebhook } from "./twilioOutbound.js";
 export { publicDemoCallView } from "./callView.js";
 export {
+  calcomTenantFromClient,
   probeCalcomForClient,
   publicCalcomProbe,
   publicClientView,
