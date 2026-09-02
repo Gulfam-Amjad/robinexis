@@ -32,7 +32,13 @@ export function workspaceReceptionistDemo(input: {
   businessName: string;
   location?: string;
   phone?: string;
+  greeting?: string;
 }): ReceptionistDemoConfig {
+  // Blades is a named, fully scripted receptionist, so the workspace playground
+  // should be the same Sophie experience callers hear rather than a generic agent.
+  if (input.agentId === BLADES_RECEPTIONIST_DEMO.agentId) {
+    return BLADES_RECEPTIONIST_DEMO;
+  }
   return {
     agentId: input.agentId,
     agentName: "Your receptionist",
@@ -40,6 +46,7 @@ export function workspaceReceptionistDemo(input: {
     location: input.location || "Business workspace",
     phone: input.phone || "",
     phoneDisplay: input.phone || "Phone number not assigned",
+    greeting: input.greeting,
     scenarios: [
       "What time are you open?",
       "What services do you offer?",

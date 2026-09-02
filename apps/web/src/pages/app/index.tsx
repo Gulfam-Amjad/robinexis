@@ -431,14 +431,15 @@ export function PlaygroundPage() {
     businessName: client.data.businessName,
     location: client.data.location,
     phone: client.data.phone,
+    greeting: client.data.greeting,
   });
   return (
     <>
       <PageHeader
         eyebrow="Agent playground"
         title="Your receptionist, ready to talk"
-        description="Test the same Sophie experience your callers hear, without leaving Robinexis."
-        actions={<Link className="button button-secondary button-md" to="/demo/blades-hair" target="_blank">Open public demo <Link2 size={15} /></Link>}
+        description={`Test the same ${demoConfig.businessName} conversation your callers hear, without leaving Robinexis.`}
+        actions={demoConfig.sharePath ? <Link className="button button-secondary button-md" to={demoConfig.sharePath} target="_blank">Open public demo <Link2 size={15} /></Link> : undefined}
       />
       <ReceptionistCall compact config={demoConfig} />
     </>
@@ -687,7 +688,7 @@ function IntegrationsContent({ clientId }: { clientId: string }) {
     <>
       <PageHeader eyebrow="Integrations" title="Connect the tools behind the conversation" description="Robinexis keeps credentials server-side. This page shows connection health, never secret values." />
       {status.error && <div className="notice notice-error"><div><XCircle /><span><strong>Connection status unavailable.</strong> {status.error.message}</span></div><button onClick={() => status.refetch()}>Retry</button></div>}
-      <div className="integration-grid">{known.map(({ id, name, description, icon: Icon }) => { const item = byId.get(id); const connected = item?.connected || false; return <Card className="integration-card" key={id}><div className={`integration-icon integration-${id}`}><Icon /></div><div><h3>{name}</h3><p>{item?.detail || description}</p></div><Badge tone={connected ? "success" : "neutral"}>{status.isLoading ? "Checking…" : connected ? "Connected" : "Needs setup"}</Badge><a className="button button-secondary button-sm" href="mailto:hello@robinexis.com?subject=Robinexis%20integration%20setup">Configure server-side</a></Card>; })}</div>
+      <div className="integration-grid">{known.map(({ id, name, description, icon: Icon }) => { const item = byId.get(id); const connected = item?.connected || false; const needsSetup = !status.isLoading && !connected; return <Card className="integration-card" key={id}><div className={`integration-icon integration-${id}`}><Icon /></div><div><h3>{name}</h3><p>{item?.detail || description}</p></div><Badge tone={connected ? "success" : "neutral"}>{status.isLoading ? "Checking…" : connected ? "Connected" : "Needs setup"}</Badge>{needsSetup && <a className="button button-secondary button-sm" href="mailto:hello@robinexis.com?subject=Robinexis%20integration%20setup">Configure server-side</a>}</Card>; })}</div>
       <Card className="security-strip"><KeyRound /><div><strong>Secrets stay out of the browser</strong><p>API keys and OAuth credentials are configured in the deployment environment. The frontend only receives redacted connection status.</p></div><ShieldCheck /></Card>
     </>
   );

@@ -10,13 +10,17 @@ import {
   type LlmDriver,
 } from "@robinexis/brain";
 import {
+  BLADES_HAIR_ID,
+  DEMO_CLIENT_ID,
   MemoryStore,
   RedisSessionCache,
+  SMITH_ENGLAND_ID,
   isAiServiceEnabled,
   isGroqGatewayPipeline,
   newId,
   redactSecrets,
   seedStore,
+  sortClientsForDashboard,
   stripeStatusToLocal,
   type CallSession,
 } from "@robinexis/database";
@@ -545,6 +549,23 @@ describe("ElevenLabs-first tenants and call views", () => {
     expect(blades.voicePipeline).toBe("elevenlabs-convai");
     expect(blades.inboundNumbers).toEqual(["+447446868067"]);
     expect(demo.inboundNumbers).toEqual([]);
+  });
+
+  it("opens the dashboard on a live tenant rather than the sandbox", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    const ids = (await store.listClients()).map((client) => client.id);
+    expect(ids[0]).toBe(BLADES_HAIR_ID);
+    expect(ids.at(-1)).toBe(DEMO_CLIENT_ID);
+  });
+
+  it("ranks published tenants first and stays stable whatever order rows arrive in", () => {
+    const draft = { id: SMITH_ENGLAND_ID, slug: "smith-england-salon", businessName: "Smith England", published: false };
+    const live = { id: BLADES_HAIR_ID, slug: "blades-hair", businessName: "Blades Hair", published: true };
+    const sandbox = { id: DEMO_CLIENT_ID, slug: DEMO_CLIENT_ID, businessName: "Robinexis Demo", published: true };
+    const expected = [BLADES_HAIR_ID, SMITH_ENGLAND_ID, DEMO_CLIENT_ID];
+    expect(sortClientsForDashboard([sandbox, draft, live]).map((client) => client.id)).toEqual(expected);
+    expect(sortClientsForDashboard([live, sandbox, draft]).map((client) => client.id)).toEqual(expected);
   });
 
   it("looks up demo calls by Twilio SID and redacts to the public lab view", async () => {

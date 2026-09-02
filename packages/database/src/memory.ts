@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { sortClientsForDashboard } from "./clientOrder.js";
 import type {
   AnalyticsRange,
   AnalyticsSummary,
@@ -107,7 +108,7 @@ export class MemoryStore implements PlatformStore {
     return [...this.clients.values()].find((client) => client.elevenlabsAgentId === agentId);
   }
   async listClients() {
-    return [...this.clients.values()];
+    return sortClientsForDashboard([...this.clients.values()]);
   }
   async upsertClient(c: ClientConfig) {
     this.clients.set(c.id, c);

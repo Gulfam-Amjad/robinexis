@@ -3,10 +3,9 @@ import type { PlatformStore } from "./memory.js";
 import { getStore } from "./store.js";
 import { newId } from "./memory.js";
 import { frozenClientPrompt } from "./receptionistPlaybook.js";
+import { BLADES_HAIR_ID, DEMO_CLIENT_ID, SMITH_ENGLAND_ID } from "./ids.js";
 
-export const SMITH_ENGLAND_ID = "client_smith_england";
-export const DEMO_CLIENT_ID = "robinexis-demo";
-export const BLADES_HAIR_ID = "client_blades_hair";
+export { BLADES_HAIR_ID, DEMO_CLIENT_ID, SMITH_ENGLAND_ID };
 
 const callingWindow = { tz: "Europe/London", startHour: 8, endHour: 21, skipSunday: true } as const;
 

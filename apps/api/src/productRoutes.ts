@@ -140,7 +140,7 @@ function filterCalls(calls: CallSession[], url: URL): CallSession[] {
   });
 }
 
-function integrationList(client: ClientConfig, calendar: Record<string, unknown>) {
+export function integrationList(client: ClientConfig, calendar: Record<string, unknown>) {
   const now = new Date().toISOString();
   return [
     { id: "twilio", name: "Twilio", connected: Boolean(client.inboundNumbers.length), detail: client.inboundNumbers.length ? "Inbound numbers route directly to ElevenLabs" : "No inbound number assigned", lastCheckedAt: now },

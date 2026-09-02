@@ -1,5 +1,6 @@
 import { poolSsl } from "./env.js";
 import pg from "pg";
+import { sortClientsForDashboard } from "./clientOrder.js";
 import type { PlatformStore } from "./memory.js";
 import type {
   AnalyticsRange,
@@ -50,8 +51,8 @@ export class PostgresStore implements PlatformStore {
     return r.rows[0]?.config as ClientConfig | undefined;
   }
   async listClients() {
-    const r = await this.pool.query("SELECT config FROM clients");
-    return r.rows.map((row) => row.config as ClientConfig);
+    const r = await this.pool.query("SELECT config FROM clients ORDER BY slug");
+    return sortClientsForDashboard(r.rows.map((row) => row.config as ClientConfig));
   }
   async upsertClient(c: ClientConfig) {
     await this.pool.query(
