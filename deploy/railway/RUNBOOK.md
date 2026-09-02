@@ -10,7 +10,7 @@ Caller → Twilio → ElevenLabs → authenticated Railway REST → Cal.com
 
 | Service | Purpose | Build | Start |
 |---|---|---|---|
-| `@robinexis/api` | `/health`, authenticated Blades tools, product/Stripe APIs | `node scripts/railway.mjs api` | `node scripts/railway.mjs migrate && node scripts/railway.mjs start` |
+| `@robinexis/api` | `/health`, tenant-bound booking tools, product APIs, signed provider webhooks | `node scripts/railway.mjs api` | `node scripts/railway.mjs migrate && node scripts/railway.mjs start` |
 | `@robinexis/worker` | Stripe reconciliation and data retention only | `node scripts/railway.mjs worker` | `npm run start -w @robinexis/worker` |
 
 The public API is `https://robinexisapi-production-3836.up.railway.app`.
@@ -18,8 +18,11 @@ The public API is `https://robinexisapi-production-3836.up.railway.app`.
 - `GET /health`
 - `POST /api/v1/voice-tools/check-availability`
 - `POST /api/v1/voice-tools/create-booking`
+- `POST /webhooks/elevenlabs/post-call`
 
-Both booking routes require `x-voice-tool-secret`. Keep `VOICE_TOOL_SECRET`, `CALCOM_API_KEY`, `CALCOM_USERNAME` and database credentials on Railway only.
+Both booking routes require `x-voice-tool-secret`. `VOICE_TOOL_SECRET` remains bound to Blades for compatibility. New tenants use one unique secret each in `VOICE_TOOL_SECRETS_JSON`, shaped as `{"client_id":"long-unique-secret"}`; the request body cannot choose its tenant. ElevenLabs post-call events require a valid `ElevenLabs-Signature` generated with `ELEVENLABS_WEBHOOK_SECRET`.
+
+Keep all webhook, calendar, Supabase and database credentials on Railway only. Product JWTs are resolved into either a Robinexis operator or tenant-scoped salon membership. Database tables are API-only: browser Supabase roles have no direct table grants.
 
 ## Deploy
 
@@ -33,12 +36,14 @@ Review the IaC plan before applying it. `.railway/railway.ts` now describes only
 
 ## Verify
 
-1. `GET /health` returns `status: ok`, `service: api` and a build version.
+1. `GET /health` returns `status: ok`, `service: api`, a build version and `checks.database: ok`.
 2. An invalid `x-voice-tool-secret` receives `401`.
 3. Availability returns only Cal.com slots.
 4. Booking requires the system conversation ID, explicit confirmation and a still-free slot.
 5. Repeating the same conversation/slot returns the original booking UID.
-6. Twilio `+447446868067` remains assigned to ElevenLabs, not Railway.
+6. A signed ElevenLabs transcription webhook creates or updates the call under the tenant mapped by `agent_id`; an unknown agent is ignored.
+7. A salon user can only list workspaces in `workspace_memberships`; operators can switch across all tenants.
+8. Twilio `+447446868067` remains assigned to ElevenLabs, not Railway.
 
 ## Retired gateway rollback
 

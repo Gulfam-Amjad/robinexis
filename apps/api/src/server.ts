@@ -1,9 +1,9 @@
 import http from "node:http";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { config as loadEnv } from "dotenv";
 import {
-  DEMO_CLIENT_ID,
   getStore,
   seedStore,
   structuredLog,
@@ -11,13 +11,12 @@ import {
 import {
   applyOutboundStatus,
   handleStripeWebhook,
-  probeCalcomForClient,
-  publicDemoCallView,
   validateTwilioWebhook,
 } from "@robinexis/integrations";
-import { applyCors, describeAuthMode, isAdmin } from "./auth.js";
+import { applyCors, authenticateRequest, describeAuthMode } from "./auth.js";
+import { ingestElevenLabsWebhook } from "./elevenLabsWebhook.js";
 import { handleProductRoute } from "./productRoutes.js";
-import { runVoiceTool, voiceToolAuthorized } from "./voiceToolRoutes.js";
+import { runVoiceTool, voiceToolClientId } from "./voiceToolRoutes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 loadEnv({ path: path.resolve(__dirname, "../../../.env") });
@@ -41,11 +40,29 @@ function send(res: http.ServerResponse, status: number, body: unknown, type = "a
 
 async function readRaw(req: http.IncomingMessage): Promise<Buffer> {
   const chunks: Buffer[] = [];
-  for await (const c of req) chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c));
+  let total = 0;
+  for await (const c of req) {
+    const chunk = Buffer.isBuffer(c) ? c : Buffer.from(c);
+    total += chunk.byteLength;
+    if (total > 6 * 1024 * 1024) throw new Error("payload_too_large");
+    chunks.push(chunk);
+  }
   return Buffer.concat(chunks);
 }
 
 const server = http.createServer(async (req, res) => {
+  const requestId = String(req.headers["x-request-id"] || randomUUID()).slice(0, 128);
+  const requestStartedAt = Date.now();
+  res.setHeader("X-Request-Id", requestId);
+  res.on("finish", () => {
+    structuredLog("http_request", {
+      requestId,
+      method: req.method || "UNKNOWN",
+      path: (req.url || "/").split("?")[0],
+      status: res.statusCode,
+      durationMs: Date.now() - requestStartedAt,
+    });
+  });
   applyCors(req, res);
   const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
 
@@ -58,34 +75,13 @@ const server = http.createServer(async (req, res) => {
   try {
     const store = await getStore();
     if (url.pathname === "/health") {
-      send(res, 200, { status: "ok", service: "api", buildVersion: BUILD_VERSION });
-      return;
-    }
-    if (url.pathname === "/demo/calendar" && req.method === "GET") {
-      if ((await store.listClients()).length === 0) await seedStore(store);
-      const client =
-        (await store.getPublishedClient(DEMO_CLIENT_ID)) ?? (await store.getClientBySlug(DEMO_CLIENT_ID));
-      const slug = (url.searchParams.get("eventTypeSlug") || "").trim() || undefined;
-      send(res, 200, await probeCalcomForClient({ client, eventTypeSlug: slug }));
-      return;
-    }
-    if (url.pathname === "/demo/calls" && req.method === "GET") {
-      if ((await store.listClients()).length === 0) await seedStore(store);
-      const sid = (url.searchParams.get("sid") || "").trim();
-      const tenant =
-        (url.searchParams.get("clientId") || "").trim() || DEMO_CLIENT_ID;
-      const limit = Math.min(20, Math.max(1, Number(url.searchParams.get("limit") || 8) || 8));
-      if (sid) {
-        const call = await store.getCallByTwilioSid(tenant, sid);
-        if (!call) {
-          send(res, 404, { ok: false, error: "not_found" });
-          return;
-        }
-        send(res, 200, { ok: true, call: publicDemoCallView(call) });
-        return;
-      }
-      const calls = (await store.listCallsForClient(tenant, limit)).map(publicDemoCallView);
-      send(res, 200, { ok: true, calls });
+      await store.listClients();
+      send(res, 200, {
+        status: "ok",
+        service: "api",
+        buildVersion: BUILD_VERSION,
+        checks: { database: "ok" },
+      });
       return;
     }
     if (url.pathname === "/webhooks/twilio/status" && req.method === "POST") {
@@ -120,11 +116,19 @@ const server = http.createServer(async (req, res) => {
       send(res, result.ok ? 200 : 400, result);
       return;
     }
+    if (url.pathname === "/webhooks/elevenlabs/post-call" && req.method === "POST") {
+      const raw = await readRaw(req);
+      const signature = String(req.headers["elevenlabs-signature"] || "");
+      const result = await ingestElevenLabsWebhook(store, raw, signature);
+      send(res, result.status, result.body);
+      return;
+    }
     const voiceToolMatch = url.pathname.match(
       /^\/api\/v1\/voice-tools\/(check-availability|create-booking)$/,
     );
     if (voiceToolMatch && req.method === "POST") {
-      if (!voiceToolAuthorized(req.headers["x-voice-tool-secret"])) {
+      const authorizedClientId = voiceToolClientId(req.headers["x-voice-tool-secret"]);
+      if (!authorizedClientId) {
         send(res, 401, { ok: false, error: "unauthorized" });
         return;
       }
@@ -133,23 +137,29 @@ const server = http.createServer(async (req, res) => {
         store,
         voiceToolMatch[1] as "check-availability" | "create-booking",
         input,
+        { store, clientId: authorizedClientId },
       );
       send(res, result.status, result.body);
       return;
     }
     if (url.pathname === "/api/v1" || url.pathname.startsWith("/api/v1/")) {
-      if (!(await isAdmin(req))) {
+      const actor = await authenticateRequest(req, store);
+      if (!actor) {
         send(res, 401, { error: "unauthorized" });
         return;
       }
-      const handled = await handleProductRoute({ req, res, url, store, send, readRaw });
+      const handled = await handleProductRoute({ req, res, url, store, actor, send, readRaw });
       if (!handled) send(res, 404, { error: "not_found" });
       return;
     }
     send(res, 404, { error: "not_found" });
   } catch (err) {
     structuredLog("api_error", { err: String(err) });
-    send(res, 500, { error: "internal" });
+    send(
+      res,
+      err instanceof Error && err.message === "payload_too_large" ? 413 : 500,
+      { error: err instanceof Error && err.message === "payload_too_large" ? "payload_too_large" : "internal" },
+    );
   }
 });
 

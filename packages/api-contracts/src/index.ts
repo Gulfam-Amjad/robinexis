@@ -11,6 +11,25 @@ export type ServiceStatus =
 export type CallDirection = "inbound" | "outbound";
 export type CallStatus = "active" | "completed" | "transferred" | "failed";
 export type JobStatus = "pending" | "approved" | "dialing" | "completed" | "suppressed" | "failed" | "cancelled";
+export type WorkspaceRole = "owner" | "manager" | "viewer";
+
+export interface SessionActor {
+  email: string;
+  role: "operator" | "salon";
+  clientRoles: Record<string, WorkspaceRole | "operator">;
+  capabilities?: {
+    administerPlatform?: boolean;
+    createClients?: boolean;
+  };
+}
+
+export interface WorkspaceMembership {
+  id: string;
+  clientId: string;
+  email: string;
+  role: WorkspaceRole;
+  createdAt: string;
+}
 
 export interface ClientSummary {
   id: string;
@@ -36,6 +55,7 @@ export interface Client extends ClientSummary {
   email?: string;
   transferNumber?: string;
   voiceId?: string;
+  elevenlabsAgentId?: string;
   voicePipeline?: "elevenlabs-convai" | "groq-gateway";
   services?: ClientService[];
   staff?: string[];
@@ -176,6 +196,7 @@ export interface PromptVersion {
 export interface BootstrapResponse {
   clients: ClientSummary[];
   client?: Client;
+  actor?: SessionActor;
   summary?: AnalyticsSummary;
   recentCalls?: Call[];
   integrations?: IntegrationStatus[];

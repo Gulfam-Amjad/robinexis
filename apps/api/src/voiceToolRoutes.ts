@@ -26,6 +26,23 @@ export function voiceToolAuthorized(
   return Boolean(secret && value && safeEqual(value, secret));
 }
 
+export function voiceToolClientId(
+  header: string | string[] | undefined,
+  legacySecret = process.env.VOICE_TOOL_SECRET || "",
+  tenantSecretsJson = process.env.VOICE_TOOL_SECRETS_JSON || "",
+): string | undefined {
+  const value = Array.isArray(header) ? header[0] || "" : header || "";
+  if (!value) return undefined;
+  if (legacySecret && safeEqual(value, legacySecret)) return BLADES_HAIR_ID;
+  if (!tenantSecretsJson) return undefined;
+  try {
+    const secrets = JSON.parse(tenantSecretsJson) as Record<string, string>;
+    return Object.entries(secrets).find(([, secret]) => secret && safeEqual(value, secret))?.[0];
+  } catch {
+    return undefined;
+  }
+}
+
 function callFor(clientId: string, conversationId: string): CallSession {
   const now = new Date().toISOString();
   return {
@@ -54,11 +71,11 @@ export async function runVoiceTool(
   store: PlatformStore,
   tool: "check-availability" | "create-booking",
   input: Record<string, unknown>,
-  options: Parameters<typeof createToolExecutor>[0] = { store },
+  options: Parameters<typeof createToolExecutor>[0] & { clientId?: string } = { store },
 ): Promise<ToolResponse> {
-  const clientId = String(input.clientId || BLADES_HAIR_ID);
+  const clientId = options.clientId || BLADES_HAIR_ID;
   const client = await store.getPublishedClient(clientId);
-  if (!client || client.id !== BLADES_HAIR_ID) {
+  if (!client) {
     return { status: 404, body: { ok: false, error: "client_not_found" } };
   }
 

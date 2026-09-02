@@ -1,12 +1,14 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { ClientSummary } from "@robinexis/api-contracts";
+import type { ClientSummary, SessionActor } from "@robinexis/api-contracts";
 import { AUTH_REQUIRED } from "./lib/auth";
 import { api, API_KEY_STORAGE, CLIENT_STORAGE } from "./lib/api";
 import { currentSession, signOut, supabase } from "./lib/supabase";
 
 type SessionValue = {
   apiKey: string | null;
+  actor?: SessionActor;
+  actorLoading: boolean;
   login: (key: string) => void;
   logout: () => void;
 };
@@ -15,6 +17,12 @@ const SessionContext = createContext<SessionValue | null>(null);
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [apiKey, setApiKey] = useState(() => sessionStorage.getItem(API_KEY_STORAGE));
+  const actorQuery = useQuery({
+    queryKey: ["session-actor", apiKey],
+    queryFn: api.session,
+    enabled: AUTH_REQUIRED ? Boolean(apiKey) : true,
+    retry: false,
+  });
   const login = useCallback((key: string) => {
     sessionStorage.setItem(API_KEY_STORAGE, key.trim());
     setApiKey(key.trim());
@@ -40,7 +48,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     });
     return () => data.subscription.unsubscribe();
   }, [login]);
-  return <SessionContext.Provider value={{ apiKey, login, logout }}>{children}</SessionContext.Provider>;
+  return (
+    <SessionContext.Provider
+      value={{
+        apiKey,
+        actor: actorQuery.data,
+        actorLoading: actorQuery.isLoading,
+        login,
+        logout,
+      }}
+    >
+      {children}
+    </SessionContext.Provider>
+  );
 }
 
 export function useSession() {

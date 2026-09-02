@@ -23,7 +23,6 @@ import {
   Link2,
   Mail,
   MessageCircleMore,
-  MoreHorizontal,
   Phone,
   PhoneCall,
   Play,
@@ -63,7 +62,8 @@ import {
 import { z } from "zod";
 import type { Call, Client, Job, TimeseriesPoint } from "@robinexis/api-contracts";
 import { api, formatDate } from "../../lib/api";
-import { useClient, useToast } from "../../state";
+import { workspaceReceptionistDemo } from "../../lib/receptionistDemo";
+import { useClient, useSession, useToast } from "../../state";
 import { ReceptionistCall } from "../../components/ReceptionistCall";
 import {
   Badge,
@@ -84,10 +84,13 @@ import {
 
 function ClientGate({ children }: { children: (clientId: string) => React.ReactNode }) {
   const { activeClientId, isLoading, error } = useClient();
+  const { actor } = useSession();
   if (isLoading) return <LoadingState label="Loading client workspace…" />;
   if (error) return <ErrorState error={error} />;
   if (!activeClientId) {
-    return <EmptyState icon={Sparkles} title="Create your first client" description="Add the business details your voice agent will use, then test and publish it." action={<LinkButton to="/app/onboarding">Start setup</LinkButton>} />;
+    return actor?.role === "operator"
+      ? <EmptyState icon={Sparkles} title="Create your first client" description="Add the business details your voice agent will use, then test and publish it." action={<LinkButton to="/app/onboarding">Start setup</LinkButton>} />
+      : <EmptyState icon={ShieldCheck} title="No workspace assigned" description="Ask a Robinexis operator or workspace owner to add your email to a salon." />;
   }
   return <>{children(activeClientId)}</>;
 }
@@ -130,7 +133,7 @@ function OverviewContent({ clientId }: { clientId: string }) {
   return (
     <>
       <PageHeader eyebrow="Good afternoon" title={`${activeClient?.businessName || "Your business"} is in good hands`} description="Here’s what your receptionist has been doing for your customers." actions={<LinkButton to="/app/playground" variant="secondary"><Play size={15} /> Test agent</LinkButton>} />
-      {!activeClient?.published && <div className="notice"><div><WandSparkles /><span><strong>Your agent is still a draft.</strong> Finish setup and publish before routing live calls.</span></div><Link to="/app/agents">Review agent <ChevronRight size={15} /></Link></div>}
+      {!activeClient?.published && <div className="notice"><div><WandSparkles /><span><strong>This workspace configuration is still a draft.</strong> Review it and approve a version for audit before go-live.</span></div><Link to="/app/agents">Review agent <ChevronRight size={15} /></Link></div>}
       <div className="metrics-grid">
         <MetricCard label="Total calls" value={summary?.totalCalls ?? 0} detail="Current period" icon={PhoneCall} tone="cream" />
         <MetricCard label="Appointments booked" value={summary?.bookedAppointments ?? 0} detail={`${Math.round(summary?.bookingRate || 0)}% booking rate`} icon={CalendarCheck2} tone="sage" />
@@ -144,11 +147,12 @@ function OverviewContent({ clientId }: { clientId: string }) {
         </Card>
         <Card className="panel quick-panel">
           <SectionHeading title="Agent health" description="Ready for the next call" />
-          <div className="health-ring"><div><strong>{activeClient?.published ? "Live" : "Draft"}</strong><span>status</span></div></div>
+          <div className="health-ring"><div><strong>{activeClient?.access?.inbound ? "Active" : activeClient?.published ? "Ready" : "Draft"}</strong><span>phone status</span></div></div>
           <div className="health-list">
+            <span>{integration("elevenlabs")?.connected ? <CheckCircle2 /> : <XCircle className="danger-icon" />} Voice agent <Badge tone={integration("elevenlabs")?.connected ? "success" : "warning"}>{integration("elevenlabs")?.connected ? "Connected" : "Needs setup"}</Badge></span>
             <span>{integration("gemini")?.connected ? <CheckCircle2 /> : <XCircle className="danger-icon" />} Business knowledge <Badge tone={integration("gemini")?.connected ? "success" : "warning"}>{integration("gemini")?.connected ? "Ready" : "Needs setup"}</Badge></span>
             <span>{integration("calcom")?.connected ? <CheckCircle2 /> : <XCircle className="danger-icon" />} Calendar connection <Badge tone={integration("calcom")?.connected ? "success" : "warning"}>{integration("calcom")?.connected ? "Ready" : "Needs setup"}</Badge></span>
-            <span>{activeClient?.published ? <CheckCircle2 /> : <Clock3 />} Published prompt <Badge tone={activeClient?.published ? "success" : "warning"}>{activeClient?.published ? "Ready" : "Needs review"}</Badge></span>
+            <span>{activeClient?.published ? <CheckCircle2 /> : <Clock3 />} Approved version <Badge tone={activeClient?.published ? "success" : "warning"}>{activeClient?.published ? "Recorded" : "Needs review"}</Badge></span>
           </div>
           <Link className="button button-secondary button-md full-button" to="/app/agents">Manage agent <Settings2 size={15} /></Link>
         </Card>
@@ -226,21 +230,22 @@ export function AgentsPage() {
 }
 
 function AgentsContent({ clientId }: { clientId: string }) {
+  const { actor } = useSession();
   const client = useQuery({ queryKey: ["client", clientId], queryFn: () => api.client(clientId), retry: false });
   if (client.isLoading) return <LoadingState label="Loading your agent…" />;
   if (client.error) return <ErrorState error={client.error} onRetry={() => client.refetch()} />;
   const item = client.data!;
   return (
     <>
-      <PageHeader eyebrow="Voice agents" title="Your reception team" description="Configure how Robinexis answers, acts, and hands conversations back to people." actions={<LinkButton to="/app/agents/new"><Plus size={15} /> New agent</LinkButton>} />
+      <PageHeader eyebrow="Voice agents" title="Your reception team" description="Configure how Robinexis answers, acts, and hands conversations back to people." actions={actor?.role === "operator" ? <LinkButton to="/app/agents/new"><Plus size={15} /> New agent</LinkButton> : undefined} />
       <div className="agent-grid">
         <Card className="agent-card">
-          <div className="agent-card-top"><span className="agent-avatar"><Bot /></span><Badge tone={item.published ? "success" : "warning"}>{item.published ? "Live" : "Draft"}</Badge></div>
+          <div className="agent-card-top"><span className="agent-avatar"><Bot /></span><Badge tone={item.published ? "success" : "warning"}>{item.published ? "Approved" : "Draft"}</Badge></div>
           <h2>{item.role || `${item.businessName} Receptionist`}</h2><p>{item.tone || "Warm, confident and naturally helpful"}</p>
           <div className="agent-meta"><span><PhoneCall /> {item.inboundNumbers?.length || 0} number{item.inboundNumbers?.length === 1 ? "" : "s"}</span><span><BookOpen /> {item.publishedFacts?.length || 0} facts</span></div>
           <div className="agent-card-actions"><Link className="button button-secondary button-md" to={`/app/agents/${item.id}`}>Open agent</Link><Link className="icon-button" to="/app/playground"><Play size={17} /></Link></div>
         </Card>
-        <button className="new-agent-card" onClick={() => { window.location.href = "/app/agents/new"; }}><span><Plus /></span><strong>Create another agent</strong><p>Set up a different role, location, or conversation flow.</p></button>
+        {actor?.role === "operator" && <button className="new-agent-card" onClick={() => { window.location.href = "/app/agents/new"; }}><span><Plus /></span><strong>Create another agent</strong><p>Set up a different role, location, or conversation flow.</p></button>}
       </div>
     </>
   );
@@ -249,6 +254,7 @@ function AgentsContent({ clientId }: { clientId: string }) {
 const agentSchema = z.object({
   role: z.string().min(3, "Give your agent a role"),
   tone: z.string().min(3, "Describe how it should sound"),
+  elevenlabsAgentId: z.string().optional(),
   voiceId: z.string().optional(),
   transferNumber: z.string().optional(),
   greeting: z.string().min(8, "Write a short opening"),
@@ -265,12 +271,16 @@ const agentSchema = z.object({
 function AgentForm({ client, isNew = false }: { client: Client; isNew?: boolean }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const { actor } = useSession();
   const { push } = useToast();
+  const canEdit = actor?.role === "operator" || ["owner", "manager"].includes(actor?.clientRoles[client.id] || "");
+  const isOperator = actor?.role === "operator";
   const { register, handleSubmit, formState: { errors, isDirty } } = useForm<z.infer<typeof agentSchema>>({
     resolver: zodResolver(agentSchema),
     defaultValues: {
       role: client.role || `${client.businessName} AI receptionist`,
       tone: client.tone || "Warm, professional and concise",
+      elevenlabsAgentId: client.elevenlabsAgentId || "",
       voiceId: client.voiceId || "",
       transferNumber: client.transferNumber || "",
       greeting: client.greeting || `Hello, you've reached ${client.businessName}. How can I help today?`,
@@ -288,6 +298,7 @@ function AgentForm({ client, isNew = false }: { client: Client; isNew?: boolean 
     mutationFn: (values: z.infer<typeof agentSchema>) => api.updateClient(client.id, {
       role: values.role,
       tone: values.tone,
+      elevenlabsAgentId: values.elevenlabsAgentId,
       voiceId: values.voiceId,
       transferNumber: values.transferNumber,
       greeting: values.greeting,
@@ -305,7 +316,7 @@ function AgentForm({ client, isNew = false }: { client: Client; isNew?: boolean 
     }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["client", client.id] });
-      push({ title: "Agent saved", message: "Changes are ready to test. Publish when you’re happy.", tone: "success" });
+      push({ title: "Agent saved", message: "Changes are ready to test. Approve a workspace version when you’re happy.", tone: "success" });
       if (isNew) navigate(`/app/agents/${client.id}`);
     },
     onError: (error) => push({ title: "Save failed", message: error.message, tone: "error" }),
@@ -320,12 +331,14 @@ function AgentForm({ client, isNew = false }: { client: Client; isNew?: boolean 
   }, [isDirty]);
   return (
     <form className="agent-editor" onSubmit={handleSubmit((values) => save.mutate(values))}>
+      <fieldset disabled={!canEdit || save.isPending}>
       <Card className="form-card">
         <SectionHeading title="Personality & voice" description="Make the agent sound like a natural extension of the team." />
         <div className="form-grid">
           <Field label="Role" error={errors.role?.message}><input {...register("role")} /></Field>
           <Field label="Tone" error={errors.tone?.message}><input {...register("tone")} /></Field>
-          <Field label="ElevenLabs voice ID" hint="Leave empty to use the workspace default."><input placeholder="Optional voice ID" {...register("voiceId")} /></Field>
+          {isOperator && <Field label="ElevenLabs agent ID" hint="Required for this workspace's browser playground."><input placeholder="agent_…" {...register("elevenlabsAgentId")} /></Field>}
+          {isOperator && <Field label="ElevenLabs voice ID" hint="Leave empty to use the workspace default."><input placeholder="Optional voice ID" {...register("voiceId")} /></Field>}
           <Field label="Human transfer number"><input placeholder="+44…" {...register("transferNumber")} /></Field>
         </div>
         <Field label="Opening greeting" error={errors.greeting?.message}><textarea rows={3} {...register("greeting")} /></Field>
@@ -340,13 +353,14 @@ function AgentForm({ client, isNew = false }: { client: Client; isNew?: boolean 
         <Field label="Services" hint="One per line: Title | slug | duration minutes"><textarea rows={5} placeholder="Haircut & Style | haircut-style | 45" {...register("services")} /></Field>
         <div className="form-grid">
           <Field label="Team members" hint="One name per line"><textarea rows={4} {...register("staff")} /></Field>
-          <Field label="Inbound phone numbers" hint="One E.164 number per line"><textarea rows={4} placeholder="+447700900000" {...register("inboundNumbers")} /></Field>
+          {isOperator && <Field label="Inbound phone numbers" hint="One E.164 number per line"><textarea rows={4} placeholder="+447700900000" {...register("inboundNumbers")} /></Field>}
           <Field label="Opening hours"><textarea rows={4} {...register("hours")} /></Field>
           <Field label="Prices"><textarea rows={4} {...register("prices")} /></Field>
         </div>
         <Field label="Policies" hint="One approved policy per line"><textarea rows={5} {...register("policies")} /></Field>
       </Card>
-      <div className="sticky-save"><span>{isDirty ? "You have unpublished changes" : "All changes saved"}</span><Button disabled={save.isPending}>{save.isPending ? "Saving…" : "Save agent"} <Check size={16} /></Button></div>
+      <div className="sticky-save"><span>{canEdit ? isDirty ? "You have unsaved changes" : "All changes saved" : "Viewer access · read only"}</span>{canEdit && <Button disabled={save.isPending}>{save.isPending ? "Saving…" : "Save agent"} <Check size={16} /></Button>}</div>
+      </fieldset>
     </form>
   );
 }
@@ -362,6 +376,7 @@ export function NewAgentPage() {
 
 export function AgentDetailPage() {
   const { id } = useParams();
+  const { actor } = useSession();
   const queryClient = useQueryClient();
   const { push } = useToast();
   const client = useQuery({ queryKey: ["client", id], queryFn: () => api.client(id!), enabled: Boolean(id), retry: false });
@@ -370,20 +385,21 @@ export function AgentDetailPage() {
     mutationFn: () => api.publishClient(id!),
     onSuccess: async () => {
       await Promise.all([queryClient.invalidateQueries({ queryKey: ["client", id] }), queryClient.invalidateQueries({ queryKey: ["clients"] }), queryClient.invalidateQueries({ queryKey: ["promptVersions", id] })]);
-      push({ title: "Agent published", message: "New calls will use the latest approved prompt.", tone: "success" });
+      push({ title: "Workspace version approved", message: "The approved prompt is stored for audit. Provider sync remains a Robinexis operation.", tone: "success" });
     },
     onError: (error) => push({ title: "Publish failed", message: error.message, tone: "error" }),
   });
   if (client.isLoading) return <LoadingState />;
   if (client.error) return <ErrorState error={client.error} onRetry={() => client.refetch()} />;
+  const canEdit = actor?.role === "operator" || (id ? ["owner", "manager"].includes(actor?.clientRoles[id] || "") : false);
   return (
     <>
       <Link className="back-link" to="/app/agents"><ArrowLeft size={15} /> All agents</Link>
-      <PageHeader eyebrow="Agent editor" title={client.data?.role || "Voice receptionist"} description={`${client.data?.businessName} · ${client.data?.tone || "Warm and professional"}`} actions={<><Link className="button button-secondary button-md" to="/app/playground"><Play size={15} /> Test</Link><Button onClick={() => publish.mutate()} disabled={publish.isPending}>{publish.isPending ? "Publishing…" : "Publish"} <UploadCloud size={15} /></Button></>} />
+      <PageHeader eyebrow={canEdit ? "Agent editor" : "Agent details"} title={client.data?.role || "Voice receptionist"} description={`${client.data?.businessName} · ${client.data?.tone || "Warm and professional"}`} actions={<><Link className="button button-secondary button-md" to="/app/playground"><Play size={15} /> Test</Link>{canEdit && <Button onClick={() => publish.mutate()} disabled={publish.isPending}>{publish.isPending ? "Approving…" : "Approve version"} <UploadCloud size={15} /></Button>}</>} />
       <div className="editor-layout">
         <div><AgentForm client={client.data!} /></div>
         <aside className="editor-aside">
-          <Card className="panel"><SectionHeading title="Publish status" /><div className="publish-status"><span className={client.data?.published ? "status-orb live" : "status-orb"}><Cloud /></span><div><strong>{client.data?.published ? "Live" : "Draft changes"}</strong><p>{client.data?.published ? "Calls use the latest version." : "Publish before live calls can answer."}</p></div></div></Card>
+          <Card className="panel"><SectionHeading title="Workspace version" /><div className="publish-status"><span className={client.data?.published ? "status-orb live" : "status-orb"}><Cloud /></span><div><strong>{client.data?.published ? "Approved" : "Draft changes"}</strong><p>{client.data?.published ? "Stored for audit. Live provider sync is managed separately." : "Review and approve this workspace configuration."}</p></div></div></Card>
           <Card className="panel"><SectionHeading title="Prompt history" />{versions.isLoading ? <SkeletonRows count={3} /> : versions.data?.length ? <div className="version-list">{versions.data.slice(0, 5).map((version) => <span key={version.id}><i>v{version.version}</i><div><strong>Published prompt</strong><small>{formatDate(version.createdAt)}</small></div></span>)}</div> : <p className="muted">No published versions yet.</p>}</Card>
           <Card className="safety-card"><ShieldCheck /><h3>Built-in safety</h3><p>Agent prompts are frozen per call. Updating settings never changes a conversation already in progress.</p></Card>
         </aside>
@@ -393,6 +409,29 @@ export function AgentDetailPage() {
 }
 
 export function PlaygroundPage() {
+  const { activeClientId } = useClient();
+  const client = useQuery({
+    queryKey: ["client", activeClientId],
+    queryFn: () => api.client(activeClientId!),
+    enabled: Boolean(activeClientId),
+    retry: false,
+  });
+  if (client.isLoading) return <LoadingState label="Loading this workspace’s receptionist…" />;
+  if (client.error) return <ErrorState error={client.error} onRetry={() => client.refetch()} />;
+  if (!client.data?.elevenlabsAgentId) {
+    return (
+      <>
+        <PageHeader eyebrow="Agent playground" title="Connect this workspace’s live agent" description="The browser playground becomes available after a Robinexis operator assigns the workspace’s ElevenLabs agent ID." />
+        <EmptyState icon={PhoneCall} title="Voice agent not connected" description="The workspace remains isolated; Robinexis must connect its own agent before browser calls can start." action={<LinkButton to="/app/agents">Review agent</LinkButton>} />
+      </>
+    );
+  }
+  const demoConfig = workspaceReceptionistDemo({
+    agentId: client.data.elevenlabsAgentId,
+    businessName: client.data.businessName,
+    location: client.data.location,
+    phone: client.data.phone,
+  });
   return (
     <>
       <PageHeader
@@ -401,7 +440,7 @@ export function PlaygroundPage() {
         description="Test the same Sophie experience your callers hear, without leaving Robinexis."
         actions={<Link className="button button-secondary button-md" to="/demo/blades-hair" target="_blank">Open public demo <Link2 size={15} /></Link>}
       />
-      <ReceptionistCall compact />
+      <ReceptionistCall compact config={demoConfig} />
     </>
   );
 }
@@ -488,6 +527,8 @@ export function CalendarPage() {
 }
 
 function CalendarContent({ clientId }: { clientId: string }) {
+  const { actor } = useSession();
+  const canEdit = actor?.role === "operator" || ["owner", "manager"].includes(actor?.clientRoles[clientId] || "");
   const queryClient = useQueryClient();
   const { push } = useToast();
   const [eventSlug, setEventSlug] = useState("15min");
@@ -523,12 +564,12 @@ function CalendarContent({ clientId }: { clientId: string }) {
       <PageHeader eyebrow="Calendar" title="Appointments in one calm view" description="Review bookings made through conversations and keep an eye on upcoming demand." actions={<Link className="button button-secondary button-md" to="/app/integrations"><Link2 size={15} /> Calendar settings</Link>} />
       <div className="calendar-summary"><Card><CalendarCheck2 /><div><strong>{bookings.data?.length || 0}</strong><span>Upcoming bookings</span></div></Card><Card><Clock3 /><div><strong>Live</strong><span>Availability sync</span></div></Card><Card><Sparkles /><div><strong>AI</strong><span>Booking source</span></div></Card></div>
       <Card className="panel"><SectionHeading title="Live availability" description="Read-only slots returned by the connected calendar." /><div className="form-grid"><Field label="Event type slug"><input value={eventSlug} onChange={(event) => setEventSlug(event.target.value)} placeholder="15min" /></Field><div className="form-actions"><Button variant="secondary" onClick={() => slots.refetch()} disabled={!eventSlug || slots.isFetching}><RefreshCw size={15} /> {slots.isFetching ? "Checking…" : "Refresh slots"}</Button></div></div>{slots.error ? <ErrorState error={slots.error} /> : <div className="slot-grid">{(slots.data || []).slice(0, 8).map((slot) => <span key={slot.start}>{formatDate(slot.start)}</span>)}{!slots.isLoading && !slots.data?.length && <p className="muted">No slots returned for this event type.</p>}</div>}</Card>
-      <Card className="panel">
+      <Card className={`panel ${canEdit ? "" : "calendar-readonly"}`}>
         <SectionHeading title="Upcoming appointments" description="Times shown in your workspace timezone" />
         {bookings.isLoading ? <SkeletonRows count={5} /> : bookings.error ? <ErrorState error={bookings.error} onRetry={() => bookings.refetch()} /> : !grouped.length ? <EmptyState icon={CalendarDays} title="No appointments yet" description="Connect a calendar and add service event types so your agent can offer real availability." action={<LinkButton to="/app/integrations" variant="secondary">Connect calendar</LinkButton>} /> : <div className="agenda">{grouped.map(([day, items]) => <div className="agenda-day" key={day}><div className="agenda-date"><strong>{new Date(day).toLocaleDateString("en-GB", { day: "2-digit" })}</strong><span>{new Date(day).toLocaleDateString("en-GB", { month: "short", weekday: "short" })}</span></div><div>{items.map((booking) => <div className="booking-row" key={booking.uid}><span className="booking-time">{new Date(booking.start).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</span><i /><div><strong>{booking.attendeeName || booking.title || "Customer appointment"}</strong><small>{booking.attendeeEmail || "Booked by voice agent"}</small></div><Badge tone={statusTone(booking.status || "active")}>{booking.status || "confirmed"}</Badge><div className="row-actions"><Button size="sm" variant="ghost" disabled={calendarAction.isPending} onClick={() => setRescheduleTarget({ uid: booking.uid, start: booking.start })}>Move</Button><button aria-label="Cancel appointment" className="icon-button danger-icon" disabled={calendarAction.isPending} onClick={() => setCancelUid(booking.uid)}><XCircle size={17} /></button></div></div>)}</div></div>)}</div>}
       </Card>
-      <ConfirmDialog open={Boolean(cancelUid)} title="Cancel this appointment?" description="This updates the connected live calendar immediately and cannot be undone from Robinexis." confirmLabel="Cancel appointment" busy={calendarAction.isPending} onClose={() => setCancelUid(null)} onConfirm={() => { if (cancelUid) calendarAction.mutate({ uid: cancelUid, action: "cancel" }, { onSuccess: () => setCancelUid(null) }); }} />
-      <RescheduleDialog target={rescheduleTarget} busy={calendarAction.isPending} onClose={() => setRescheduleTarget(null)} onConfirm={(newStart) => { if (rescheduleTarget) calendarAction.mutate({ uid: rescheduleTarget.uid, action: "reschedule", newStart }, { onSuccess: () => setRescheduleTarget(null) }); }} />
+      {canEdit && <ConfirmDialog open={Boolean(cancelUid)} title="Cancel this appointment?" description="This updates the connected live calendar immediately and cannot be undone from Robinexis." confirmLabel="Cancel appointment" busy={calendarAction.isPending} onClose={() => setCancelUid(null)} onConfirm={() => { if (cancelUid) calendarAction.mutate({ uid: cancelUid, action: "cancel" }, { onSuccess: () => setCancelUid(null) }); }} />}
+      {canEdit && <RescheduleDialog target={rescheduleTarget} busy={calendarAction.isPending} onClose={() => setRescheduleTarget(null)} onConfirm={(newStart) => { if (rescheduleTarget) calendarAction.mutate({ uid: rescheduleTarget.uid, action: "reschedule", newStart }, { onSuccess: () => setRescheduleTarget(null) }); }} />}
     </>
   );
 }
@@ -596,6 +637,8 @@ export function KnowledgePage() {
 }
 
 function KnowledgeContent({ clientId }: { clientId: string }) {
+  const { actor } = useSession();
+  const canEdit = actor?.role === "operator" || ["owner", "manager"].includes(actor?.clientRoles[clientId] || "");
   const [adding, setAdding] = useState(false);
   const [searchText, setSearchText] = useState("");
   const [sourceFile, setSourceFile] = useState<File | null>(null);
@@ -613,8 +656,8 @@ function KnowledgeContent({ clientId }: { clientId: string }) {
   const search = useMutation({ mutationFn: () => api.searchKnowledge(clientId, searchText), onError: (error) => push({ title: "Search failed", message: error.message, tone: "error" }) });
   return (
     <>
-      <PageHeader eyebrow="Knowledge" title="Give your agent the right answers" description="Add approved sources, keep facts current, and test what the agent can retrieve." actions={<Button onClick={() => setAdding((value) => !value)}><Plus size={15} /> Add source</Button>} />
-      <div className="knowledge-grid">
+      <PageHeader eyebrow="Knowledge" title="Give your agent the right answers" description={canEdit ? "Add approved sources, keep facts current, and test what the agent can retrieve." : "Review approved sources and test what the agent can retrieve."} actions={canEdit ? <Button onClick={() => setAdding((value) => !value)}><Plus size={15} /> Add source</Button> : undefined} />
+      <div className={`knowledge-grid ${canEdit ? "" : "knowledge-readonly"}`}>
         <div>
           {adding && <Card className="form-card inline-create"><SectionHeading title="Add a knowledge source" description="Upload TXT, Markdown, or a text-based PDF (maximum 5 MB), or paste approved content. Never include credentials." /><form onSubmit={handleSubmit((values) => { if (!sourceFile && !values.content?.trim()) { push({ title: "Add some knowledge", message: "Choose a file or paste approved content.", tone: "error" }); return; } create.mutate(values); })}><div className="form-grid"><Field label="Title" error={errors.title?.message}><input placeholder="Services & pricing" {...register("title")} /></Field><Field label="Source label or URL" error={errors.source?.message}><input placeholder="Internal handbook" {...register("source")} /></Field></div><Field label="Upload source"><input type="file" accept=".txt,.md,.markdown,.pdf,text/plain,text/markdown,application/pdf" onChange={(event) => { const file = event.target.files?.[0] || null; if (file && file.size > 5 * 1024 * 1024) { push({ title: "File is too large", message: "Knowledge files are limited to 5 MB.", tone: "error" }); event.target.value = ""; setSourceFile(null); return; } setSourceFile(file); }} /></Field><Field label="Or paste content"><textarea rows={6} placeholder="Paste approved knowledge…" {...register("content")} /></Field><div className="form-actions"><Button variant="ghost" type="button" onClick={() => { setAdding(false); setSourceFile(null); }}>Cancel</Button><Button disabled={create.isPending}>{create.isPending ? "Indexing…" : "Add & index"}</Button></div></form></Card>}
           <Card className="panel"><SectionHeading title="Sources" description={`${documents.data?.length || 0} document${documents.data?.length === 1 ? "" : "s"} available to your agent`} />{documents.isLoading ? <SkeletonRows count={5} /> : documents.error ? <ErrorState error={documents.error} onRetry={() => documents.refetch()} /> : !documents.data?.length ? <EmptyState icon={BookOpen} title="Your knowledge base is empty" description="Add a website page, service guide, or approved FAQ so your agent can answer with confidence." action={<Button onClick={() => setAdding(true)}><Plus size={15} /> Add first source</Button>} /> : <div className="document-list">{documents.data.map((document) => <div key={document.id}><span className="document-icon"><FileText /></span><div><strong>{document.title}</strong><small>{document.source || "Manual content"} · {document.chunkCount || 0} sections</small></div><Badge tone={statusTone(document.status)}>{document.status || "ready"}</Badge><button aria-label={`Delete ${document.title}`} className="icon-button danger-icon" onClick={() => setDeleteTarget({ id: document.id, title: document.title })}><Trash2 size={16} /></button></div>)}</div>}</Card>
@@ -633,15 +676,11 @@ export function IntegrationsPage() {
 function IntegrationsContent({ clientId }: { clientId: string }) {
   const status = useQuery({ queryKey: ["integrations", clientId], queryFn: () => api.integrations(clientId), retry: false });
   const known = [
-    { id: "twilio", name: "Twilio", description: "Phone numbers, inbound and outbound calling", icon: PhoneCall },
+    { id: "twilio", name: "Twilio", description: "Phone numbers routed directly into the live voice agent", icon: PhoneCall },
     { id: "calcom", name: "Cal.com", description: "Live availability and appointment booking", icon: CalendarDays },
-    { id: "elevenlabs", name: "ElevenLabs", description: "Warm, expressive voice generation", icon: Activity },
-    { id: "groq", name: "Groq", description: "Fast speech understanding and reasoning", icon: Zap },
-    { id: "stripe", name: "Stripe", description: "Plan, subscription and usage status", icon: CircleDollarSign },
+    { id: "elevenlabs", name: "ElevenLabs", description: "Realtime conversation, interruption and voice", icon: Activity },
     { id: "gemini", name: "Gemini", description: "Knowledge embeddings and semantic retrieval", icon: BookOpen },
     { id: "database", name: "Postgres + pgvector", description: "Persistent clients, calls and indexed knowledge", icon: Database },
-    { id: "redis", name: "Redis", description: "Live call state and concurrency reservations", icon: Database },
-    { id: "gateway", name: "Voice gateway", description: "Twilio media streaming and real-time orchestration", icon: Cloud },
   ];
   const byId = new Map((status.data || []).map((item) => [item.id.toLowerCase(), item]));
   return (
@@ -649,17 +688,80 @@ function IntegrationsContent({ clientId }: { clientId: string }) {
       <PageHeader eyebrow="Integrations" title="Connect the tools behind the conversation" description="Robinexis keeps credentials server-side. This page shows connection health, never secret values." />
       {status.error && <div className="notice notice-error"><div><XCircle /><span><strong>Connection status unavailable.</strong> {status.error.message}</span></div><button onClick={() => status.refetch()}>Retry</button></div>}
       <div className="integration-grid">{known.map(({ id, name, description, icon: Icon }) => { const item = byId.get(id); const connected = item?.connected || false; return <Card className="integration-card" key={id}><div className={`integration-icon integration-${id}`}><Icon /></div><div><h3>{name}</h3><p>{item?.detail || description}</p></div><Badge tone={connected ? "success" : "neutral"}>{status.isLoading ? "Checking…" : connected ? "Connected" : "Needs setup"}</Badge><a className="button button-secondary button-sm" href="mailto:hello@robinexis.com?subject=Robinexis%20integration%20setup">Configure server-side</a></Card>; })}</div>
-      <Card className="panel deferred-integration"><div className="deferred-row"><Database /><div><strong>External CRM adapter</strong><p>Call notes are stored locally. GoHighLevel or another CRM can be connected when an adapter is selected.</p></div><Badge tone="neutral">Deferred</Badge></div></Card>
       <Card className="security-strip"><KeyRound /><div><strong>Secrets stay out of the browser</strong><p>API keys and OAuth credentials are configured in the deployment environment. The frontend only receives redacted connection status.</p></div><ShieldCheck /></Card>
     </>
   );
 }
 
 export function TeamPage() {
+  const { activeClientId, activeClient } = useClient();
+  const { actor } = useSession();
+  const { push } = useToast();
+  const queryClient = useQueryClient();
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState<"owner" | "manager" | "viewer">("viewer");
+  const memberships = useQuery({
+    queryKey: ["memberships", activeClientId],
+    queryFn: () => api.memberships(activeClientId!),
+    enabled: Boolean(activeClientId),
+    retry: false,
+  });
+  const canAdminister =
+    actor?.role === "operator" ||
+    (activeClientId ? actor?.clientRoles[activeClientId] === "owner" : false);
+  const add = useMutation({
+    mutationFn: () => api.addMembership(activeClientId!, email.trim(), role),
+    onSuccess: async () => {
+      setEmail("");
+      await queryClient.invalidateQueries({ queryKey: ["memberships", activeClientId] });
+      push({ title: "Workspace access added", message: "They can now sign in with this email.", tone: "success" });
+    },
+    onError: (error) => push({ title: "Could not add access", message: error.message, tone: "error" }),
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => api.deleteMembership(activeClientId!, id),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["memberships", activeClientId] });
+      push({ title: "Workspace access removed", tone: "success" });
+    },
+    onError: (error) => push({ title: "Could not remove access", message: error.message, tone: "error" }),
+  });
+  if (!activeClientId) return <EmptyState title="No workspace selected" description="Select a client before managing access." />;
   return (
     <>
-      <PageHeader eyebrow="Team" title="Bring your operators together" description="Control who can review calls, tune agents, and publish changes." actions={<Button disabled><UserPlus size={15} /> Invite member</Button>} />
-      <Card className="panel"><div className="team-row"><span className="profile-avatar large">RE</span><div><strong>Robinexis admin</strong><small>Current session</small></div><span>Administrator</span><Badge tone="success">Active</Badge><button className="icon-button"><MoreHorizontal /></button></div><EmptyState icon={Users} title="Team invitations are coming soon" description="Access is currently limited to the server allowlist (ADMIN_EMAILS) after a Supabase sign-in. Role-based invitations are not enabled yet." /></Card>
+      <PageHeader eyebrow="Workspace access" title={`The people behind ${activeClient?.businessName || "this workspace"}`} description="Control who can view calls, update the receptionist, and manage workspace access." />
+      {canAdminister && (
+        <Card className="form-card team-access-form">
+          <SectionHeading title="Add an existing user" description="The email can sign in with a Supabase magic link after access is added." />
+          <form onSubmit={(event) => { event.preventDefault(); if (email.trim()) add.mutate(); }}>
+            <Field label="Work email"><input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="owner@salon.co.uk" /></Field>
+            <Field label="Workspace role">
+              <select value={role} onChange={(event) => setRole(event.target.value as typeof role)}>
+                <option value="owner">Owner — access and workspace control</option>
+                <option value="manager">Manager — edit and publish</option>
+                <option value="viewer">Viewer — read only</option>
+              </select>
+            </Field>
+            <Button disabled={add.isPending}><UserPlus size={15} /> {add.isPending ? "Adding…" : "Add access"}</Button>
+          </form>
+        </Card>
+      )}
+      <Card className="panel">
+        <SectionHeading title="Workspace members" description={`${memberships.data?.length || 0} people have direct access.`} />
+        {memberships.isLoading ? <SkeletonRows count={3} /> : memberships.error ? <ErrorState error={memberships.error} onRetry={() => memberships.refetch()} /> : memberships.data?.length ? (
+          <div className="team-list">
+            {memberships.data.map((member) => (
+              <div className="team-row" key={member.id}>
+                <span className="profile-avatar large">{member.email.slice(0, 2).toUpperCase()}</span>
+                <div><strong>{member.email}</strong><small>Added {formatDate(member.createdAt, { dateStyle: "medium" })}</small></div>
+                <span className="capitalize">{member.role}</span>
+                <Badge tone="success">Active</Badge>
+                {canAdminister && <button className="icon-button danger-icon" aria-label={`Remove ${member.email}`} onClick={() => remove.mutate(member.id)} disabled={remove.isPending}><Trash2 /></button>}
+              </div>
+            ))}
+          </div>
+        ) : <EmptyState icon={Users} title="No salon users yet" description="Robinexis operators still have platform access. Add the first salon owner above to enable their workspace login." />}
+      </Card>
     </>
   );
 }
@@ -691,6 +793,8 @@ function BillingContent({ clientId }: { clientId: string }) {
 
 export function SettingsPage() {
   const { activeClientId } = useClient();
+  const { actor } = useSession();
+  const canEdit = actor?.role === "operator" || (activeClientId ? ["owner", "manager"].includes(actor?.clientRoles[activeClientId] || "") : false);
   const queryClient = useQueryClient();
   const { push } = useToast();
   const client = useQuery({ queryKey: ["client", activeClientId], queryFn: () => api.client(activeClientId!), enabled: Boolean(activeClientId), retry: false });
@@ -698,21 +802,21 @@ export function SettingsPage() {
   const form = useForm<z.infer<typeof settingsSchema>>({ values: { businessName: client.data?.businessName || "", location: client.data?.location || "", email: client.data?.email || "", phone: client.data?.phone || "" }, resolver: zodResolver(settingsSchema) });
   const save = useMutation({
     mutationFn: (values: z.infer<typeof settingsSchema>) => api.updateClient(activeClientId!, values),
-    onSuccess: async () => { await Promise.all([queryClient.invalidateQueries({ queryKey: ["client", activeClientId] }), queryClient.invalidateQueries({ queryKey: ["clients"] })]); push({ title: "Settings saved", message: "Republish your agent if these details affect conversations.", tone: "success" }); },
+    onSuccess: async () => { await Promise.all([queryClient.invalidateQueries({ queryKey: ["client", activeClientId] }), queryClient.invalidateQueries({ queryKey: ["clients"] })]); push({ title: "Settings saved", message: "Approve a new workspace version if these details affect conversations.", tone: "success" }); },
     onError: (error) => push({ title: "Save failed", message: error.message, tone: "error" }),
   });
-  if (!activeClientId) return <EmptyState title="No client selected" description="Create or select a client workspace before changing settings." action={<LinkButton to="/app/onboarding">Create client</LinkButton>} />;
+  if (!activeClientId) return <EmptyState title="No client selected" description="Select a client workspace before changing settings." action={actor?.role === "operator" ? <LinkButton to="/app/onboarding">Create client</LinkButton> : undefined} />;
   if (client.isLoading) return <LoadingState />;
   if (client.error) return <ErrorState error={client.error} />;
   return (
     <>
       <PageHeader eyebrow="Workspace settings" title="The business behind the voice" description="Manage operational details used across your agents, calls, and reports." />
       <div className="settings-layout">
-        <nav className="settings-nav"><a className="active" href="#business"><Settings2 /> Business profile</a><a href="#security"><ShieldCheck /> Security</a><a href="#developer"><Code2 /> Developer</a></nav>
+        <nav className="settings-nav"><a className="active" href="#business"><Settings2 /> Business profile</a><a href="#security"><ShieldCheck /> Security</a>{actor?.role === "operator" && <a href="#developer"><Code2 /> Developer</a>}</nav>
         <div>
-          <Card className="form-card" id="business"><SectionHeading title="Business profile" description="Changing approved business details marks the current agent configuration as a draft." /><form onSubmit={form.handleSubmit((values) => save.mutate(values))}><div className="form-grid"><Field label="Business name"><input {...form.register("businessName")} /></Field><Field label="Location"><input {...form.register("location")} /></Field><Field label="Public email"><input {...form.register("email")} /></Field><Field label="Public phone"><input {...form.register("phone")} /></Field></div><div className="form-actions"><Button disabled={save.isPending}>{save.isPending ? "Saving…" : "Save changes"}</Button></div></form></Card>
-          <Card className="form-card" id="security"><SectionHeading title="Session security" description="The dashboard stores a short-lived access token for this tab only." /><div className="security-setting"><span><KeyRound /></span><div><strong>Supabase session</strong><p>A signed JWT is sent to the Railway API. The server allowlists operator emails.</p></div><Badge tone="success">Protected</Badge></div></Card>
-          <Card className="form-card" id="developer"><SectionHeading title="API environment" description="Set VITE_API_BASE_URL to the Railway API origin in production." /><div className="code-line"><code>/api/v1</code><button className="icon-button" onClick={() => navigator.clipboard.writeText("/api/v1")}><Copy size={16} /></button></div></Card>
+          <Card className="form-card" id="business"><SectionHeading title="Business profile" description={canEdit ? "Changing approved business details marks the current agent configuration as a draft." : "Your viewer role can review these details but cannot change them."} /><form onSubmit={form.handleSubmit((values) => save.mutate(values))}><fieldset disabled={!canEdit || save.isPending}><div className="form-grid"><Field label="Business name"><input {...form.register("businessName")} /></Field><Field label="Location"><input {...form.register("location")} /></Field><Field label="Public email"><input {...form.register("email")} /></Field><Field label="Public phone"><input {...form.register("phone")} /></Field></div>{canEdit && <div className="form-actions"><Button disabled={save.isPending}>{save.isPending ? "Saving…" : "Save changes"}</Button></div>}</fieldset></form></Card>
+          <Card className="form-card" id="security"><SectionHeading title="Session security" description="The dashboard stores a short-lived access token for this tab only." /><div className="security-setting"><span><KeyRound /></span><div><strong>Supabase session</strong><p>A signed JWT is verified by the Railway API, then restricted to assigned workspaces and roles.</p></div><Badge tone="success">Protected</Badge></div></Card>
+          {actor?.role === "operator" && <Card className="form-card" id="developer"><SectionHeading title="API environment" description="Production dashboard requests use the versioned Railway API." /><div className="code-line"><code>/api/v1</code><button className="icon-button" onClick={() => navigator.clipboard.writeText("/api/v1")}><Copy size={16} /></button></div></Card>}
         </div>
       </div>
     </>

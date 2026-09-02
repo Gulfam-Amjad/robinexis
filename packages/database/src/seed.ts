@@ -119,6 +119,7 @@ export function bladesHairSeed(): ClientConfig {
     email: "info@bladeshair.co.uk",
     transferNumber: process.env.FRONT_DESK_PHONE_NUMBER || "+442079296680",
     voiceId: process.env.ELEVENLABS_VOICE_ID || "L4so9SudEsIYzE9j4qlR",
+    elevenlabsAgentId: "agent_6101m1c3n4wnfsgskgzr13w2gt9s",
     voicePipeline: "elevenlabs-convai",
     hours: "Monday to Friday, 10:00am–7:00pm. Closed weekends unless the team confirms otherwise.",
     prices:

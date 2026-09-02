@@ -106,6 +106,7 @@ export function publicClientView(client: ClientConfig) {
     location: client.location,
     phone: client.phone,
     email: client.email,
+    elevenlabsAgentId: client.elevenlabsAgentId,
     voicePipeline: client.voicePipeline,
     services: client.services,
     staff: client.staff,

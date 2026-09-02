@@ -12,8 +12,11 @@ import type {
   KnowledgeDocument,
   ListResponse,
   PromptVersion,
+  SessionActor,
   TimeseriesPoint,
   Usage,
+  WorkspaceMembership,
+  WorkspaceRole,
 } from "@robinexis/api-contracts";
 
 export const API_KEY_STORAGE = "robinexis_admin_api_key";
@@ -84,6 +87,7 @@ async function fileToBase64(file: File): Promise<string> {
 
 export const api = {
   validateKey: (key: string) => request<BootstrapResponse>("/api/v1/bootstrap", {}, key),
+  session: () => request<SessionActor>("/api/v1/session"),
   bootstrap: (clientId?: string) =>
     request<BootstrapResponse>(`/api/v1/bootstrap${query({ clientId })}`),
   clients: async () => list(await request<ClientSummary[] | ListResponse<ClientSummary>>("/api/v1/clients")),
@@ -131,6 +135,17 @@ export const api = {
     request<Job>("/api/v1/jobs", { method: "POST", body: JSON.stringify(input) }),
   jobAction: (id: string, action: "approve" | "cancel") =>
     request<Job>(`/api/v1/jobs/${encodeURIComponent(id)}/${action}`, { method: "POST" }),
+  memberships: async (clientId: string) =>
+    list(await request<WorkspaceMembership[] | ListResponse<WorkspaceMembership>>(`/api/v1/memberships${query({ clientId })}`)),
+  addMembership: (clientId: string, email: string, role: WorkspaceRole) =>
+    request<WorkspaceMembership>("/api/v1/memberships", {
+      method: "POST",
+      body: JSON.stringify({ clientId, email, role }),
+    }),
+  deleteMembership: (clientId: string, id: string) =>
+    request<{ ok: boolean }>(`/api/v1/memberships/${encodeURIComponent(id)}${query({ clientId })}`, {
+      method: "DELETE",
+    }),
   integrations: async (clientId: string) =>
     list(await request<IntegrationStatus[] | ListResponse<IntegrationStatus>>(`/api/v1/integrations/status${query({ clientId })}`)),
   documents: async (clientId: string) =>

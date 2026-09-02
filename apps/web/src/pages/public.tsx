@@ -134,7 +134,7 @@ export function LoginPage() {
     }
   };
   return (
-    <AuthShell title="Welcome back" copy="Sign in with a magic link. Only allowlisted operators can open the workspace.">
+    <AuthShell title="Welcome back" copy="Sign in with a magic link. Robinexis operators and assigned salon teams can open their workspaces.">
       <form className="auth-form" onSubmit={handleSubmit(submit)}>
         <Field label="Work email" hint="We email a one-time sign-in link. No password is stored here." error={errors.email?.message}>
           <input type="email" autoComplete="email" placeholder="you@company.com" {...register("email")} />
@@ -143,7 +143,7 @@ export function LoginPage() {
         {sent && <div className="form-alert" role="status">Check your inbox for the sign-in link.</div>}
         <Button type="submit" disabled={checking}>{checking ? "Sending link…" : "Email me a sign-in link"} <ArrowRight size={16} /></Button>
       </form>
-      <div className="auth-note"><ShieldCheck size={17} /><p>The API authorises the signed-in email against a server allowlist. The browser never chooses who is an admin.</p></div>
+      <div className="auth-note"><ShieldCheck size={17} /><p>The API verifies the signed-in user and enforces their workspace role. The browser never decides which client data they can access.</p></div>
     </AuthShell>
   );
 }
@@ -188,7 +188,7 @@ function AuthShell({ title, copy, children }: { title: string; copy: string; chi
 export function PricingPage() {
   const plans = [
     { name: "Starter", price: "£149", copy: "For independent businesses ready to stop missing calls.", features: ["One AI receptionist", "150 included minutes", "Booking & call summaries", "Email support"] },
-    { name: "Growth", price: "£299", copy: "For busy teams turning more calls into appointments.", features: ["Everything in Starter", "500 included minutes", "Outbound follow-ups", "Analytics & custom handoffs"], featured: true },
+    { name: "Growth", price: "£299", copy: "For busy teams turning more calls into appointments.", features: ["Everything in Starter", "500 included minutes", "Advanced call insights", "Analytics & custom handoffs"], featured: true },
     { name: "Pro", price: "Let’s talk", copy: "For multi-location teams with more complex workflows.", features: ["Multiple locations", "Custom integrations", "Priority onboarding", "Dedicated optimisation"] },
   ];
   return (

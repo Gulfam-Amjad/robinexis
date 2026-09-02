@@ -1,4 +1,16 @@
-export const BLADES_RECEPTIONIST_DEMO = {
+export interface ReceptionistDemoConfig {
+  agentId: string;
+  agentName: string;
+  businessName: string;
+  location: string;
+  phone: string;
+  phoneDisplay: string;
+  sharePath?: string;
+  greeting?: string;
+  scenarios: readonly string[];
+}
+
+export const BLADES_RECEPTIONIST_DEMO: ReceptionistDemoConfig = {
   agentId: "agent_6101m1c3n4wnfsgskgzr13w2gt9s",
   agentName: "Sophie",
   businessName: "Blades Hair",
@@ -13,7 +25,29 @@ export const BLADES_RECEPTIONIST_DEMO = {
     "Can you find me an appointment next Tuesday afternoon?",
     "I'd like to speak to someone about a restyle.",
   ],
-} as const;
+};
+
+export function workspaceReceptionistDemo(input: {
+  agentId: string;
+  businessName: string;
+  location?: string;
+  phone?: string;
+}): ReceptionistDemoConfig {
+  return {
+    agentId: input.agentId,
+    agentName: "Your receptionist",
+    businessName: input.businessName,
+    location: input.location || "Business workspace",
+    phone: input.phone || "",
+    phoneDisplay: input.phone || "Phone number not assigned",
+    scenarios: [
+      "What time are you open?",
+      "What services do you offer?",
+      "Can you check your next available appointment?",
+      "I'd like to speak to a person.",
+    ],
+  };
+}
 
 export type ReceptionistStatus =
   | "idle"

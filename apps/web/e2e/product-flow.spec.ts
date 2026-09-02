@@ -6,9 +6,10 @@ const client = {
   businessName: "Demo Salon",
   published: false,
   serviceStatus: "trialing",
+  elevenlabsAgentId: "agent_test_demo",
 };
 
-async function openOperatorSession(page: Page) {
+async function openWorkspaceSession(page: Page, role: "operator" | "salon" = "operator") {
   await page.addInitScript(() => {
     sessionStorage.setItem("robinexis_admin_api_key", "test-admin-key");
     sessionStorage.setItem("robinexis_active_client", "client_demo");
@@ -17,6 +18,12 @@ async function openOperatorSession(page: Page) {
   await page.route("**/api/v1/**", (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
+    if (path === "/api/v1/session") return route.fulfill({ json: {
+      email: role === "operator" ? "operator@robinexis.test" : "owner@demo-salon.test",
+      role,
+      clientRoles: role === "salon" ? { [client.id]: "owner" } : {},
+      capabilities: { administerPlatform: role === "operator", createClients: role === "operator" },
+    } });
     if (path === "/api/v1/clients") return route.fulfill({ json: { items: [client] } });
     if (path === "/api/v1/bootstrap") return route.fulfill({ json: {
       clients: [client],
@@ -31,6 +38,7 @@ async function openOperatorSession(page: Page) {
     if (path === "/api/v1/analytics/timeseries") return route.fulfill({ json: { items: [] } });
     if (path === "/api/v1/calendar/bookings" || path === "/api/v1/calendar/slots" || path === "/api/v1/jobs" || path === "/api/v1/knowledge/documents") return route.fulfill({ json: { items: [] } });
     if (path === "/api/v1/integrations/status") return route.fulfill({ json: { items: [{ id: "calcom", name: "Cal.com", connected: true }] } });
+    if (path === "/api/v1/memberships") return route.fulfill({ json: { items: role === "salon" ? [{ id: "member_1", clientId: client.id, email: "owner@demo-salon.test", role: "owner", createdAt: "2026-09-01T00:00:00.000Z" }] : [] } });
     if (path === "/api/v1/usage") return route.fulfill({ json: { clientId: client.id, month: "2026-08", inboundMinutes: 10, outboundMinutes: 2 } });
     if (path === `/api/v1/clients/${client.id}`) return route.fulfill({ json: { ...client, role: "AI receptionist", tone: "Warm and concise", publishedFacts: [], services: [] } });
     return route.fulfill({ status: 404, json: { error: "not_found" } });
@@ -53,17 +61,17 @@ test("public Blades receptionist is branded and needs no login", async ({ page }
 });
 
 test("operator can open the data-backed overview", async ({ page }) => {
-  await openOperatorSession(page);
+  await openWorkspaceSession(page);
 
   await page.goto("/app");
   await expect(page.getByRole("heading", { name: /Demo Salon is in good hands/i })).toBeVisible();
   await expect(page.getByText("12", { exact: true })).toBeVisible();
-  await expect(page.getByText("Needs setup")).toBeVisible();
+  await expect(page.getByText("Needs setup").first()).toBeVisible();
 });
 
 test("all operator areas render against their backend contracts", async ({ page }) => {
   test.setTimeout(60_000);
-  await openOperatorSession(page);
+  await openWorkspaceSession(page);
   const routes = [
     ["/app/agents", "Your reception team"],
     [`/app/agents/${client.id}`, "AI receptionist"],
@@ -71,10 +79,9 @@ test("all operator areas render against their backend contracts", async ({ page 
     ["/app/calls", "Every conversation, accounted for"],
     ["/app/analytics", "Know what’s happening on the phone"],
     ["/app/calendar", "Appointments in one calm view"],
-    ["/app/campaigns", "Thoughtful follow-up, at the right time"],
     ["/app/knowledge", "Give your agent the right answers"],
     ["/app/integrations", "Connect the tools behind the conversation"],
-    ["/app/team", "Bring your operators together"],
+    ["/app/team", "The people behind Demo Salon"],
     ["/app/billing", "A plan that grows with every call"],
     ["/app/settings", "The business behind the voice"],
   ] as const;
@@ -83,4 +90,19 @@ test("all operator areas render against their backend contracts", async ({ page 
     await page.goto(path);
     await expect(page.getByRole("heading", { name: heading })).toBeVisible();
   }
+});
+
+test("salon owners see only their workspace experience", async ({ page }) => {
+  await openWorkspaceSession(page, "salon");
+  await page.goto("/app");
+  await expect(page.getByText("Salon owner", { exact: true })).toBeVisible();
+  await expect(page.getByText("Demo Salon", { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("link", { name: "Campaigns" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Billing" })).toHaveCount(0);
+
+  await page.goto("/app/team");
+  await expect(page.locator("#main-content").getByText("owner@demo-salon.test", { exact: true })).toBeVisible();
+
+  await page.goto("/app/billing");
+  await expect(page).toHaveURL(/\/app$/);
 });

@@ -14,6 +14,12 @@ import {
   publicClientView,
 } from "@robinexis/integrations";
 import { GeminiEmbeddingProvider, KnowledgeService } from "@robinexis/knowledge";
+import {
+  canAccessClient,
+  canAdministerPlatform,
+  canManageClient,
+  type AuthenticatedActor,
+} from "./auth.js";
 
 export type ProductSend = (
   res: http.ServerResponse,
@@ -57,6 +63,7 @@ export interface ProductRouteContext {
   res: http.ServerResponse;
   url: URL;
   store: PlatformStore;
+  actor: AuthenticatedActor;
   send: ProductSend;
   readRaw: (req: http.IncomingMessage) => Promise<Buffer>;
 }
@@ -178,8 +185,8 @@ function analytics(calls: CallSession[]) {
 function integrationList(client: ClientConfig, calendar: Record<string, unknown>) {
   const now = new Date().toISOString();
   return [
-    { id: "twilio", name: "Twilio", connected: Boolean(client.phone), detail: "Inbound calls route directly to ElevenLabs", lastCheckedAt: now },
-    { id: "elevenlabs", name: "ElevenLabs", connected: client.voicePipeline === "elevenlabs-convai", detail: "Realtime speech, barge-in and agent conversation", lastCheckedAt: now },
+    { id: "twilio", name: "Twilio", connected: Boolean(client.inboundNumbers.length), detail: client.inboundNumbers.length ? "Inbound numbers route directly to ElevenLabs" : "No inbound number assigned", lastCheckedAt: now },
+    { id: "elevenlabs", name: "ElevenLabs", connected: client.voicePipeline === "elevenlabs-convai" && Boolean(client.elevenlabsAgentId), detail: client.elevenlabsAgentId ? "Realtime speech, barge-in and agent conversation" : "Assign this workspace's ElevenLabs agent ID", lastCheckedAt: now },
     { id: "calcom", name: "Cal.com", connected: Boolean(calendar.ok), detail: calendar.ok ? `${calendar.slotCount || 0} slots available` : String(calendar.error || "Not connected"), lastCheckedAt: String(calendar.probedAt || now) },
     { id: "gemini", name: "Gemini", connected: Boolean(process.env.GEMINI_API_KEY), detail: "Knowledge embeddings", lastCheckedAt: now },
     { id: "stripe", name: "Stripe", connected: Boolean(process.env.STRIPE_SECRET_KEY), detail: "Billing webhook", lastCheckedAt: now },
@@ -251,16 +258,41 @@ function createClient(body: Partial<ClientConfig>): ClientConfig {
 
 async function requireClient(ctx: ProductRouteContext, id: string): Promise<ClientConfig | undefined> {
   const client = id ? await ctx.store.getClient(id) : undefined;
-  if (!client) ctx.send(ctx.res, 404, { error: "client_not_found" });
+  if (!client || !canAccessClient(ctx.actor, id)) {
+    ctx.send(ctx.res, 404, { error: "client_not_found" });
+    return undefined;
+  }
+  return client;
+}
+
+async function requireManageClient(ctx: ProductRouteContext, id: string): Promise<ClientConfig | undefined> {
+  const client = await requireClient(ctx, id);
+  if (client && !canManageClient(ctx.actor, id)) {
+    ctx.send(ctx.res, 403, { error: "workspace_write_forbidden" });
+    return undefined;
+  }
   return client;
 }
 
 export async function handleProductRoute(ctx: ProductRouteContext): Promise<boolean> {
-  const { req, res, url, store, send } = ctx;
+  const { req, res, url, store, actor, send } = ctx;
   const route = url.pathname.slice("/api/v1".length) || "/";
 
+  if (route === "/session" && req.method === "GET") {
+    send(res, 200, {
+      email: actor.email,
+      role: actor.role,
+      clientRoles: actor.clientRoles,
+      capabilities: {
+        administerPlatform: canAdministerPlatform(actor),
+        createClients: canAdministerPlatform(actor),
+      },
+    });
+    return true;
+  }
+
   if (route === "/bootstrap" && req.method === "GET") {
-    const clients = await store.listClients();
+    const clients = (await store.listClients()).filter((item) => canAccessClient(actor, item.id));
     const selected = clients.find((item) => item.id === clientId(url)) || clients[0];
     const calls = selected ? await store.listCallsForClient(selected.id, 8) : [];
     const calendar = selected ? await probeCalcomForClient({ client: selected }) : {};
@@ -272,15 +304,25 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       summary: analytics(calls),
       recentCalls: calls,
       integrations: selected ? integrationList(selected, calendar) : [],
+      actor: {
+        email: actor.email,
+        role: actor.role,
+        clientRoles: actor.clientRoles,
+      },
     });
     return true;
   }
 
   if (route === "/clients" && req.method === "GET") {
-    send(res, 200, { items: (await store.listClients()).map(safeEditableClient) });
+    const clients = (await store.listClients()).filter((item) => canAccessClient(actor, item.id));
+    send(res, 200, { items: clients.map(safeEditableClient) });
     return true;
   }
   if (route === "/clients" && req.method === "POST") {
+    if (!canAdministerPlatform(actor)) {
+      send(res, 403, { error: "platform_admin_required" });
+      return true;
+    }
     try {
       const body = await readJson<Partial<ClientConfig>>(ctx);
       const created = createClient(body);
@@ -299,7 +341,7 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
     return true;
   }
   if (clientMatch && req.method === "PATCH") {
-    const client = await requireClient(ctx, clientMatch[1]);
+    const client = await requireManageClient(ctx, clientMatch[1]);
     if (!client) return true;
     const body = await readJson<Partial<ClientConfig> & { calendar?: Record<string, unknown> }>(ctx);
     if (body.calendar && ("apiKey" in body.calendar || "token" in body.calendar || "secret" in body.calendar)) {
@@ -307,8 +349,31 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       return true;
     }
     const immutable = new Set(["id", "serviceStatus", "stripeCustomerId", "stripeSubscriptionId"]);
+    const salonEditable = new Set([
+      "businessName",
+      "role",
+      "greeting",
+      "tone",
+      "location",
+      "phone",
+      "email",
+      "transferNumber",
+      "services",
+      "staff",
+      "hours",
+      "prices",
+      "policies",
+      "publishedFacts",
+      "unknownTopics",
+      "calendarNoteMode",
+      "callingWindow",
+      "firstCampaignRequiresApproval",
+    ]);
     for (const [key, value] of Object.entries(body)) {
-      if (!immutable.has(key) && value !== undefined) {
+      const permitted =
+        !immutable.has(key) &&
+        (canAdministerPlatform(actor) || salonEditable.has(key));
+      if (permitted && value !== undefined) {
         (client as unknown as Record<string, unknown>)[key] = value;
       }
     }
@@ -320,7 +385,7 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
 
   const publishMatch = route.match(/^\/clients\/([^/]+)\/publish$/);
   if (publishMatch && req.method === "POST") {
-    const client = await requireClient(ctx, publishMatch[1]);
+    const client = await requireManageClient(ctx, publishMatch[1]);
     if (!client) return true;
     const latest = await store.latestPrompt(client.id);
     const prompt = {
@@ -344,6 +409,7 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
 
   const versionsMatch = route.match(/^\/clients\/([^/]+)\/prompt-versions$/);
   if (versionsMatch && req.method === "GET") {
+    if (!(await requireClient(ctx, versionsMatch[1]))) return true;
     const extended = store as ExtendedStore;
     const versions = extended.listPromptVersions
       ? await extended.listPromptVersions(versionsMatch[1])
@@ -370,7 +436,11 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
   const callMatch = route.match(/^\/calls\/([^/]+)$/);
   if (callMatch && req.method === "GET") {
     const call = await store.getCall(callMatch[1]);
-    if (!call || (clientId(url) && call.clientId !== clientId(url))) {
+    if (
+      !call ||
+      !canAccessClient(actor, call.clientId) ||
+      (clientId(url) && call.clientId !== clientId(url))
+    ) {
       send(res, 404, { error: "call_not_found" });
     } else {
       send(res, 200, call);
@@ -471,7 +541,7 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
   const calendarAction = route.match(/^\/calendar\/bookings\/([^/]+)\/(reschedule|cancel)$/);
   if (calendarAction && req.method === "POST") {
     const body = await readJson<{ clientId?: string; start?: string; newStart?: string; confirmed?: boolean }>(ctx);
-    const client = await requireClient(ctx, body.clientId || clientId(url));
+    const client = await requireManageClient(ctx, body.clientId || clientId(url));
     if (!client) return true;
     if (body.confirmed !== true) {
       send(res, 400, { error: "explicit_confirmation_required" });
@@ -495,16 +565,21 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
 
   if (route === "/jobs" && req.method === "GET") {
     const id = clientId(url);
+    if (!id && !canAdministerPlatform(actor)) {
+      send(res, 400, { error: "clientId_required" });
+      return true;
+    }
     if (id && !(await requireClient(ctx, id))) return true;
     send(res, 200, { items: await store.listJobs(id || undefined) });
     return true;
   }
   if (route === "/jobs" && req.method === "POST") {
     const body = await readJson<Partial<OutboundJob> & { clientId?: string; contactPhone?: string }>(ctx);
-    if (!body.clientId || !body.contactPhone || !(await store.getClient(body.clientId))) {
+    if (!body.clientId || !body.contactPhone) {
       send(res, 400, { error: "valid_clientId_and_contactPhone_required" });
       return true;
     }
+    if (!(await requireManageClient(ctx, body.clientId))) return true;
     const job: OutboundJob = {
       id: newId("job_"),
       clientId: body.clientId,
@@ -528,7 +603,11 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
   if (jobAction && req.method === "POST") {
     const job = await store.getJob(jobAction[1]);
     const expectedClient = clientId(url);
-    if (!job || (expectedClient && job.clientId !== expectedClient)) {
+    if (
+      !job ||
+      !canManageClient(actor, job.clientId) ||
+      (expectedClient && job.clientId !== expectedClient)
+    ) {
       send(res, 404, { error: "job_not_found" });
       return true;
     }
@@ -542,6 +621,76 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       job.status = "cancelled";
     }
     send(res, 200, job);
+    return true;
+  }
+
+  if (route === "/memberships" && req.method === "GET") {
+    const id = clientId(url);
+    if (!(await requireClient(ctx, id))) return true;
+    send(res, 200, { items: await store.listMembershipsForClient(id) });
+    return true;
+  }
+
+  if (route === "/memberships" && req.method === "POST") {
+    const body = await readJson<{
+      clientId?: string;
+      email?: string;
+      role?: "owner" | "manager" | "viewer";
+    }>(ctx);
+    const id = String(body.clientId || "");
+    if (!(await requireClient(ctx, id))) return true;
+    const canAdministerWorkspace =
+      canAdministerPlatform(actor) || actor.clientRoles[id] === "owner";
+    if (!canAdministerWorkspace) {
+      send(res, 403, { error: "workspace_owner_required" });
+      return true;
+    }
+    const email = String(body.email || "").trim().toLowerCase();
+    const role = body.role || "viewer";
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !["owner", "manager", "viewer"].includes(role)) {
+      send(res, 400, { error: "valid_email_and_role_required" });
+      return true;
+    }
+    const existing = await store.listMembershipsForClient(id);
+    if (!existing.length && role !== "owner") {
+      send(res, 400, { error: "first_membership_must_be_owner" });
+      return true;
+    }
+    const membership = {
+      id: newId("member_"),
+      clientId: id,
+      email,
+      role,
+      createdAt: new Date().toISOString(),
+    };
+    await store.upsertMembership(membership);
+    const saved = (await store.listMembershipsForClient(id)).find((item) => item.email === email);
+    send(res, 201, saved || membership);
+    return true;
+  }
+
+  const membershipMatch = route.match(/^\/memberships\/([^/]+)$/);
+  if (membershipMatch && req.method === "DELETE") {
+    const id = clientId(url);
+    if (!(await requireClient(ctx, id))) return true;
+    const canAdministerWorkspace =
+      canAdministerPlatform(actor) || actor.clientRoles[id] === "owner";
+    if (!canAdministerWorkspace) {
+      send(res, 403, { error: "workspace_owner_required" });
+      return true;
+    }
+    const memberships = await store.listMembershipsForClient(id);
+    const selected = memberships.find((item) => item.id === membershipMatch[1]);
+    if (!selected) {
+      send(res, 404, { error: "membership_not_found" });
+      return true;
+    }
+    if (selected.role === "owner" && memberships.filter((item) => item.role === "owner").length === 1) {
+      send(res, 409, { error: "last_workspace_owner" });
+      return true;
+    }
+    await store.deleteMembership(id, selected.id);
+    send(res, 200, { ok: true });
     return true;
   }
 
@@ -586,7 +735,7 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       content?: string;
       contentBase64?: string;
     }>(ctx);
-    if (!body.clientId || !(await requireClient(ctx, body.clientId))) return true;
+    if (!body.clientId || !(await requireManageClient(ctx, body.clientId))) return true;
     if (!body.title || (!body.content && !body.contentBase64)) {
       send(res, 400, { error: "title_and_content_required" });
       return true;
@@ -623,7 +772,7 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
   const knowledgeDocumentMatch = route.match(/^\/knowledge\/documents\/([^/]+)$/);
   if (knowledgeDocumentMatch && req.method === "DELETE") {
     const id = clientId(url);
-    if (!(await requireClient(ctx, id))) return true;
+    if (!(await requireManageClient(ctx, id))) return true;
     const deleted = await store.deleteKnowledgeDocument(id, knowledgeDocumentMatch[1]);
     send(res, deleted ? 200 : 404, deleted ? { ok: true } : { error: "document_not_found" });
     return true;

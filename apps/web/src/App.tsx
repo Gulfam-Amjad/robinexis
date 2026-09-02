@@ -22,7 +22,6 @@ const CallsPage = lazy(() => appPages().then((m) => ({ default: m.CallsPage })))
 const CallDetailPage = lazy(() => appPages().then((m) => ({ default: m.CallDetailPage })));
 const AnalyticsPage = lazy(() => appPages().then((m) => ({ default: m.AnalyticsPage })));
 const CalendarPage = lazy(() => appPages().then((m) => ({ default: m.CalendarPage })));
-const CampaignsPage = lazy(() => appPages().then((m) => ({ default: m.CampaignsPage })));
 const KnowledgePage = lazy(() => appPages().then((m) => ({ default: m.KnowledgePage })));
 const IntegrationsPage = lazy(() => appPages().then((m) => ({ default: m.IntegrationsPage })));
 const TeamPage = lazy(() => appPages().then((m) => ({ default: m.TeamPage })));
@@ -30,12 +29,21 @@ const BillingPage = lazy(() => appPages().then((m) => ({ default: m.BillingPage 
 const SettingsPage = lazy(() => appPages().then((m) => ({ default: m.SettingsPage })));
 
 function RequireSession() {
-  const { apiKey } = useSession();
+  const { apiKey, actor, actorLoading } = useSession();
   const location = useLocation();
-  if (AUTH_REQUIRED && !apiKey) {
+  if (AUTH_REQUIRED && apiKey && actorLoading) {
+    return <div className="not-found">Verifying workspace access…</div>;
+  }
+  if (AUTH_REQUIRED && (!apiKey || !actor)) {
     return <Navigate to="/login" replace state={{ from: `${location.pathname}${location.search}` }} />;
   }
   return <Outlet />;
+}
+
+function RequireOperator() {
+  const { actor, actorLoading } = useSession();
+  if (actorLoading) return <div className="not-found">Loading workspace…</div>;
+  return actor?.role === "operator" ? <Outlet /> : <Navigate to="/app" replace />;
 }
 
 function NotFoundPage() {
@@ -58,21 +66,22 @@ export default function App() {
         <Route element={<RequireSession />}>
           <Route path="/app" element={<AppShell />}>
             <Route index element={<OverviewPage />} />
-            <Route path="onboarding" element={<OnboardingPage />} />
             <Route path="agents" element={<AgentsPage />} />
-            <Route path="agents/new" element={<NewAgentPage />} />
             <Route path="agents/:id" element={<AgentDetailPage />} />
             <Route path="playground" element={<PlaygroundPage />} />
             <Route path="calls" element={<CallsPage />} />
             <Route path="calls/:id" element={<CallDetailPage />} />
             <Route path="analytics" element={<AnalyticsPage />} />
             <Route path="calendar" element={<CalendarPage />} />
-            <Route path="campaigns" element={<CampaignsPage />} />
             <Route path="knowledge" element={<KnowledgePage />} />
             <Route path="integrations" element={<IntegrationsPage />} />
             <Route path="team" element={<TeamPage />} />
-            <Route path="billing" element={<BillingPage />} />
             <Route path="settings" element={<SettingsPage />} />
+            <Route element={<RequireOperator />}>
+              <Route path="onboarding" element={<OnboardingPage />} />
+              <Route path="agents/new" element={<NewAgentPage />} />
+              <Route path="billing" element={<BillingPage />} />
+            </Route>
           </Route>
         </Route>
         <Route path="*" element={<NotFoundPage />} />

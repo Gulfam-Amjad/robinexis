@@ -19,6 +19,7 @@ import type {
   Suppression,
   ToolActionRow,
   UsageCounters,
+  WorkspaceMembership,
 } from "./types.js";
 
 export class PostgresStore implements PlatformStore {
@@ -41,6 +42,13 @@ export class PostgresStore implements PlatformStore {
     }
     return undefined;
   }
+  async getClientByElevenLabsAgentId(agentId: string) {
+    const r = await this.pool.query(
+      "SELECT config FROM clients WHERE config->>'elevenlabsAgentId' = $1 LIMIT 1",
+      [agentId],
+    );
+    return r.rows[0]?.config as ClientConfig | undefined;
+  }
   async listClients() {
     const r = await this.pool.query("SELECT config FROM clients");
     return r.rows.map((row) => row.config as ClientConfig);
@@ -55,6 +63,43 @@ export class PostgresStore implements PlatformStore {
   async getPublishedClient(idOrSlug: string) {
     const c = (await this.getClient(idOrSlug)) ?? (await this.getClientBySlug(idOrSlug));
     return c?.published ? c : undefined;
+  }
+  async listMembershipsForEmail(email: string) {
+    const r = await this.pool.query(
+      `SELECT id, client_id, email, role, created_at
+       FROM workspace_memberships WHERE email = lower($1) ORDER BY created_at`,
+      [email.trim()],
+    );
+    return r.rows.map(membershipFromRow);
+  }
+  async listMembershipsForClient(clientId: string) {
+    const r = await this.pool.query(
+      `SELECT id, client_id, email, role, created_at
+       FROM workspace_memberships WHERE client_id = $1 ORDER BY created_at`,
+      [clientId],
+    );
+    return r.rows.map(membershipFromRow);
+  }
+  async upsertMembership(membership: WorkspaceMembership) {
+    await this.pool.query(
+      `INSERT INTO workspace_memberships (id, client_id, email, role, created_at)
+       VALUES ($1, $2, lower($3), $4, $5)
+       ON CONFLICT (client_id, email) DO UPDATE SET role = EXCLUDED.role`,
+      [
+        membership.id,
+        membership.clientId,
+        membership.email.trim(),
+        membership.role,
+        membership.createdAt,
+      ],
+    );
+  }
+  async deleteMembership(clientId: string, membershipId: string) {
+    const r = await this.pool.query(
+      "DELETE FROM workspace_memberships WHERE client_id = $1 AND id = $2",
+      [clientId, membershipId],
+    );
+    return Boolean(r.rowCount);
   }
   async getPromptVersion(id: string) {
     const r = await this.pool.query(
@@ -218,6 +263,24 @@ export class PostgresStore implements PlatformStore {
       idempotencyKey: row.idempotency_key,
       at: row.at?.toISOString?.() ?? new Date().toISOString(),
     } as ToolActionRow;
+  }
+  async listToolActionsForCall(clientId: string, callId: string) {
+    const r = await this.pool.query(
+      `SELECT id, call_id, client_id, name, input, result, error, idempotency_key, at
+       FROM tool_actions WHERE client_id = $1 AND call_id = $2 ORDER BY at, id`,
+      [clientId, callId],
+    );
+    return r.rows.map((row) => ({
+      id: row.id,
+      callId: row.call_id,
+      clientId: row.client_id,
+      name: row.name,
+      input: row.input,
+      result: row.result,
+      error: row.error ?? undefined,
+      idempotencyKey: row.idempotency_key ?? undefined,
+      at: toIso(row.at),
+    }));
   }
   async saveJob(j: OutboundJob) {
     await this.pool.query(
@@ -482,6 +545,16 @@ function promptFromRow(row: Record<string, any>): PromptVersion {
     clientId: row.client_id,
     version: row.version,
     compiled: row.compiled,
+    createdAt: toIso(row.created_at),
+  };
+}
+
+function membershipFromRow(row: Record<string, any>): WorkspaceMembership {
+  return {
+    id: row.id,
+    clientId: row.client_id,
+    email: row.email,
+    role: row.role,
     createdAt: toIso(row.created_at),
   };
 }

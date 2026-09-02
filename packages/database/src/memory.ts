@@ -18,15 +18,21 @@ import type {
   Suppression,
   ToolActionRow,
   UsageCounters,
+  WorkspaceMembership,
 } from "./types.js";
 
 export interface PlatformStore {
   getClient(id: string): Promise<ClientConfig | undefined>;
   getClientBySlug(slug: string): Promise<ClientConfig | undefined>;
   getClientByInboundNumber(e164: string): Promise<ClientConfig | undefined>;
+  getClientByElevenLabsAgentId(agentId: string): Promise<ClientConfig | undefined>;
   listClients(): Promise<ClientConfig[]>;
   upsertClient(c: ClientConfig): Promise<void>;
   getPublishedClient(id: string): Promise<ClientConfig | undefined>;
+  listMembershipsForEmail(email: string): Promise<WorkspaceMembership[]>;
+  listMembershipsForClient(clientId: string): Promise<WorkspaceMembership[]>;
+  upsertMembership(membership: WorkspaceMembership): Promise<void>;
+  deleteMembership(clientId: string, membershipId: string): Promise<boolean>;
 
   getPromptVersion(id: string): Promise<PromptVersion | undefined>;
   latestPrompt(clientId: string): Promise<PromptVersion | undefined>;
@@ -44,6 +50,7 @@ export interface PlatformStore {
   saveToolAction(row: ToolActionRow): Promise<void>;
   claimToolAction(row: ToolActionRow): Promise<boolean>;
   findToolByIdempotency(clientId: string, key: string): Promise<ToolActionRow | undefined>;
+  listToolActionsForCall(clientId: string, callId: string): Promise<ToolActionRow[]>;
 
   saveJob(j: OutboundJob): Promise<void>;
   getJob(id: string): Promise<OutboundJob | undefined>;
@@ -84,6 +91,7 @@ export class MemoryStore implements PlatformStore {
   usage = new Map<string, UsageCounters>();
   knowledgeDocuments = new Map<string, KnowledgeDocument>();
   knowledgeChunks = new Map<string, KnowledgeChunk>();
+  memberships = new Map<string, WorkspaceMembership>();
 
   async getClient(id: string) {
     return this.clients.get(id);
@@ -95,6 +103,9 @@ export class MemoryStore implements PlatformStore {
     const n = e164.replace(/\s/g, "");
     return [...this.clients.values()].find((c) => c.inboundNumbers.some((x) => x.replace(/\s/g, "") === n));
   }
+  async getClientByElevenLabsAgentId(agentId: string) {
+    return [...this.clients.values()].find((client) => client.elevenlabsAgentId === agentId);
+  }
   async listClients() {
     return [...this.clients.values()];
   }
@@ -104,6 +115,27 @@ export class MemoryStore implements PlatformStore {
   async getPublishedClient(idOrSlug: string) {
     const c = this.clients.get(idOrSlug) ?? (await this.getClientBySlug(idOrSlug));
     return c?.published ? c : undefined;
+  }
+  async listMembershipsForEmail(email: string) {
+    const normalized = email.trim().toLowerCase();
+    return [...this.memberships.values()].filter((membership) => membership.email === normalized);
+  }
+  async listMembershipsForClient(clientId: string) {
+    return [...this.memberships.values()].filter((membership) => membership.clientId === clientId);
+  }
+  async upsertMembership(membership: WorkspaceMembership) {
+    const normalized = { ...membership, email: membership.email.trim().toLowerCase() };
+    for (const [id, existing] of this.memberships) {
+      if (existing.clientId === normalized.clientId && existing.email === normalized.email && id !== normalized.id) {
+        this.memberships.delete(id);
+      }
+    }
+    this.memberships.set(normalized.id, normalized);
+  }
+  async deleteMembership(clientId: string, membershipId: string) {
+    const membership = this.memberships.get(membershipId);
+    if (!membership || membership.clientId !== clientId) return false;
+    return this.memberships.delete(membershipId);
   }
   async getPromptVersion(id: string) {
     return this.prompts.find((p) => p.id === id);
@@ -186,6 +218,11 @@ export class MemoryStore implements PlatformStore {
   }
   async findToolByIdempotency(clientId: string, key: string) {
     return [...this.tools].reverse().find((t) => t.clientId === clientId && t.idempotencyKey === key);
+  }
+  async listToolActionsForCall(clientId: string, callId: string) {
+    return this.tools
+      .filter((tool) => tool.clientId === clientId && tool.callId === callId)
+      .sort((a, b) => a.at.localeCompare(b.at));
   }
   async saveJob(j: OutboundJob) {
     this.jobs.set(j.id, j);

@@ -27,6 +27,8 @@ export default defineRailway(() => {
     CALCOM_API_KEY: preserve(),
     CALCOM_USERNAME: preserve(),
     VOICE_TOOL_SECRET: preserve(),
+    VOICE_TOOL_SECRETS_JSON: preserve(),
+    ELEVENLABS_WEBHOOK_SECRET: preserve(),
   };
 
   const data = {

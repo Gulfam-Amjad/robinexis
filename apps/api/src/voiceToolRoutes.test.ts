@@ -1,13 +1,25 @@
 import { describe, expect, it } from "vitest";
 import { BLADES_HAIR_ID, MemoryStore, seedStore } from "@robinexis/database";
 import { FakeCalendar } from "@robinexis/integrations";
-import { runVoiceTool, voiceToolAuthorized } from "./voiceToolRoutes.js";
+import { runVoiceTool, voiceToolAuthorized, voiceToolClientId } from "./voiceToolRoutes.js";
 
 describe("ElevenLabs voice tool routes", () => {
   it("requires a non-empty shared secret", () => {
     expect(voiceToolAuthorized("correct", "correct")).toBe(true);
     expect(voiceToolAuthorized("wrong", "correct")).toBe(false);
     expect(voiceToolAuthorized("", "")).toBe(false);
+  });
+
+  it("maps each webhook secret to one server-authorized tenant", () => {
+    expect(voiceToolClientId("legacy", "legacy", "")).toBe(BLADES_HAIR_ID);
+    expect(
+      voiceToolClientId(
+        "tenant-secret",
+        "legacy",
+        JSON.stringify({ client_second: "tenant-secret" }),
+      ),
+    ).toBe("client_second");
+    expect(voiceToolClientId("wrong", "legacy", JSON.stringify({ client_second: "tenant-secret" }))).toBeUndefined();
   });
 
   it("returns only calendar slots for a supported Blades service", async () => {

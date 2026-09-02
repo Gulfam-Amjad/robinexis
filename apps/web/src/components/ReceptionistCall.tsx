@@ -21,6 +21,7 @@ import {
   formatCallDuration,
   RECEPTIONIST_STATUS_COPY,
   type LocalCallPhase,
+  type ReceptionistDemoConfig,
 } from "../lib/receptionistDemo";
 import { Badge, Button, Card, SectionHeading } from "./ui";
 
@@ -31,23 +32,27 @@ type TranscriptEntry = {
 };
 
 export function ReceptionistCall({
+  config = BLADES_RECEPTIONIST_DEMO,
   compact = false,
   showShare = false,
 }: {
+  config?: ReceptionistDemoConfig;
   compact?: boolean;
   showShare?: boolean;
 }) {
   return (
-    <ConversationProvider agentId={BLADES_RECEPTIONIST_DEMO.agentId}>
-      <ReceptionistCallExperience compact={compact} showShare={showShare} />
+    <ConversationProvider agentId={config.agentId}>
+      <ReceptionistCallExperience config={config} compact={compact} showShare={showShare} />
     </ConversationProvider>
   );
 }
 
 function ReceptionistCallExperience({
+  config,
   compact,
   showShare,
 }: {
+  config: ReceptionistDemoConfig;
   compact: boolean;
   showShare: boolean;
 }) {
@@ -153,7 +158,7 @@ function ReceptionistCallExperience({
       permission.getTracks().forEach((track) => track.stop());
       setPhase("starting");
       conversation.startSession({
-        agentId: BLADES_RECEPTIONIST_DEMO.agentId,
+        agentId: config.agentId,
         connectionType: "webrtc",
       });
     } catch (error) {
@@ -167,7 +172,7 @@ function ReceptionistCallExperience({
       );
       setPhase("idle");
     }
-  }, [conversation]);
+  }, [config.agentId, conversation]);
 
   const endCall = useCallback(() => {
     conversation.endSession();
@@ -181,17 +186,18 @@ function ReceptionistCallExperience({
   }, []);
 
   const shareDemo = useCallback(async () => {
-    const url = `${window.location.origin}${BLADES_RECEPTIONIST_DEMO.sharePath}`;
+    if (!config.sharePath) return;
+    const url = `${window.location.origin}${config.sharePath}`;
     if (navigator.share) {
       await navigator.share({
-        title: "Meet Sophie — Blades Hair AI receptionist",
-        text: "Try the Blades Hair AI receptionist, powered by Robinexis.",
+        title: `Meet ${config.agentName} — ${config.businessName} AI receptionist`,
+        text: `Try the ${config.businessName} AI receptionist, powered by Robinexis.`,
         url,
       });
       return;
     }
     await copyText(url, "share");
-  }, [copyText]);
+  }, [config.agentName, config.businessName, config.sharePath, copyText]);
 
   const activeLevel = Math.min(
     1,
@@ -205,9 +211,9 @@ function ReceptionistCallExperience({
     <section className={`receptionist-experience ${compact ? "receptionist-compact" : ""}`}>
       <div className="receptionist-stage">
         <div className="receptionist-brandline">
-          <span className="blades-monogram">BH</span>
+          <span className="blades-monogram">{config.businessName.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()}</span>
           <div>
-            <strong>{BLADES_RECEPTIONIST_DEMO.businessName}</strong>
+            <strong>{config.businessName}</strong>
             <small>AI receptionist</small>
           </div>
           <Badge tone={connected ? "success" : "neutral"}>
@@ -229,8 +235,8 @@ function ReceptionistCallExperience({
 
         <div className="voice-status" aria-live="polite">
           <span className={`voice-status-dot voice-status-${uiStatus}`} />
-          <h2>{statusCopy.label}</h2>
-          <p>{localError || conversation.message || statusCopy.detail}</p>
+          <h2>{statusCopy.label.replaceAll("Sophie", config.agentName)}</h2>
+          <p>{localError || conversation.message || statusCopy.detail.replaceAll("Sophie", config.agentName).replaceAll("Blades Hair", config.businessName)}</p>
         </div>
 
         <div className="voice-waveform" aria-hidden="true">
@@ -245,7 +251,7 @@ function ReceptionistCallExperience({
           {!connected && conversation.status !== "connecting" ? (
             <Button className="voice-start" onClick={startCall}>
               {uiStatus === "ended" || uiStatus === "error" ? <RotateCcw /> : <Phone />}
-              {uiStatus === "ended" || uiStatus === "error" ? "Start another call" : "Talk to Sophie"}
+              {uiStatus === "ended" || uiStatus === "error" ? "Start another call" : `Talk to ${config.agentName}`}
             </Button>
           ) : (
             <>
@@ -280,7 +286,7 @@ function ReceptionistCallExperience({
         <Card className="receptionist-transcript">
           <SectionHeading
             title="Live conversation"
-            description={connected ? "Sophie and you, as it happens." : "Your transcript will appear here."}
+            description={connected ? `${config.agentName} and you, as it happens.` : "Your transcript will appear here."}
             action={transcript.length ? (
               <button
                 className="icon-button"
@@ -288,7 +294,7 @@ function ReceptionistCallExperience({
                 aria-label="Copy transcript"
                 onClick={() =>
                   copyText(
-                    transcript.map((turn) => `${turn.role === "agent" ? "Sophie" : "You"}: ${turn.message}`).join("\n"),
+                    transcript.map((turn) => `${turn.role === "agent" ? config.agentName : "You"}: ${turn.message}`).join("\n"),
                     "transcript",
                   )
                 }
@@ -301,11 +307,11 @@ function ReceptionistCallExperience({
             {!transcript.length ? (
               <div className="transcript-empty">
                 <Headphones />
-                <p>Start the call, say hello, and Sophie will take it from there.</p>
+                <p>Start the call, say hello, and {config.agentName} will take it from there.</p>
               </div>
             ) : transcript.map((turn) => (
               <div className={`transcript-bubble transcript-bubble-${turn.role}`} key={turn.id}>
-                <span>{turn.role === "agent" ? "Sophie" : "You"}</span>
+                <span>{turn.role === "agent" ? config.agentName : "You"}</span>
                 <p>{turn.message}</p>
               </div>
             ))}
@@ -315,9 +321,9 @@ function ReceptionistCallExperience({
 
         <Card className="receptionist-prompts">
           <SectionHeading
-            title="Try asking Sophie"
+            title={`Try asking ${config.agentName}`}
             description="Use your own words, or copy one of these prompts."
-            action={showShare ? (
+            action={showShare && config.sharePath ? (
               <button className="share-demo-button" type="button" onClick={shareDemo}>
                 {copied === "share" ? <Check /> : <Share2 />}
                 {copied === "share" ? "Copied" : "Share demo"}
@@ -325,7 +331,7 @@ function ReceptionistCallExperience({
             ) : undefined}
           />
           <div className="receptionist-scenarios">
-            {BLADES_RECEPTIONIST_DEMO.scenarios.map((scenario) => (
+            {config.scenarios.map((scenario) => (
               <button
                 key={scenario}
                 type="button"
@@ -337,7 +343,7 @@ function ReceptionistCallExperience({
             ))}
           </div>
           <p className="demo-booking-note">
-            This testing agent uses the existing demo diary. Appointments created here are real test bookings.
+            This agent uses the workspace&apos;s configured diary. Test carefully: confirmed appointments may be created in that calendar.
           </p>
         </Card>
       </div>

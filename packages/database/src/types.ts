@@ -15,6 +15,16 @@ export type CallDirection = "inbound" | "outbound";
 /** elevenlabs-convai = live Option 1 (do not answer on the gateway). groq-gateway = Option 2. */
 export type VoicePipeline = "elevenlabs-convai" | "groq-gateway";
 
+export type WorkspaceRole = "owner" | "manager" | "viewer";
+
+export interface WorkspaceMembership {
+  id: string;
+  clientId: string;
+  email: string;
+  role: WorkspaceRole;
+  createdAt: string;
+}
+
 export interface ClientService {
   slug: string;
   title: string;
@@ -47,6 +57,7 @@ export interface ClientConfig {
   email: string;
   transferNumber: string;
   voiceId: string;
+  elevenlabsAgentId?: string;
   voicePipeline: VoicePipeline;
   services: ClientService[];
   staff: string[];
@@ -115,6 +126,7 @@ export interface CallSession {
   state: string;
   status: "active" | "completed" | "transferred" | "failed";
   outcome?: CallOutcome;
+  durationSeconds?: number;
   createdAt: string;
   updatedAt: string;
 }

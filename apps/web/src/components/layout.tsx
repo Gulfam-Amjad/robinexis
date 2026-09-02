@@ -6,7 +6,6 @@ import {
   ChevronDown,
   ChevronsUpDown,
   CircleDollarSign,
-  Headphones,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -33,7 +32,6 @@ const navigation = [
   { label: "Calls", to: "/app/calls", icon: PhoneCall },
   { label: "Analytics", to: "/app/analytics", icon: BarChart3 },
   { label: "Calendar", to: "/app/calendar", icon: CalendarDays },
-  { label: "Campaigns", to: "/app/campaigns", icon: Headphones },
   { label: "Knowledge", to: "/app/knowledge", icon: BookOpen },
   { label: "Integrations", to: "/app/integrations", icon: PlugZap },
 ] as const;
@@ -53,7 +51,13 @@ export function Logo({ light = false }: { light?: boolean }) {
   );
 }
 
-function NavItems({ onNavigate }: { onNavigate?: () => void }) {
+function NavItems({
+  actorRole,
+  onNavigate,
+}: {
+  actorRole: "operator" | "salon";
+  onNavigate?: () => void;
+}) {
   const render = ({ label, to, icon: Icon, ...item }: (typeof navigation)[number] | (typeof secondary)[number]) => (
     <NavLink className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`} end={"end" in item && item.end} key={to} to={to} onClick={onNavigate}>
       <Icon size={18} />
@@ -62,9 +66,15 @@ function NavItems({ onNavigate }: { onNavigate?: () => void }) {
   );
   return (
     <>
-      <nav className="sidebar-nav" aria-label="Product navigation">{navigation.map(render)}</nav>
+      <nav className="sidebar-nav" aria-label="Product navigation">
+        {navigation.map(render)}
+      </nav>
       <div className="sidebar-spacer" />
-      <nav className="sidebar-nav sidebar-secondary" aria-label="Workspace navigation">{secondary.map(render)}</nav>
+      <nav className="sidebar-nav sidebar-secondary" aria-label="Workspace navigation">
+        {secondary
+          .filter((item) => actorRole === "operator" || item.label !== "Billing")
+          .map(render)}
+      </nav>
     </>
   );
 }
@@ -74,7 +84,8 @@ export function AppShell() {
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
   const { clients, activeClient, activeClientId, setActiveClientId } = useClient();
-  const { logout } = useSession();
+  const { actor, logout } = useSession();
+  const actorRole = actor?.role || "operator";
   const navigate = useNavigate();
   const location = useLocation();
   const current = [...navigation, ...secondary].find((item) =>
@@ -117,15 +128,19 @@ export function AppShell() {
         <div className="client-switcher">
           <span className="client-avatar">{initials(activeClient?.businessName || "New workspace")}</span>
           <label>
-            <small>Client workspace</small>
-            <select value={activeClientId || ""} onChange={(event) => setActiveClientId(event.target.value)}>
-              {!clients.length && <option value="">No clients yet</option>}
-              {clients.map((client) => <option value={client.id} key={client.id}>{client.businessName}</option>)}
-            </select>
+            <small>{actorRole === "operator" ? "Client workspace" : "Your salon"}</small>
+            {actorRole === "operator" || clients.length > 1 ? (
+              <select value={activeClientId || ""} onChange={(event) => setActiveClientId(event.target.value)}>
+                {!clients.length && <option value="">No clients yet</option>}
+                {clients.map((client) => <option value={client.id} key={client.id}>{client.businessName}</option>)}
+              </select>
+            ) : (
+              <strong className="fixed-workspace-name">{activeClient?.businessName || "No workspace"}</strong>
+            )}
           </label>
-          <ChevronsUpDown size={15} />
+          {(actorRole === "operator" || clients.length > 1) && <ChevronsUpDown size={15} />}
         </div>
-        <NavItems onNavigate={() => setMobileOpen(false)} />
+        <NavItems actorRole={actorRole} onNavigate={() => setMobileOpen(false)} />
         {activeClientId && <div className="sidebar-health"><span className={connected === total && total ? "health-dot ready" : "health-dot"} /><div><strong>System connections</strong><small>{integrations.isLoading ? "Checking…" : `${connected} of ${total} ready`}</small></div><Link to="/app/integrations">View</Link></div>}
         <div className="sidebar-help">
           <span><Sparkles size={16} /> Need a hand?</span>
@@ -138,14 +153,20 @@ export function AppShell() {
         <header className="topbar">
           <div className="topbar-title">
             <button aria-label="Open navigation" aria-expanded={mobileOpen} className="icon-button mobile-only" onClick={() => setMobileOpen(true)}><Menu /></button>
-            <div><small>Workspace</small><strong>{current?.label || "Robinexis"}</strong></div>
+            <div><small>{actorRole === "operator" ? "Robinexis operations" : activeClient?.businessName || "Salon workspace"}</small><strong>{current?.label || "Robinexis"}</strong></div>
           </div>
           <div className="topbar-actions" ref={profileRef}>
             <Badge tone="accent">Sandbox aware</Badge>
-            {activeClient && <Badge tone={activeClient.published ? "success" : "warning"}>{activeClient.published ? "Live" : "Draft"}</Badge>}
+            <Badge tone={actorRole === "operator" ? "accent" : "neutral"}>
+              {actorRole === "operator" ? "Operator" : "Salon owner"}
+            </Badge>
+            {activeClient && <Badge tone={activeClient.access?.inbound ? "success" : activeClient.published ? "accent" : "warning"}>{activeClient.access?.inbound ? "Phone active" : activeClient.published ? "Approved" : "Draft"}</Badge>}
             <button className="profile-button" aria-haspopup="menu" aria-expanded={profileOpen} onClick={() => setProfileOpen((value) => !value)}>
               <span className="profile-avatar">RE</span>
-              <span className="profile-copy"><strong>Robinexis admin</strong><small>Operator access</small></span>
+              <span className="profile-copy">
+                <strong>{actorRole === "operator" ? "Robinexis operator" : actor?.email || "Salon user"}</strong>
+                <small>{actorRole === "operator" ? "All workspaces" : "Assigned workspaces only"}</small>
+              </span>
               <ChevronDown size={15} />
             </button>
             {profileOpen && (

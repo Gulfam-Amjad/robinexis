@@ -1,6 +1,11 @@
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import type http from "node:http";
-import { isProductionRuntime, loadDatabaseEnv } from "@robinexis/database";
+import {
+  isProductionRuntime,
+  loadDatabaseEnv,
+  type PlatformStore,
+  type WorkspaceRole,
+} from "@robinexis/database";
 
 loadDatabaseEnv();
 
@@ -25,6 +30,7 @@ export function corsHeaders(origin: string | undefined): Record<string, string> 
   const headers: Record<string, string> = {
     "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept",
     "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
+    "Access-Control-Expose-Headers": "X-Request-Id",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };
@@ -42,7 +48,7 @@ export function applyCors(req: http.IncomingMessage, res: http.ServerResponse) {
 
 export function describeAuthMode(): string {
   if (skipAuthEnabled()) return "SKIP_AUTH — local testing, /api/v1 is open";
-  if (process.env.SUPABASE_URL) return "Supabase JWT required; email must match ADMIN_EMAILS";
+  if (process.env.SUPABASE_URL) return "Supabase JWT required; operator allowlist or workspace membership";
   if (process.env.ADMIN_API_KEY) return "ADMIN_API_KEY required on /api/v1";
   if (isProductionRuntime()) return "production auth misconfigured — /api/v1 will reject every request";
   return "no auth configured — /api/v1 is open outside production";
@@ -54,7 +60,23 @@ function bearer(req: http.IncomingMessage) {
   return match?.[1]?.trim() || "";
 }
 
-async function emailFromSupabaseToken(token: string): Promise<string | undefined> {
+type VerifiedIdentity = { subject: string; email: string };
+
+export type AuthenticatedActor =
+  | {
+      subject: string;
+      email: string;
+      role: "operator";
+      clientRoles: Record<string, "operator">;
+    }
+  | {
+      subject: string;
+      email: string;
+      role: "salon";
+      clientRoles: Record<string, WorkspaceRole>;
+    };
+
+async function identityFromSupabaseToken(token: string): Promise<VerifiedIdentity | undefined> {
   const supabaseUrl = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
   if (!supabaseUrl) return undefined;
   const secret = process.env.SUPABASE_JWT_SECRET;
@@ -70,22 +92,73 @@ async function emailFromSupabaseToken(token: string): Promise<string | undefined
         : "") ||
       "",
   ).toLowerCase();
-  return email || undefined;
+  const subject = String(payload.sub || "");
+  return email && subject ? { email, subject } : undefined;
 }
 
-export async function isAdmin(req: http.IncomingMessage): Promise<boolean> {
-  if (skipAuthEnabled()) return true;
+export async function authenticateRequest(
+  req: http.IncomingMessage,
+  store: PlatformStore,
+): Promise<AuthenticatedActor | undefined> {
+  if (skipAuthEnabled()) {
+    return {
+      subject: "local-operator",
+      email: "local@robinexis.test",
+      role: "operator",
+      clientRoles: {},
+    };
+  }
   const token = bearer(req);
-  if (!token) return !isProductionRuntime() && !process.env.ADMIN_API_KEY && !process.env.SUPABASE_URL;
+  if (!token) {
+    if (!isProductionRuntime() && !process.env.ADMIN_API_KEY && !process.env.SUPABASE_URL) {
+      return {
+        subject: "local-operator",
+        email: "local@robinexis.test",
+        role: "operator",
+        clientRoles: {},
+      };
+    }
+    return undefined;
+  }
 
   if (process.env.ADMIN_API_KEY && token === process.env.ADMIN_API_KEY && !isProductionRuntime()) {
-    return true;
+    return {
+      subject: "local-api-key",
+      email: "local@robinexis.test",
+      role: "operator",
+      clientRoles: {},
+    };
   }
 
   try {
-    const email = await emailFromSupabaseToken(token);
-    return Boolean(email && adminEmails.includes(email));
+    const identity = await identityFromSupabaseToken(token);
+    if (!identity) return undefined;
+    if (adminEmails.includes(identity.email)) {
+      return { ...identity, role: "operator", clientRoles: {} };
+    }
+    const memberships = await store.listMembershipsForEmail(identity.email);
+    if (!memberships.length) return undefined;
+    return {
+      ...identity,
+      role: "salon",
+      clientRoles: Object.fromEntries(
+        memberships.map((membership) => [membership.clientId, membership.role]),
+      ),
+    };
   } catch {
-    return false;
+    return undefined;
   }
+}
+
+export function canAccessClient(actor: AuthenticatedActor, clientId: string): boolean {
+  return actor.role === "operator" || Boolean(actor.clientRoles[clientId]);
+}
+
+export function canManageClient(actor: AuthenticatedActor, clientId: string): boolean {
+  if (actor.role === "operator") return true;
+  return ["owner", "manager"].includes(actor.clientRoles[clientId] || "");
+}
+
+export function canAdministerPlatform(actor: AuthenticatedActor): boolean {
+  return actor.role === "operator";
 }
