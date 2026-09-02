@@ -47,7 +47,7 @@ async function openWorkspaceSession(page: Page, role: "operator" | "salon" = "op
 
 test("public pricing explains the product and access model", async ({ page }) => {
   await page.goto("/pricing");
-  await expect(page.getByRole("heading", { name: /better front desk/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /simple managed plans/i })).toBeVisible();
   await expect(page.getByText(/self-serve checkout is not yet available/i)).toBeVisible();
 });
 

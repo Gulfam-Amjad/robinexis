@@ -193,7 +193,7 @@ export function PublicHeader() {
         <a href="/#features">Features</a>
         <Link to="/pricing">Pricing</Link>
         <Link to={AUTH_REQUIRED ? "/login" : "/app"}>{AUTH_REQUIRED ? "Log in" : "Open app"}</Link>
-        <Link className="button button-primary button-sm" to="/signup">Get started</Link>
+        <Link className="button button-primary button-sm" to="/signup">Request demo</Link>
       </nav>
     </header>
   );

@@ -28,12 +28,13 @@ export function LandingPage() {
       <main>
         <section className="hero">
           <div className="hero-copy">
-            <span className="pill"><Sparkles size={14} /> The front desk that never misses a call</span>
-            <h1>Every call answered.<br /><em>Every opportunity captured.</em></h1>
-            <p>Robinexis gives service businesses a warm, capable AI receptionist that answers naturally, books appointments, and keeps your team in control.</p>
+            <span className="pill"><Sparkles size={14} /> AI reception for customer-first teams</span>
+            <h1>Bespoke AI Receptionist</h1>
+            <p>Answer every call with a warm, capable receptionist built around your business.</p>
+            <p>Robinexis handles enquiries, checks live availability, books appointments, and hands over safely when your team is needed.</p>
             <div className="hero-actions">
-              <Link className="button button-primary button-md" to="/signup">Build your receptionist <ArrowRight size={16} /></Link>
-              <Link className="text-link" to="/signup"><span><Play size={14} fill="currentColor" /></span> Request a live demo</Link>
+              <Link className="button button-primary button-md" to="/signup">Request your demo <ArrowRight size={16} /></Link>
+              <Link className="text-link" to="/demo/blades-hair"><span><Play size={14} fill="currentColor" /></span> Try a live receptionist</Link>
             </div>
             <div className="hero-proof">
               <div className="avatar-pile"><span>ER</span><span>WR</span><span>AI</span></div>
@@ -69,12 +70,12 @@ export function LandingPage() {
         <section className="trust-strip"><span>One calm operating layer for every conversation</span><div><strong>24/7 ANSWERING</strong><strong>LIVE BOOKING</strong><strong>SAFE HANDOFFS</strong><strong>CALL INSIGHTS</strong></div></section>
 
         <section className="public-section" id="features">
-          <div className="section-intro"><span className="eyebrow">Calm, capable, always on</span><h2>Your best receptionist,<br />available on every call.</h2><p>More than an answering service. Robinexis understands your business, takes action, and hands over gracefully when a human touch matters.</p></div>
+          <div className="section-intro"><span className="eyebrow">Features</span><h2>All the features,<br />none of the headaches</h2><p>Stop losing bookings to missed calls. Robinexis answers, reschedules, and fills your calendar, automatically.</p></div>
           <div className="feature-grid">
             {([
-              [PhoneCall, "Answers naturally", "A warm, on-brand voice that handles real conversations — including interruptions and follow-up questions."],
-              [CalendarCheck2, "Books while you work", "Checks live availability, books, reschedules, and cancels appointments with proper confirmation."],
-              [ShieldCheck, "Knows its limits", "Works only from approved business facts and brings your team in whenever confidence is low."],
+              [PhoneCall, "Answers naturally", "A warm, on-brand voice that handles real conversations, including interruptions and follow-up questions."],
+              [CalendarCheck2, "Books while you work", "Checks live availability and creates confirmed appointments without inventing a slot."],
+              [ShieldCheck, "Knows its limits", "Works from approved business facts and brings your team in whenever confidence is low."],
               [BarChart3, "Turns calls into insight", "See what customers ask, which calls convert, and where your front desk can improve."],
             ] as const).map(([Icon, title, body]) => (
               <Card className="feature-card" key={String(title)}>
@@ -85,12 +86,12 @@ export function LandingPage() {
         </section>
 
         <section className="steps-section" id="how-it-works">
-          <div className="section-intro"><span className="eyebrow">From hello to live</span><h2>Set up in an afternoon.<br />Improve every day.</h2></div>
+          <div className="section-intro"><span className="eyebrow">How it works</span><h2>From business brief to a receptionist ready to help</h2><p>Robinexis manages the setup while your team stays in control of the facts and customer experience.</p></div>
           <div className="steps">
             {[
-              ["01", "Tell us about your business", "Add services, policies, opening hours and the facts your agent can safely share."],
-              ["02", "Shape the conversation", "Choose the voice, tone, greeting and handoff rules that feel like your team."],
-              ["03", "Test, publish, learn", "Try real scenarios in the playground, go live, then use call insights to keep improving."],
+              ["01", "Teach it your business", "Approve the services, opening hours, policies, prices, and handoff rules your receptionist can use."],
+              ["02", "Connect live booking", "Link your calendar so Robinexis can check real availability and create confirmed appointments safely."],
+              ["03", "Test, launch, improve", "Try realistic calls, launch on your number, then use transcripts and outcomes to keep improving."],
             ].map(([number, title, body]) => <div className="step" key={number}><span>{number}</span><h3>{title}</h3><p>{body}</p></div>)}
           </div>
         </section>
@@ -98,11 +99,11 @@ export function LandingPage() {
         <section className="cta-section">
           <span className="pill pill-light"><Sparkles size={14} /> Your next customer is calling</span>
           <h2>Let Robinexis pick up.</h2>
-          <p>Give every caller an immediate, thoughtful response — even when your team is busy doing their best work.</p>
-          <Link className="button button-light button-md" to="/signup">Start building <ArrowRight size={16} /></Link>
+          <p>See how a receptionist trained around your business could answer, help, and book.</p>
+          <Link className="button button-light button-md" to="/signup">Request a live demo <ArrowRight size={16} /></Link>
         </section>
       </main>
-      <footer className="public-footer"><LogoFooter /><span>© 2026 Robinexis. Made in the UK.</span><div><Link to="/pricing">Pricing</Link><a href="mailto:hello@robinexis.com">Contact</a><a href="#">Privacy</a></div></footer>
+      <footer className="public-footer"><LogoFooter /><span>AI receptionists that answer, help, and book · © 2026 Robinexis</span><div><Link to="/pricing">Pricing</Link><a href="mailto:hello@robinexis.com">Contact</a><a href="#">Privacy</a></div></footer>
     </div>
   );
 }
@@ -195,7 +196,7 @@ export function PricingPage() {
     <div className="public-page pricing-page">
       <PublicHeader />
       <main className="pricing-main">
-        <div className="section-intro"><span className="eyebrow">Simple, useful pricing</span><h1>A better front desk,<br />without the overhead.</h1><p>Start with the calls you miss today. Scale when Robinexis proves its value.</p></div>
+        <div className="section-intro"><span className="eyebrow">Pricing</span><h1>Simple managed plans</h1><p>Guide pricing for a receptionist configured and supported by Robinexis. Final scope is confirmed before activation.</p></div>
         <div className="pricing-grid">
           {plans.map((plan) => <Card className={`price-card ${plan.featured ? "price-featured" : ""}`} key={plan.name}>
             {plan.featured && <span className="popular">Most popular</span>}
