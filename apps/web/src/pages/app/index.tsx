@@ -64,6 +64,7 @@ import { z } from "zod";
 import type { Call, Client, Job, TimeseriesPoint } from "@robinexis/api-contracts";
 import { api, formatDate } from "../../lib/api";
 import { useClient, useToast } from "../../state";
+import { ReceptionistCall } from "../../components/ReceptionistCall";
 import {
   Badge,
   Button,
@@ -394,29 +395,13 @@ export function AgentDetailPage() {
 export function PlaygroundPage() {
   return (
     <>
-      <PageHeader eyebrow="Agent playground" title="Talk to the Blades receptionist" description="Use the native ElevenLabs realtime experience—the same conversation engine that answers the salon number." />
-      <div className="playground-layout">
-        <Card className="call-me-card">
-          <div className="call-me-visual"><span><PhoneCall /></span><i className="ring-one" /><i className="ring-two" /></div>
-          <h2>Start the live voice demo</h2><p>ElevenLabs handles speech, interruption and audio directly; Railway is used only when checking or creating a booking.</p>
-          <a className="button button-primary button-md full-button" href="https://elevenlabs.io/app/talk-to?agent_id=agent_6101m1c3n4wnfsgskgzr13w2gt9s" target="_blank" rel="noreferrer">Talk to Sophie <PhoneCall size={16} /></a>
-          <div className="sandbox-note"><ShieldCheck /> Native realtime voice · No outbound gateway</div>
-        </Card>
-        <div className="test-column">
-          <Card className="panel">
-            <SectionHeading title="Live architecture" description="The fast production path used by this demo" />
-            <div className="check-list">
-              <span><CheckCircle2 /><strong>Twilio → ElevenLabs</strong><Badge tone="success">Direct</Badge></span>
-              <span><CheckCircle2 /><strong>Speech and interruption</strong><Badge tone="success">ElevenLabs</Badge></span>
-              <span><CheckCircle2 /><strong>Cal.com booking tools</strong><Badge tone="success">Railway REST</Badge></span>
-            </div>
-          </Card>
-          <Card className="panel scenario-card">
-            <SectionHeading title="Try these scenarios" description="Listen for confirmation and honest handoffs." />
-            <div className="scenario-grid">{["Book me in Thursday afternoon", "What are your prices?", "I need to change my appointment", "Can I speak to a person?"].map((text) => <button aria-label={`Copy scenario: ${text}`} key={text} onClick={() => navigator.clipboard.writeText(text)}><MessageCircleMore />{text}<Copy size={14} /></button>)}</div>
-          </Card>
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="Agent playground"
+        title="Your receptionist, ready to talk"
+        description="Test the same Sophie experience your callers hear, without leaving Robinexis."
+        actions={<Link className="button button-secondary button-md" to="/demo/blades-hair" target="_blank">Open public demo <Link2 size={15} /></Link>}
+      />
+      <ReceptionistCall compact />
     </>
   );
 }

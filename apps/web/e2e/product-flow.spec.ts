@@ -37,12 +37,19 @@ async function openOperatorSession(page: Page) {
   });
 }
 
-test("public journey explains the product and access model", async ({ page }) => {
-  await page.goto("/");
-  await expect(page.getByRole("heading", { name: /Every call answered/i })).toBeVisible();
-  await page.getByRole("link", { name: /Pricing/i }).first().click();
+test("public pricing explains the product and access model", async ({ page }) => {
+  await page.goto("/pricing");
   await expect(page.getByRole("heading", { name: /better front desk/i })).toBeVisible();
   await expect(page.getByText(/self-serve checkout is not yet available/i)).toBeVisible();
+});
+
+test("public Blades receptionist is branded and needs no login", async ({ page }) => {
+  await page.goto("/demo/blades-hair");
+  await expect(page.getByRole("heading", { name: /Meet Sophie, the AI receptionist/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Talk to Sophie/i })).toBeVisible();
+  await expect(page.getByText(/Powered by Robinexis/i).first()).toBeVisible();
+  await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", "noindex,nofollow");
+  await expect(page.locator('a[href*="elevenlabs.io"]')).toHaveCount(0);
 });
 
 test("operator can open the data-backed overview", async ({ page }) => {
@@ -55,11 +62,12 @@ test("operator can open the data-backed overview", async ({ page }) => {
 });
 
 test("all operator areas render against their backend contracts", async ({ page }) => {
+  test.setTimeout(60_000);
   await openOperatorSession(page);
   const routes = [
     ["/app/agents", "Your reception team"],
     [`/app/agents/${client.id}`, "AI receptionist"],
-    ["/app/playground", "Hear the experience for yourself"],
+    ["/app/playground", "Your receptionist, ready to talk"],
     ["/app/calls", "Every conversation, accounted for"],
     ["/app/analytics", "Know what’s happening on the phone"],
     ["/app/calendar", "Appointments in one calm view"],

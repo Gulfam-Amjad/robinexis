@@ -7,7 +7,10 @@ status: tested
 
 # Blades Hair demo pitch
 
-Open [[blades-hair-demo]] or call `+447446868067`.
+Open the [branded Robinexis voice demo](https://robinexis-pink.vercel.app/demo/blades-hair), use [[blades-hair-demo]] locally, or call `+447446868067`.
+
+> [!info] Browser demo
+> No login is required during testing. Select **Talk to Sophie**, allow microphone access, and use headphones where practical. The page uses the same live Sophie agent and existing Cal.com testing diary as the phone experience.
 
 1. Let Sophie finish: “Hi, thanks for calling Blades Hair on Cullum Street — you're through to Sophie. How are you today?”
 2. Interrupt naturally: “Actually, what time do you close on Friday?” She should stop and answer 7pm immediately.
@@ -23,3 +26,4 @@ Open [[blades-hair-demo]] or call `+447446868067`.
 - Railway is a narrow authenticated REST layer for live Cal.com actions.
 - Duplicate create requests are idempotent.
 - Unverified accessibility, policy or availability claims are handed back to the team rather than invented.
+- The custom page is fully Robinexis and Blades branded; visitors never leave the experience for a third-party playground.

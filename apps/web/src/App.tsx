@@ -9,6 +9,7 @@ const LandingPage = lazy(() => import("./pages/public").then((m) => ({ default: 
 const LoginPage = lazy(() => import("./pages/public").then((m) => ({ default: m.LoginPage })));
 const SignupPage = lazy(() => import("./pages/public").then((m) => ({ default: m.SignupPage })));
 const PricingPage = lazy(() => import("./pages/public").then((m) => ({ default: m.PricingPage })));
+const BladesReceptionistDemoPage = lazy(() => import("./pages/blades-demo"));
 const appPages = () => import("./pages/app");
 
 const OverviewPage = lazy(() => appPages().then((m) => ({ default: m.OverviewPage })));
@@ -53,6 +54,7 @@ export default function App() {
         <Route path="/login" element={AUTH_REQUIRED ? <LoginPage /> : <Navigate to="/app" replace />} />
         <Route path="/signup" element={AUTH_REQUIRED ? <SignupPage /> : <Navigate to="/app" replace />} />
         <Route path="/pricing" element={<PricingPage />} />
+        <Route path="/demo/blades-hair" element={<BladesReceptionistDemoPage />} />
         <Route element={<RequireSession />}>
           <Route path="/app" element={<AppShell />}>
             <Route index element={<OverviewPage />} />
