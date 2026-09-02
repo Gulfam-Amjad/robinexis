@@ -5,8 +5,8 @@ Registry of every system your AIOS can reach. Filled by `/onboard` from Q4-Q7 an
 | # | Domain | Tool | Mechanism | Auth | Last checked |
 |---|---|---|---|---|---|
 | 1 | Revenue / Financials | Stripe (payments) · GoHighLevel (pipeline) · QuickBooks (accounting) | Stripe: webhook handler in apps/api (keys local `.env`) | .env | 2026-08-29 |
-| 2 | Customer interactions | Gmail · Twilio (production: Smith England Salon AI receptionist live on +447446868067) · WhatsApp/SMS | Twilio: key+ref | .env | 2026-08-19 |
-| 3 | Calendar | Google Calendar (internal) — product also integrates client-side with Outlook & Fresha · Cal.com (production booking tool for Smith England Salon — **account identity unverified, see os/decisions/log.md 2026-08-19**) | key+ref | .env | 2026-08-19 |
+| 2 | Customer interactions | Twilio + ElevenLabs (Blades Hair client demo live on +447446868067; inbound voice routes directly to agent `agent_6101m1c3n4wnfsgskgzr13w2gt9s`) · Gmail · WhatsApp/SMS | Twilio: API key · ElevenLabs: CLI/API key | .env | 2026-09-02 |
+| 3 | Calendar | Cal.com (verified live Blades Hair availability and ElevenLabs booking tools) · Google Calendar (internal) · Outlook & Fresha (supported client-side) | key+ref | .env | 2026-09-02 |
 | 4 | Communication | Slack (team) · WhatsApp (team quick updates) | not yet connected | — | — |
 | 5 | Project / task tracking | Notion (roadmaps, onboarding pipeline, SOPs) · GitHub Issues (technical tasks) | not yet connected | — | — |
 | 6 | Meeting intelligence | Fireflies.ai · Google Meet recordings | not yet connected | — | — |
