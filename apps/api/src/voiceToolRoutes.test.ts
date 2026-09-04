@@ -69,6 +69,7 @@ describe("ElevenLabs voice tool routes", () => {
       status: 200,
       body: { ok: true, slots: ["2026-09-02T10:00:00.000Z"] },
     });
+    expect(await store.getCall("conv_availability")).toBeUndefined();
   });
 
   it("supports a second published tenant selected by its server-bound secret", async () => {

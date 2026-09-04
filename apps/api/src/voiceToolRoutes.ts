@@ -125,7 +125,6 @@ export async function runVoiceTool(
         return { status: 400, body: { ok: false, error: "missing_conversation_id" } };
       }
   const call = callFor(client.id, conversationId);
-  await store.saveCall(call);
 
   if (tool === "check-availability") {
     const start = String(input.start || "");
@@ -174,6 +173,9 @@ export async function runVoiceTool(
     return { status: 409, body: { ok: false, error: "slot_no_longer_free" } };
   }
 
+  // Booking projections reference the source call. Availability checks remain
+  // read-only and do not create dashboard call rows.
+  await store.saveCall(call);
   const result = await exec({
     name: "create_booking",
     input: {
