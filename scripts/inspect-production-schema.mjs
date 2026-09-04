@@ -48,7 +48,9 @@ try {
       `SELECT
          (SELECT count(*)::int FROM clients) AS clients,
          (SELECT count(*)::int FROM call_sessions WHERE client_id = 'client_blades_hair') AS blades_calls,
-         (SELECT count(*)::int FROM prompt_versions WHERE client_id = 'client_blades_hair') AS blades_prompts`,
+         (SELECT count(*)::int FROM prompt_versions WHERE client_id = 'client_blades_hair') AS blades_prompts,
+         (SELECT count(*)::int FROM call_sessions
+          WHERE client_id = 'client_blades_hair' AND id = 'safe-readonly-canary') AS safe_canary_calls`,
     ),
   ]);
   console.log(JSON.stringify({
