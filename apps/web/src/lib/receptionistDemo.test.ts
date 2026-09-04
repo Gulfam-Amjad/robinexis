@@ -3,6 +3,7 @@ import {
   deriveReceptionistStatus,
   formatCallDuration,
   RECEPTIONIST_STATUS_COPY,
+  receptionistStatusCopy,
   type LocalCallPhase,
   type VoiceConnectionStatus,
 } from "./receptionistDemo.js";
@@ -42,5 +43,10 @@ describe("branded receptionist state", () => {
   it("formats the live call timer", () => {
     expect(formatCallDuration(0)).toBe("00:00");
     expect(formatCallDuration(65)).toBe("01:05");
+  });
+
+  it("uses the active workspace names in generic call status", () => {
+    expect(receptionistStatusCopy("listening", "Maya", "North Street Salon").label).toBe("Maya is listening");
+    expect(receptionistStatusCopy("ended", "Maya", "North Street Salon").detail).toContain("North Street Salon");
   });
 });

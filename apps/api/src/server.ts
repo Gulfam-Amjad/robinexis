@@ -16,7 +16,8 @@ import {
 import { applyCors, authenticateRequest, describeAuthMode } from "./auth.js";
 import { ingestElevenLabsWebhook } from "./elevenLabsWebhook.js";
 import { handleProductRoute } from "./productRoutes.js";
-import { runVoiceTool, voiceToolClientId } from "./voiceToolRoutes.js";
+import { checkRateLimit, limitForPath, requestIp } from "./rateLimit.js";
+import { runVoiceTool, voiceToolClientIdForRequest } from "./voiceToolRoutes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 loadEnv({ path: path.resolve(__dirname, "../../../.env") });
@@ -70,6 +71,18 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(204);
     res.end();
     return;
+  }
+
+  const requestLimit = limitForPath(url.pathname);
+  if (requestLimit) {
+    const rate = checkRateLimit(`${requestIp(req)}:${url.pathname}`, requestLimit);
+    res.setHeader("X-RateLimit-Limit", String(rate.limit));
+    res.setHeader("X-RateLimit-Remaining", String(rate.remaining));
+    if (!rate.allowed) {
+      res.setHeader("Retry-After", String(rate.retryAfterSeconds));
+      send(res, 429, { error: "rate_limited" });
+      return;
+    }
   }
 
   try {
@@ -127,7 +140,10 @@ const server = http.createServer(async (req, res) => {
       /^\/api\/v1\/voice-tools\/(check-availability|create-booking)$/,
     );
     if (voiceToolMatch && req.method === "POST") {
-      const authorizedClientId = voiceToolClientId(req.headers["x-voice-tool-secret"]);
+      const authorizedClientId = await voiceToolClientIdForRequest(
+        store,
+        req.headers["x-voice-tool-secret"],
+      );
       if (!authorizedClientId) {
         send(res, 401, { ok: false, error: "unauthorized" });
         return;

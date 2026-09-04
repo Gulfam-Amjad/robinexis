@@ -1,24 +1,35 @@
 import { randomUUID } from "node:crypto";
 import { sortClientsForDashboard } from "./clientOrder.js";
 import type {
+  AgentInstance,
   AnalyticsRange,
   AnalyticsSummary,
   AnalyticsTimeseriesPoint,
+  BookingRecord,
+  CalendarConnection,
   CallListOptions,
   CallNote,
   CallSession,
+  ClientConfigRevision,
   ClientConfig,
+  CreditLedgerEntry,
   KnowledgeChunk,
   KnowledgeDocument,
   KnowledgeDocumentListOptions,
   KnowledgeSearchOptions,
   KnowledgeSearchResult,
+  Location,
   OutboundJob,
   Page,
+  PhoneEndpoint,
   PromptVersion,
+  ProvisioningRun,
+  StripeEvent,
+  Subscription,
   Suppression,
   ToolActionRow,
   UsageCounters,
+  UserProfile,
   WorkspaceMembership,
 } from "./types.js";
 
@@ -29,11 +40,50 @@ export interface PlatformStore {
   getClientByElevenLabsAgentId(agentId: string): Promise<ClientConfig | undefined>;
   listClients(): Promise<ClientConfig[]>;
   upsertClient(c: ClientConfig): Promise<void>;
+  getDraftClient(clientId: string): Promise<ClientConfigRevision | undefined>;
+  saveDraftClient(revision: ClientConfigRevision): Promise<void>;
+  publishClientDraft(revision: ClientConfigRevision, prompt: PromptVersion): Promise<void>;
   getPublishedClient(id: string): Promise<ClientConfig | undefined>;
   listMembershipsForEmail(email: string): Promise<WorkspaceMembership[]>;
   listMembershipsForClient(clientId: string): Promise<WorkspaceMembership[]>;
   upsertMembership(membership: WorkspaceMembership): Promise<void>;
   deleteMembership(clientId: string, membershipId: string): Promise<boolean>;
+  getUserProfile(clientId: string, authUserId: string): Promise<UserProfile | undefined>;
+  getUserProfileByAuthUserId(authUserId: string): Promise<UserProfile | undefined>;
+  listUserProfilesForAuthUser(authUserId: string): Promise<UserProfile[]>;
+  listUserProfiles(clientId: string): Promise<UserProfile[]>;
+  upsertUserProfile(profile: UserProfile): Promise<void>;
+
+  getLocation(clientId: string, id: string): Promise<Location | undefined>;
+  listLocations(clientId: string): Promise<Location[]>;
+  upsertLocation(location: Location): Promise<void>;
+  getAgentInstance(clientId: string, id: string): Promise<AgentInstance | undefined>;
+  getAgentInstanceByProviderAgentId(providerAgentId: string): Promise<AgentInstance | undefined>;
+  getAgentInstanceByVoiceCredentialHash(hash: string): Promise<AgentInstance | undefined>;
+  listAgentInstances(clientId: string): Promise<AgentInstance[]>;
+  upsertAgentInstance(agent: AgentInstance): Promise<void>;
+  listPhoneEndpoints(clientId: string): Promise<PhoneEndpoint[]>;
+  upsertPhoneEndpoint(endpoint: PhoneEndpoint): Promise<void>;
+  listCalendarConnections(clientId: string): Promise<CalendarConnection[]>;
+  upsertCalendarConnection(connection: CalendarConnection): Promise<void>;
+
+  getCurrentSubscription(clientId: string): Promise<Subscription | undefined>;
+  upsertSubscription(subscription: Subscription): Promise<void>;
+  claimStripeEvent(event: StripeEvent): Promise<boolean>;
+  saveStripeEvent(event: StripeEvent): Promise<void>;
+  getStripeEvent(clientId: string, id: string): Promise<StripeEvent | undefined>;
+
+  saveBookingRecord(booking: BookingRecord): Promise<void>;
+  findBookingByIdempotency(clientId: string, key: string): Promise<BookingRecord | undefined>;
+  listBookingRecords(clientId: string): Promise<BookingRecord[]>;
+  appendCreditLedgerEntry(entry: CreditLedgerEntry): Promise<boolean>;
+  listCreditLedger(clientId: string): Promise<CreditLedgerEntry[]>;
+  getCreditBalance(clientId: string): Promise<number>;
+  claimProvisioningRun(run: ProvisioningRun): Promise<boolean>;
+  saveProvisioningRun(run: ProvisioningRun): Promise<void>;
+  getProvisioningRun(clientId: string, id: string): Promise<ProvisioningRun | undefined>;
+  getProvisioningRunByIdempotency(clientId: string, key: string): Promise<ProvisioningRun | undefined>;
+  listProvisioningRuns(clientId: string): Promise<ProvisioningRun[]>;
 
   getPromptVersion(id: string): Promise<PromptVersion | undefined>;
   latestPrompt(clientId: string): Promise<PromptVersion | undefined>;
@@ -42,6 +92,7 @@ export interface PlatformStore {
 
   saveCall(c: CallSession): Promise<void>;
   getCall(id: string): Promise<CallSession | undefined>;
+  getCallForClient(clientId: string, id: string): Promise<CallSession | undefined>;
   getCallByTwilioSid(clientId: string, twilioCallSid: string): Promise<CallSession | undefined>;
   listCallsForClient(clientId: string, limit?: number): Promise<CallSession[]>;
   listCallsForClient(clientId: string, options: CallListOptions): Promise<Page<CallSession>>;
@@ -55,6 +106,7 @@ export interface PlatformStore {
 
   saveJob(j: OutboundJob): Promise<void>;
   getJob(id: string): Promise<OutboundJob | undefined>;
+  getJobForClient(clientId: string, id: string): Promise<OutboundJob | undefined>;
   listJobs(clientId?: string): Promise<OutboundJob[]>;
   claimJob(id: string, attemptedAt: string): Promise<boolean>;
   dueJobs(nowIso: string, limit: number): Promise<OutboundJob[]>;
@@ -83,6 +135,7 @@ function monthKey(d = new Date()) {
 
 export class MemoryStore implements PlatformStore {
   clients = new Map<string, ClientConfig>();
+  clientRevisions = new Map<string, ClientConfigRevision>();
   prompts: PromptVersion[] = [];
   calls = new Map<string, CallSession>();
   tools: ToolActionRow[] = [];
@@ -93,6 +146,16 @@ export class MemoryStore implements PlatformStore {
   knowledgeDocuments = new Map<string, KnowledgeDocument>();
   knowledgeChunks = new Map<string, KnowledgeChunk>();
   memberships = new Map<string, WorkspaceMembership>();
+  userProfiles = new Map<string, UserProfile>();
+  locations = new Map<string, Location>();
+  agentInstances = new Map<string, AgentInstance>();
+  phoneEndpoints = new Map<string, PhoneEndpoint>();
+  calendarConnections = new Map<string, CalendarConnection>();
+  subscriptions = new Map<string, Subscription>();
+  stripeEvents = new Map<string, StripeEvent>();
+  bookingRecords = new Map<string, BookingRecord>();
+  creditLedger = new Map<string, CreditLedgerEntry>();
+  provisioningRuns = new Map<string, ProvisioningRun>();
 
   async getClient(id: string) {
     return this.clients.get(id);
@@ -105,13 +168,39 @@ export class MemoryStore implements PlatformStore {
     return [...this.clients.values()].find((c) => c.inboundNumbers.some((x) => x.replace(/\s/g, "") === n));
   }
   async getClientByElevenLabsAgentId(agentId: string) {
-    return [...this.clients.values()].find((client) => client.elevenlabsAgentId === agentId);
+    const instance = await this.getAgentInstanceByProviderAgentId(agentId);
+    return instance
+      ? this.clients.get(instance.clientId)
+      : [...this.clients.values()].find((client) => client.elevenlabsAgentId === agentId);
   }
   async listClients() {
     return sortClientsForDashboard([...this.clients.values()]);
   }
   async upsertClient(c: ClientConfig) {
     this.clients.set(c.id, c);
+  }
+  async getDraftClient(clientId: string) {
+    return [...this.clientRevisions.values()]
+      .filter((revision) => revision.clientId === clientId && revision.status === "draft")
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+  }
+  async saveDraftClient(revision: ClientConfigRevision) {
+    for (const [id, existing] of this.clientRevisions) {
+      if (existing.clientId === revision.clientId && existing.status === "draft" && id !== revision.id) {
+        this.clientRevisions.set(id, { ...existing, status: "superseded" });
+      }
+    }
+    this.clientRevisions.set(revision.id, { ...revision });
+  }
+  async publishClientDraft(revision: ClientConfigRevision, prompt: PromptVersion) {
+    this.prompts = this.prompts.filter((item) => item.id !== prompt.id);
+    this.prompts.push({ ...prompt });
+    this.clients.set(revision.clientId, { ...revision.config });
+    this.clientRevisions.set(revision.id, {
+      ...revision,
+      status: "published",
+      publishedAt: new Date().toISOString(),
+    });
   }
   async getPublishedClient(idOrSlug: string) {
     const c = this.clients.get(idOrSlug) ?? (await this.getClientBySlug(idOrSlug));
@@ -138,6 +227,144 @@ export class MemoryStore implements PlatformStore {
     if (!membership || membership.clientId !== clientId) return false;
     return this.memberships.delete(membershipId);
   }
+  async getUserProfile(clientId: string, authUserId: string) {
+    return [...this.userProfiles.values()].find((profile) => profile.clientId === clientId && profile.authUserId === authUserId);
+  }
+  async getUserProfileByAuthUserId(authUserId: string) {
+    return [...this.userProfiles.values()].find((profile) => profile.authUserId === authUserId);
+  }
+  async listUserProfilesForAuthUser(authUserId: string) {
+    return [...this.userProfiles.values()].filter((profile) => profile.authUserId === authUserId);
+  }
+  async listUserProfiles(clientId: string) {
+    return [...this.userProfiles.values()].filter((profile) => profile.clientId === clientId);
+  }
+  async upsertUserProfile(profile: UserProfile) {
+    for (const [key, existing] of this.userProfiles) {
+      if (existing.authUserId === profile.authUserId && key !== profile.id) this.userProfiles.delete(key);
+    }
+    this.userProfiles.set(profile.id, { ...profile, email: profile.email.trim().toLowerCase() });
+  }
+  async getLocation(clientId: string, id: string) {
+    return this.locations.get(`${clientId}:${id}`);
+  }
+  async listLocations(clientId: string) {
+    return [...this.locations.values()].filter((location) => location.clientId === clientId);
+  }
+  async upsertLocation(location: Location) {
+    this.locations.set(`${location.clientId}:${location.id}`, { ...location });
+  }
+  async getAgentInstance(clientId: string, id: string) {
+    return this.agentInstances.get(`${clientId}:${id}`);
+  }
+  async getAgentInstanceByProviderAgentId(providerAgentId: string) {
+    return [...this.agentInstances.values()].find((agent) => agent.providerAgentId === providerAgentId);
+  }
+  async getAgentInstanceByVoiceCredentialHash(hash: string) {
+    return [...this.agentInstances.values()].find((agent) => agent.voiceCredentialHash === hash);
+  }
+  async listAgentInstances(clientId: string) {
+    return [...this.agentInstances.values()].filter((agent) => agent.clientId === clientId);
+  }
+  async upsertAgentInstance(agent: AgentInstance) {
+    if (agent.locationId && !this.locations.has(`${agent.clientId}:${agent.locationId}`)) throw new Error("location_not_found");
+    this.agentInstances.set(`${agent.clientId}:${agent.id}`, { ...agent });
+  }
+  async listPhoneEndpoints(clientId: string) {
+    return [...this.phoneEndpoints.values()].filter((endpoint) => endpoint.clientId === clientId);
+  }
+  async upsertPhoneEndpoint(endpoint: PhoneEndpoint) {
+    if (endpoint.locationId && !this.locations.has(`${endpoint.clientId}:${endpoint.locationId}`)) throw new Error("location_not_found");
+    if (endpoint.agentInstanceId && !this.agentInstances.has(`${endpoint.clientId}:${endpoint.agentInstanceId}`)) {
+      throw new Error("agent_instance_not_found");
+    }
+    this.phoneEndpoints.set(`${endpoint.clientId}:${endpoint.id}`, { ...endpoint });
+  }
+  async listCalendarConnections(clientId: string) {
+    return [...this.calendarConnections.values()].filter((connection) => connection.clientId === clientId);
+  }
+  async upsertCalendarConnection(connection: CalendarConnection) {
+    if (connection.locationId && !this.locations.has(`${connection.clientId}:${connection.locationId}`)) {
+      throw new Error("location_not_found");
+    }
+    this.calendarConnections.set(`${connection.clientId}:${connection.id}`, { ...connection });
+  }
+  async getCurrentSubscription(clientId: string) {
+    return [...this.subscriptions.values()]
+      .filter((subscription) => subscription.clientId === clientId)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+  }
+  async upsertSubscription(subscription: Subscription) {
+    this.subscriptions.set(`${subscription.clientId}:${subscription.id}`, { ...subscription });
+  }
+  async claimStripeEvent(event: StripeEvent) {
+    const key = event.id;
+    if (this.stripeEvents.has(key)) return false;
+    this.stripeEvents.set(key, { ...event });
+    return true;
+  }
+  async saveStripeEvent(event: StripeEvent) {
+    this.stripeEvents.set(event.id, { ...event });
+  }
+  async getStripeEvent(clientId: string, id: string) {
+    const event = this.stripeEvents.get(id);
+    return event?.clientId === clientId ? event : undefined;
+  }
+  async saveBookingRecord(booking: BookingRecord) {
+    this.bookingRecords.set(`${booking.clientId}:${booking.id}`, { ...booking });
+  }
+  async findBookingByIdempotency(clientId: string, key: string) {
+    return [...this.bookingRecords.values()].find((booking) => booking.clientId === clientId && booking.idempotencyKey === key);
+  }
+  async listBookingRecords(clientId: string) {
+    return [...this.bookingRecords.values()]
+      .filter((booking) => booking.clientId === clientId)
+      .sort((a, b) => b.startsAt.localeCompare(a.startsAt));
+  }
+  async appendCreditLedgerEntry(entry: CreditLedgerEntry) {
+    const key = `${entry.clientId}:${entry.id}`;
+    if (this.creditLedger.has(key)) return false;
+    const duplicateReference = [...this.creditLedger.values()].some(
+      (existing) =>
+        existing.clientId === entry.clientId &&
+        entry.referenceType &&
+        entry.referenceId &&
+        existing.referenceType === entry.referenceType &&
+        existing.referenceId === entry.referenceId,
+    );
+    if (duplicateReference) return false;
+    this.creditLedger.set(key, { ...entry });
+    return true;
+  }
+  async listCreditLedger(clientId: string) {
+    return [...this.creditLedger.values()]
+      .filter((entry) => entry.clientId === clientId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+  async getCreditBalance(clientId: string) {
+    return [...this.creditLedger.values()]
+      .filter((entry) => entry.clientId === clientId)
+      .reduce((sum, entry) => sum + entry.minutes, 0);
+  }
+  async claimProvisioningRun(run: ProvisioningRun) {
+    if (await this.getProvisioningRunByIdempotency(run.clientId, run.idempotencyKey)) return false;
+    this.provisioningRuns.set(`${run.clientId}:${run.id}`, { ...run });
+    return true;
+  }
+  async saveProvisioningRun(run: ProvisioningRun) {
+    this.provisioningRuns.set(`${run.clientId}:${run.id}`, { ...run });
+  }
+  async getProvisioningRun(clientId: string, id: string) {
+    return this.provisioningRuns.get(`${clientId}:${id}`);
+  }
+  async getProvisioningRunByIdempotency(clientId: string, key: string) {
+    return [...this.provisioningRuns.values()].find((run) => run.clientId === clientId && run.idempotencyKey === key);
+  }
+  async listProvisioningRuns(clientId: string) {
+    return [...this.provisioningRuns.values()]
+      .filter((run) => run.clientId === clientId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
   async getPromptVersion(id: string) {
     return this.prompts.find((p) => p.id === id);
   }
@@ -159,6 +386,10 @@ export class MemoryStore implements PlatformStore {
   }
   async getCall(id: string) {
     return this.calls.get(id);
+  }
+  async getCallForClient(clientId: string, id: string) {
+    const call = this.calls.get(id);
+    return call?.clientId === clientId ? call : undefined;
   }
   async getCallByTwilioSid(clientId: string, twilioCallSid: string) {
     const sid = twilioCallSid.trim();
@@ -230,6 +461,10 @@ export class MemoryStore implements PlatformStore {
   }
   async getJob(id: string) {
     return this.jobs.get(id);
+  }
+  async getJobForClient(clientId: string, id: string) {
+    const job = this.jobs.get(id);
+    return job?.clientId === clientId ? job : undefined;
   }
   async listJobs(clientId?: string) {
     const jobs = [...this.jobs.values()];

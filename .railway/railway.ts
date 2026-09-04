@@ -20,6 +20,7 @@ export default defineRailway(() => {
   const commonSecrets = {
     DATABASE_URL: preserve(),
     GEMINI_API_KEY: preserve(),
+    STRIPE_SECRET_KEY: preserve(),
   };
   const apiSecrets = {
     TWILIO_ACCOUNT_SID: preserve(),
@@ -29,6 +30,9 @@ export default defineRailway(() => {
     VOICE_TOOL_SECRET: preserve(),
     VOICE_TOOL_SECRETS_JSON: preserve(),
     ELEVENLABS_WEBHOOK_SECRET: preserve(),
+    STRIPE_PUBLISHABLE_KEY: preserve(),
+    STRIPE_WEBHOOK_SECRET: preserve(),
+    STRIPE_PRICE_IDS_JSON: preserve(),
   };
 
   const data = {
@@ -55,6 +59,11 @@ export default defineRailway(() => {
       RAG_TOP_K: "5",
       RAG_MIN_SIMILARITY: "0.55",
       RAG_EMBEDDING_DIMENSIONS: "768",
+      PLAN_STARTER_INCLUDED_MINUTES: "300",
+      PLAN_PRO_INCLUDED_MINUTES: "1500",
+      PLAN_ENTERPRISE_INCLUDED_MINUTES: "5000",
+      OUTBOUND_AUTOMATION_ENABLED: "false",
+      SAAS_PROVISIONING_ENABLED: "false",
       WEB_ORIGIN: "https://robinexis-pink.vercel.app",
       SUPABASE_URL: "https://cdbcbzvhzdiwwcrmxjgi.supabase.co",
       SUPABASE_JWT_SECRET: preserve(),

@@ -5,7 +5,8 @@
   "type": "module",
   "exports": { ".": "./src/index.ts" },
   "scripts": {
-    "build:migrate": "tsup && node ../../scripts/copy-migrations.mjs"
+    "build:migrate": "tsup && node ../../scripts/copy-migrations.mjs",
+    "test": "vitest run --config vitest.config.ts"
   },
   "dependencies": {
     "dotenv": "^17.4.2",

@@ -19,7 +19,7 @@ import {
   BLADES_RECEPTIONIST_DEMO,
   deriveReceptionistStatus,
   formatCallDuration,
-  RECEPTIONIST_STATUS_COPY,
+  receptionistStatusCopy,
   type LocalCallPhase,
   type ReceptionistDemoConfig,
 } from "../lib/receptionistDemo";
@@ -110,7 +110,7 @@ function ReceptionistCallExperience({
     isSpeaking: conversation.isSpeaking,
     hasError: Boolean(localError),
   });
-  const statusCopy = RECEPTIONIST_STATUS_COPY[uiStatus];
+  const statusCopy = receptionistStatusCopy(uiStatus, config.agentName, config.businessName);
 
   useEffect(() => {
     if (!connected) return;
@@ -235,8 +235,8 @@ function ReceptionistCallExperience({
 
         <div className="voice-status" aria-live="polite">
           <span className={`voice-status-dot voice-status-${uiStatus}`} />
-          <h2>{statusCopy.label.replaceAll("Sophie", config.agentName)}</h2>
-          <p>{localError || conversation.message || statusCopy.detail.replaceAll("Sophie", config.agentName).replaceAll("Blades Hair", config.businessName)}</p>
+          <h2>{statusCopy.label}</h2>
+          <p>{localError || conversation.message || statusCopy.detail}</p>
         </div>
 
         <div className="voice-waveform" aria-hidden="true">

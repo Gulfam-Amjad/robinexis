@@ -31,7 +31,7 @@ export interface ClientService {
   durationMinutes: number;
 }
 
-export interface CalendarConnection {
+export interface CalendarConnectionConfig {
   provider: "calcom" | "google" | "outlook" | "fresha";
   username?: string;
   apiKeyEnv?: string;
@@ -66,7 +66,7 @@ export interface ClientConfig {
   policies: string[];
   publishedFacts: string[];
   unknownTopics: string[];
-  calendar: CalendarConnection;
+  calendar: CalendarConnectionConfig;
   calendarNotes?: CalendarNoteConnection;
   calendarNoteMode: "summary" | "verbatim";
   enabledFeatures: string[];
@@ -92,6 +92,17 @@ export interface PromptVersion {
   version: number;
   compiled: string;
   createdAt: string;
+}
+
+export interface ClientConfigRevision {
+  id: string;
+  clientId: string;
+  status: "draft" | "published" | "superseded";
+  config: ClientConfig;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+  publishedAt?: string;
 }
 
 export interface TranscriptTurn {
@@ -280,4 +291,152 @@ export interface KnowledgeSearchResult {
   chunk: KnowledgeChunk;
   document: KnowledgeDocument;
   score: number;
+}
+
+export type LifecycleStatus = "pending" | "active" | "disabled" | "failed";
+
+export interface UserProfile {
+  id: string;
+  clientId?: string;
+  authUserId: string;
+  email: string;
+  displayName?: string;
+  platformRole: "admin" | "client";
+  workspaceRole?: WorkspaceRole;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Location {
+  id: string;
+  clientId: string;
+  slug: string;
+  name: string;
+  timezone: string;
+  phone?: string;
+  address?: Record<string, unknown>;
+  isPrimary: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgentInstance {
+  id: string;
+  clientId: string;
+  locationId?: string;
+  provider: "elevenlabs";
+  providerAgentId?: string;
+  voiceCredentialHash?: string;
+  providerSecretId?: string;
+  name: string;
+  status: LifecycleStatus;
+  config: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PhoneEndpoint {
+  id: string;
+  clientId: string;
+  locationId?: string;
+  agentInstanceId?: string;
+  provider: "twilio" | "elevenlabs";
+  e164: string;
+  providerEndpointId?: string;
+  direction: "inbound" | "outbound" | "both";
+  status: LifecycleStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CalendarConnection {
+  id: string;
+  clientId: string;
+  locationId?: string;
+  provider: CalendarConnectionConfig["provider"];
+  externalAccountId?: string;
+  credentialRef: string;
+  calendarId?: string;
+  status: LifecycleStatus;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Subscription {
+  id: string;
+  clientId: string;
+  provider: "internal" | "stripe";
+  providerCustomerId?: string;
+  providerSubscriptionId?: string;
+  planTier: "starter" | "pro" | "enterprise";
+  status: ServiceStatus;
+  priceId?: string;
+  trialEndsAt?: string;
+  currentPeriodStart?: string;
+  currentPeriodEnd?: string;
+  cancelAtPeriodEnd: boolean;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StripeEvent {
+  id: string;
+  clientId?: string;
+  eventType: string;
+  livemode: boolean;
+  payload: unknown;
+  status: "processing" | "processed" | "failed";
+  error?: string;
+  receivedAt: string;
+  processedAt?: string;
+}
+
+export interface BookingRecord {
+  id: string;
+  clientId: string;
+  locationId?: string;
+  calendarConnectionId?: string;
+  callId?: string;
+  provider: CalendarConnectionConfig["provider"];
+  providerBookingId?: string;
+  idempotencyKey?: string;
+  status: "pending" | "confirmed" | "cancelled" | "failed";
+  startsAt: string;
+  endsAt: string;
+  attendeeName?: string;
+  attendeePhone?: string;
+  attendeeEmail?: string;
+  serviceSlug?: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreditLedgerEntry {
+  id: string;
+  clientId: string;
+  minutes: number;
+  kind: "grant" | "purchase" | "usage" | "adjustment" | "refund" | "expiry";
+  direction?: CallDirection;
+  referenceType?: string;
+  referenceId?: string;
+  description?: string;
+  createdAt: string;
+}
+
+export interface ProvisioningRun {
+  id: string;
+  clientId: string;
+  idempotencyKey: string;
+  status: "pending" | "running" | "succeeded" | "failed" | "cancelled";
+  step?: string;
+  input: Record<string, unknown>;
+  output?: Record<string, unknown>;
+  error?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  createdAt: string;
+  updatedAt: string;
 }

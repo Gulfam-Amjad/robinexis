@@ -3,6 +3,7 @@ import { Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import { AppShell } from "./components/layout";
 import { EmptyState, LinkButton } from "./components/ui";
 import { AUTH_REQUIRED } from "./lib/auth";
+import { usePermissions } from "./lib/permissions";
 import { useSession } from "./state";
 
 const LandingPage = lazy(() => import("./pages/public").then((m) => ({ default: m.LandingPage })));
@@ -22,11 +23,13 @@ const CallsPage = lazy(() => appPages().then((m) => ({ default: m.CallsPage })))
 const CallDetailPage = lazy(() => appPages().then((m) => ({ default: m.CallDetailPage })));
 const AnalyticsPage = lazy(() => appPages().then((m) => ({ default: m.AnalyticsPage })));
 const CalendarPage = lazy(() => appPages().then((m) => ({ default: m.CalendarPage })));
+const UsagePage = lazy(() => appPages().then((m) => ({ default: m.UsagePage })));
 const KnowledgePage = lazy(() => appPages().then((m) => ({ default: m.KnowledgePage })));
 const IntegrationsPage = lazy(() => appPages().then((m) => ({ default: m.IntegrationsPage })));
 const TeamPage = lazy(() => appPages().then((m) => ({ default: m.TeamPage })));
 const BillingPage = lazy(() => appPages().then((m) => ({ default: m.BillingPage })));
 const SettingsPage = lazy(() => appPages().then((m) => ({ default: m.SettingsPage })));
+const AdminOverviewPage = lazy(() => appPages().then((m) => ({ default: m.AdminOverviewPage })));
 
 function RequireSession() {
   const { apiKey, actor, actorLoading } = useSession();
@@ -41,9 +44,10 @@ function RequireSession() {
 }
 
 function RequireOperator() {
-  const { actor, actorLoading } = useSession();
+  const { actorLoading } = useSession();
+  const { canAdministerPlatform } = usePermissions();
   if (actorLoading) return <div className="not-found">Loading workspace…</div>;
-  return actor?.role === "operator" ? <Outlet /> : <Navigate to="/app" replace />;
+  return canAdministerPlatform ? <Outlet /> : <Navigate to="/app" replace />;
 }
 
 function NotFoundPage() {
@@ -73,12 +77,21 @@ export default function App() {
             <Route path="calls/:id" element={<CallDetailPage />} />
             <Route path="analytics" element={<AnalyticsPage />} />
             <Route path="calendar" element={<CalendarPage />} />
+            <Route path="usage" element={<UsagePage />} />
             <Route path="knowledge" element={<KnowledgePage />} />
             <Route path="integrations" element={<IntegrationsPage />} />
             <Route path="team" element={<TeamPage />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route element={<RequireOperator />}>
-              <Route path="onboarding" element={<OnboardingPage />} />
+              <Route path="onboarding" element={<Navigate to="/admin/clients/new" replace />} />
+              <Route path="agents/new" element={<Navigate to="/admin/agents/new" replace />} />
+              <Route path="billing" element={<Navigate to="/admin/billing" replace />} />
+            </Route>
+          </Route>
+          <Route element={<RequireOperator />}>
+            <Route path="/admin" element={<AppShell />}>
+              <Route index element={<AdminOverviewPage />} />
+              <Route path="clients/new" element={<OnboardingPage />} />
               <Route path="agents/new" element={<NewAgentPage />} />
               <Route path="billing" element={<BillingPage />} />
             </Route>

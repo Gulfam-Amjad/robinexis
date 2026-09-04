@@ -11,6 +11,12 @@ import {
 import {
   calcom,
   calcomTenantFromClient,
+  createCheckoutSession,
+  ElevenLabsManagementClient,
+  featureOperationallyAvailable,
+  isPlanTier,
+  planCatalog,
+  planDefinition,
   probeCalcomForClient,
   publicClientView,
 } from "@robinexis/integrations";
@@ -21,6 +27,7 @@ import {
   canManageClient,
   type AuthenticatedActor,
 } from "./auth.js";
+import { provisionClientAgent } from "./provisioningService.js";
 
 export type ProductSend = (
   res: http.ServerResponse,
@@ -169,6 +176,15 @@ function createClient(body: Partial<ClientConfig>): ClientConfig {
   if (!body.slug || !body.businessName || !body.calendar?.provider) {
     throw new Error("slug_businessName_calendar_required");
   }
+  if (!/^[a-z0-9-]{2,80}$/.test(body.slug)) {
+    throw new Error("invalid_slug");
+  }
+  if (!body.transferNumber || !/^\+[1-9]\d{7,14}$/.test(body.transferNumber)) {
+    throw new Error("valid_transfer_number_required");
+  }
+  if (!body.calendar.credentialRef || !/^[A-Z][A-Z0-9_]*$/.test(body.calendar.credentialRef)) {
+    throw new Error("calendar_credential_reference_required");
+  }
   return {
     id: body.id || newId("client_"),
     slug: body.slug,
@@ -196,7 +212,7 @@ function createClient(body: Partial<ClientConfig>): ClientConfig {
     },
     calendarNotes: body.calendarNotes,
     calendarNoteMode: body.calendarNoteMode || "summary",
-    enabledFeatures: body.enabledFeatures || ["inbound"],
+    enabledFeatures: body.enabledFeatures || ["inbound", "booking", "transfer"],
     inboundNumbers: body.inboundNumbers || [],
     outboundCallerId: body.outboundCallerId,
     callingWindow: body.callingWindow || {
@@ -209,7 +225,7 @@ function createClient(body: Partial<ClientConfig>): ClientConfig {
     outboundRatePerHour: body.outboundRatePerHour || 10,
     firstCampaignRequiresApproval: body.firstCampaignRequiresApproval ?? true,
     published: false,
-    serviceStatus: body.serviceStatus || "incomplete",
+    serviceStatus: body.serviceStatus || "trialing",
     monthlyMinuteLimit: body.monthlyMinuteLimit,
   };
 }
@@ -245,6 +261,56 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
         administerPlatform: canAdministerPlatform(actor),
         createClients: canAdministerPlatform(actor),
       },
+    });
+    return true;
+  }
+
+  if (route === "/plans" && req.method === "GET") {
+    const plans = Object.values(planCatalog()).map((plan) => ({
+      ...plan,
+      features: plan.features.map((feature) => ({
+        id: feature,
+        operational: featureOperationallyAvailable(feature),
+      })),
+    }));
+    send(res, 200, { items: plans, currency: "GBP" });
+    return true;
+  }
+
+  if (route === "/admin/summary" && req.method === "GET") {
+    if (!canAdministerPlatform(actor)) {
+      send(res, 403, { error: "platform_admin_required" });
+      return true;
+    }
+    const clients = await store.listClients();
+    const month = new Date().toISOString().slice(0, 7);
+    const items = await Promise.all(clients.map(async (client) => {
+      const subscription = await store.getCurrentSubscription(client.id);
+      const usage = await store.getUsage(client.id, month);
+      const calls = await store.listCallsForClient(client.id, 1_000);
+      const ledger = await store.listCreditLedger(client.id);
+      const plan = subscription?.planTier ||
+        (isPlanTier(client.subscribedProduct) ? client.subscribedProduct : "starter");
+      return {
+        clientId: client.id,
+        plan,
+        subscriptionStatus: subscription?.status || client.serviceStatus,
+        subscriptionProvider: subscription?.provider,
+        usedMinutes: (usage?.inboundMinutes || 0) + (usage?.outboundMinutes || 0),
+        remainingMinutes: Math.max(0, ledger.reduce((sum, entry) => sum + entry.minutes, 0)),
+        failedCalls: calls.filter((call) => call.status === "failed").length,
+      };
+    }));
+    const mrrPence = items.reduce((sum, item) => {
+      if (item.subscriptionProvider !== "stripe" || item.subscriptionStatus !== "active") return sum;
+      return sum + (planDefinition(item.plan).monthlyPricePence || 0);
+    }, 0);
+    send(res, 200, {
+      month,
+      mrrPence,
+      totalUsedMinutes: items.reduce((sum, item) => sum + item.usedMinutes, 0),
+      totalFailedCalls: items.reduce((sum, item) => sum + item.failedCalls, 0),
+      clients: items,
     });
     return true;
   }
@@ -298,9 +364,62 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       return true;
     }
     try {
-      const body = await readJson<Partial<ClientConfig>>(ctx);
+      const body = await readJson<Partial<ClientConfig> & { planTier?: unknown }>(ctx);
+      const planTier = isPlanTier(body.planTier) ? body.planTier : "starter";
+      const plan = planDefinition(planTier);
       const created = createClient(body);
+      created.subscribedProduct = planTier;
+      created.monthlyMinuteLimit = plan.includedMinutes;
       await store.upsertClient(created);
+      const now = new Date();
+      const nowIso = now.toISOString();
+      const trialEndsAt = new Date(now.getTime() + plan.trialDays * 86_400_000).toISOString();
+      await store.upsertLocation({
+        id: `loc_${created.id}_primary`,
+        clientId: created.id,
+        slug: "primary",
+        name: created.businessName,
+        timezone: created.callingWindow.tz,
+        phone: created.phone || undefined,
+        address: created.location ? { formatted: created.location } : {},
+        isPrimary: true,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      });
+      await store.upsertCalendarConnection({
+        id: `calendar_${created.id}_primary`,
+        clientId: created.id,
+        locationId: `loc_${created.id}_primary`,
+        provider: created.calendar.provider,
+        externalAccountId: created.calendar.username,
+        credentialRef: created.calendar.credentialRef!,
+        status: "pending",
+        metadata: {},
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      });
+      await store.upsertSubscription({
+        id: `subscription_${created.id}_trial`,
+        clientId: created.id,
+        provider: "internal",
+        planTier,
+        status: "trialing",
+        trialEndsAt,
+        cancelAtPeriodEnd: false,
+        metadata: { noCardRequired: true },
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      });
+      await store.appendCreditLedgerEntry({
+        id: `credit_${created.id}_trial`,
+        clientId: created.id,
+        minutes: plan.includedMinutes,
+        kind: "grant",
+        referenceType: "subscription",
+        referenceId: `subscription_${created.id}_trial`,
+        description: `${plan.name} trial minute allocation`,
+        createdAt: nowIso,
+      });
       send(res, 201, safeEditableClient(created));
     } catch (err) {
       send(res, 400, { error: err instanceof Error ? err.message : "invalid_client" });
@@ -311,12 +430,78 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
   const clientMatch = route.match(/^\/clients\/([^/]+)$/);
   if (clientMatch && req.method === "GET") {
     const client = await requireClient(ctx, clientMatch[1]);
-    if (client) send(res, 200, safeEditableClient(client));
+    if (client) {
+      const draft = await store.getDraftClient(client.id);
+      send(res, 200, {
+        ...safeEditableClient(draft?.config || client),
+        hasUnpublishedChanges: Boolean(draft),
+      });
+    }
+    return true;
+  }
+
+  const serviceStatusMatch = route.match(/^\/clients\/([^/]+)\/service-status$/);
+  if (serviceStatusMatch && req.method === "POST") {
+    if (!canAdministerPlatform(actor)) {
+      send(res, 403, { error: "platform_admin_required" });
+      return true;
+    }
+    const client = await requireClient(ctx, serviceStatusMatch[1]);
+    if (!client) return true;
+    const body = await readJson<{ action?: string }>(ctx);
+    if (body.action !== "suspend" && body.action !== "reactivate") {
+      send(res, 400, { error: "valid_service_action_required" });
+      return true;
+    }
+    client.serviceStatus = body.action === "suspend" ? "paused" : "active";
+    await store.upsertClient(client);
+    send(res, 200, { clientId: client.id, serviceStatus: client.serviceStatus });
+    return true;
+  }
+
+  const creditAdjustmentMatch = route.match(/^\/clients\/([^/]+)\/credit-adjustments$/);
+  if (creditAdjustmentMatch && req.method === "POST") {
+    if (!canAdministerPlatform(actor)) {
+      send(res, 403, { error: "platform_admin_required" });
+      return true;
+    }
+    const client = await requireClient(ctx, creditAdjustmentMatch[1]);
+    if (!client) return true;
+    const body = await readJson<{
+      minutes?: number;
+      reason?: string;
+      idempotencyKey?: string;
+    }>(ctx);
+    if (
+      !Number.isFinite(body.minutes) ||
+      body.minutes === 0 ||
+      !body.reason?.trim() ||
+      !body.idempotencyKey?.trim()
+    ) {
+      send(res, 400, { error: "minutes_reason_and_idempotency_key_required" });
+      return true;
+    }
+    const appended = await store.appendCreditLedgerEntry({
+      id: newId("credit_adjustment_"),
+      clientId: client.id,
+      minutes: Number(body.minutes),
+      kind: "adjustment",
+      referenceType: "admin_adjustment",
+      referenceId: body.idempotencyKey.trim(),
+      description: `${body.reason.trim()} — ${actor.email}`,
+      createdAt: new Date().toISOString(),
+    });
+    send(res, appended ? 201 : 200, {
+      appended,
+      remainingMinutes: Math.max(0, await store.getCreditBalance(client.id)),
+    });
     return true;
   }
   if (clientMatch && req.method === "PATCH") {
-    const client = await requireManageClient(ctx, clientMatch[1]);
-    if (!client) return true;
+    const liveClient = await requireManageClient(ctx, clientMatch[1]);
+    if (!liveClient) return true;
+    const existingDraft = await store.getDraftClient(liveClient.id);
+    const client = structuredClone(existingDraft?.config || liveClient);
     const body = await readJson<Partial<ClientConfig> & { calendar?: Record<string, unknown> }>(ctx);
     if (body.calendar && ("apiKey" in body.calendar || "token" in body.calendar || "secret" in body.calendar)) {
       send(res, 400, { error: "raw_credentials_forbidden" });
@@ -351,17 +536,30 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
         (client as unknown as Record<string, unknown>)[key] = value;
       }
     }
-    client.published = false;
-    await store.upsertClient(client);
-    send(res, 200, safeEditableClient(client));
+    const now = new Date().toISOString();
+    await store.saveDraftClient({
+      id: existingDraft?.id || newId("client_revision_"),
+      clientId: liveClient.id,
+      status: "draft",
+      config: client,
+      createdBy: actor.subject,
+      createdAt: existingDraft?.createdAt || now,
+      updatedAt: now,
+    });
+    send(res, 200, {
+      ...safeEditableClient(client),
+      hasUnpublishedChanges: true,
+    });
     return true;
   }
 
   const publishMatch = route.match(/^\/clients\/([^/]+)\/publish$/);
   if (publishMatch && req.method === "POST") {
-    const client = await requireManageClient(ctx, publishMatch[1]);
-    if (!client) return true;
-    const latest = await store.latestPrompt(client.id);
+    const liveClient = await requireManageClient(ctx, publishMatch[1]);
+    if (!liveClient) return true;
+    const existingDraft = await store.getDraftClient(liveClient.id);
+    const client = structuredClone(existingDraft?.config || liveClient);
+    const latest = await store.latestPrompt(liveClient.id);
     const prompt = {
       id: newId("pv_"),
       clientId: client.id,
@@ -373,11 +571,103 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       }),
       createdAt: new Date().toISOString(),
     };
-    await store.savePromptVersion(prompt);
     client.promptVersionId = prompt.id;
     client.published = true;
-    await store.upsertClient(client);
+    const now = new Date().toISOString();
+    await store.publishClientDraft(
+      {
+        id: existingDraft?.id || newId("client_revision_"),
+        clientId: liveClient.id,
+        status: "draft",
+        config: client,
+        createdBy: actor.subject,
+        createdAt: existingDraft?.createdAt || now,
+        updatedAt: now,
+      },
+      prompt,
+    );
+    const location = (await store.listLocations(client.id)).find((item) => item.isPrimary);
+    if (location) {
+      await store.upsertLocation({
+        ...location,
+        name: client.businessName,
+        timezone: client.callingWindow.tz,
+        phone: client.phone || undefined,
+        address: client.location ? { formatted: client.location } : location.address,
+        updatedAt: now,
+      });
+    }
     send(res, 200, { client: safeEditableClient(client), promptVersion: prompt });
+    return true;
+  }
+
+  const provisioningMatch = route.match(/^\/clients\/([^/]+)\/provision$/);
+  if (provisioningMatch && req.method === "POST") {
+    if (!canAdministerPlatform(actor)) {
+      send(res, 403, { error: "platform_admin_required" });
+      return true;
+    }
+    if (process.env.SAAS_PROVISIONING_ENABLED !== "true") {
+      send(res, 503, { error: "saas_provisioning_disabled" });
+      return true;
+    }
+    const client = await requireClient(ctx, provisioningMatch[1]);
+    if (!client) return true;
+    if (!process.env.ELEVENLABS_API_KEY) {
+      send(res, 503, { error: "elevenlabs_not_configured" });
+      return true;
+    }
+    const body = await readJson<{
+      operationKey?: string;
+      transferNumber?: string;
+      twilioNumber?: string;
+    }>(ctx);
+    if (!body.operationKey) {
+      send(res, 400, { error: "operation_key_required" });
+      return true;
+    }
+    try {
+      const result = await provisionClientAgent(
+        {
+          clientId: client.id,
+          operationKey: body.operationKey,
+          apiBaseUrl: process.env.API_PUBLIC_BASE_URL || `https://${ctx.req.headers.host}`,
+          transferNumber: body.transferNumber,
+          twilioNumber: body.twilioNumber,
+          twilioAccountSid: process.env.TWILIO_ACCOUNT_SID,
+          twilioAuthToken: process.env.TWILIO_AUTH_TOKEN,
+        },
+        {
+          store,
+          elevenLabs: new ElevenLabsManagementClient({
+            apiKey: process.env.ELEVENLABS_API_KEY,
+          }),
+        },
+      );
+      send(res, 200, result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "provisioning_failed";
+      send(res, message === "provisioning_already_running" ? 409 : 502, { error: message });
+    }
+    return true;
+  }
+
+  const provisioningStatusMatch = route.match(/^\/clients\/([^/]+)\/provisioning$/);
+  if (provisioningStatusMatch && req.method === "GET") {
+    const client = await requireClient(ctx, provisioningStatusMatch[1]);
+    if (!client) return true;
+    const runs = await store.listProvisioningRuns(client.id);
+    send(res, 200, {
+      items: runs.map((run) => ({
+        id: run.id,
+        status: run.status,
+        step: run.step,
+        error: run.error,
+        createdAt: run.createdAt,
+        updatedAt: run.updatedAt,
+        finishedAt: run.finishedAt,
+      })),
+    });
     return true;
   }
 
@@ -409,16 +699,14 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
 
   const callMatch = route.match(/^\/calls\/([^/]+)$/);
   if (callMatch && req.method === "GET") {
-    const call = await store.getCall(callMatch[1]);
-    if (
-      !call ||
-      !canAccessClient(actor, call.clientId) ||
-      (clientId(url) && call.clientId !== clientId(url))
-    ) {
+    const requestedClientId = clientId(url);
+    if (!requestedClientId || !canAccessClient(actor, requestedClientId)) {
       send(res, 404, { error: "call_not_found" });
-    } else {
-      send(res, 200, call);
+      return true;
     }
+    const call = await store.getCallForClient(requestedClientId, callMatch[1]);
+    if (!call) send(res, 404, { error: "call_not_found" });
+    else send(res, 200, call);
     return true;
   }
 
@@ -458,15 +746,65 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
 
   if (route === "/usage" && req.method === "GET") {
     const id = clientId(url);
-    if (!(await requireClient(ctx, id))) return true;
+    const client = await requireClient(ctx, id);
+    if (!client) return true;
     const month = url.searchParams.get("month") || new Date().toISOString().slice(0, 7);
     const usage = await store.getUsage(id, month);
-    send(res, 200, usage || {
+    const ledger = await store.listCreditLedger(id);
+    const remainingMinutes = ledger.reduce((sum, entry) => sum + entry.minutes, 0);
+    const allocatedMinutes = ledger
+      .filter((entry) => entry.kind === "grant" || entry.kind === "purchase")
+      .reduce((sum, entry) => sum + entry.minutes, 0);
+    const usedMinutes = Math.abs(
+      ledger
+        .filter((entry) => entry.kind === "usage")
+        .reduce((sum, entry) => sum + entry.minutes, 0),
+    );
+    send(res, 200, {
+      ...(usage || {
       clientId: id,
       month,
       inboundMinutes: 0,
       outboundMinutes: 0,
+      }),
+      plan: isPlanTier(client.subscribedProduct) ? client.subscribedProduct : "starter",
+      allocatedMinutes,
+      usedMinutes,
+      remainingMinutes: Math.max(0, remainingMinutes),
     });
+    return true;
+  }
+
+  if (route === "/billing/checkout" && req.method === "POST") {
+    const body = await readJson<{ clientId?: string; plan?: unknown }>(ctx);
+    const id = String(body.clientId || "");
+    const client = await requireManageClient(ctx, id);
+    if (!client) return true;
+    if (!isPlanTier(body.plan)) {
+      send(res, 400, { error: "invalid_plan" });
+      return true;
+    }
+    if (body.plan === "enterprise") {
+      send(res, 400, { error: "enterprise_contact_sales" });
+      return true;
+    }
+    const webOrigin = (process.env.WEB_ORIGIN || "http://localhost:5173")
+      .split(",")[0]
+      .trim()
+      .replace(/\/$/, "");
+    const checkout = await createCheckoutSession({
+      clientId: client.id,
+      plan: body.plan,
+      customerId: client.stripeCustomerId,
+      customerEmail: client.email || actor.email,
+      successUrl: `${webOrigin}/app/billing?checkout=success`,
+      cancelUrl: `${webOrigin}/app/billing?checkout=cancelled`,
+    });
+    if (!checkout.configured) {
+      send(res, 503, { error: checkout.reason });
+      return true;
+    }
+    send(res, 201, { checkoutSessionId: checkout.id, url: checkout.url });
     return true;
   }
 
@@ -487,22 +825,45 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
   if (route === "/calendar/bookings" && req.method === "GET") {
     const client = await requireClient(ctx, clientId(url));
     if (!client) return true;
+    const projected = (await store.listBookingRecords(client.id)).map((booking) => ({
+      uid: booking.providerBookingId || booking.id,
+      title: booking.serviceSlug,
+      start: booking.startsAt,
+      end: booking.endsAt,
+      status: booking.status,
+      attendeeName: booking.attendeeName,
+      attendeeEmail: booking.attendeeEmail,
+      sourceCallId: booking.callId,
+    }));
     const tenant = calcomTenantFromClient(client);
     if (!tenant.apiKey || !tenant.username) {
-      send(res, 200, { items: [], configured: Boolean(tenant.apiKey && tenant.username) });
+      send(res, 200, { items: projected, configured: false, source: "projection" });
     } else {
-      const result = await calcom.listBookings(tenant, { status: "upcoming" });
-      send(res, 200, {
-        items: result.bookings.map((booking) => ({
-          uid: booking.uid,
-          title: booking.title,
-          start: booking.start,
-          end: booking.end,
-          status: booking.status,
-          attendeeName: booking.attendees?.[0]?.name,
-          attendeeEmail: booking.attendees?.[0]?.email,
-        })),
-      });
+      try {
+        const result = await calcom.listBookings(tenant, { status: "upcoming" });
+        const remote = result.bookings.map((booking) => ({
+            uid: booking.uid,
+            title: booking.title,
+            start: booking.start,
+            end: booking.end,
+            status: booking.status,
+            attendeeName: booking.attendees?.[0]?.name,
+            attendeeEmail: booking.attendees?.[0]?.email,
+        }));
+        const remoteIds = new Set(remote.map((booking) => booking.uid));
+        send(res, 200, {
+          items: [...remote, ...projected.filter((booking) => !remoteIds.has(booking.uid))],
+          configured: true,
+          source: "calcom",
+        });
+      } catch {
+        send(res, 200, {
+          items: projected,
+          configured: true,
+          source: "projection",
+          syncStatus: "temporarily_unavailable",
+        });
+      }
     }
     return true;
   }
@@ -523,6 +884,19 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
           bookingUid: calendarAction[1],
           start: String(body.newStart || body.start || ""),
         });
+    const projected = (await store.listBookingRecords(client.id))
+      .find((booking) => booking.providerBookingId === calendarAction[1]);
+    if (projected) {
+      if (calendarAction[2] === "cancel") projected.status = "cancelled";
+      else {
+        const nextStart = String(body.newStart || body.start || "");
+        const duration = Date.parse(projected.endsAt) - Date.parse(projected.startsAt);
+        projected.startsAt = new Date(nextStart).toISOString();
+        projected.endsAt = new Date(Date.parse(nextStart) + Math.max(0, duration)).toISOString();
+      }
+      projected.updatedAt = new Date().toISOString();
+      await store.saveBookingRecord(projected);
+    }
     send(res, 200, result);
     return true;
   }
@@ -565,13 +939,13 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
 
   const jobAction = route.match(/^\/jobs\/([^/]+)\/(approve|cancel)$/);
   if (jobAction && req.method === "POST") {
-    const job = await store.getJob(jobAction[1]);
     const expectedClient = clientId(url);
-    if (
-      !job ||
-      !canManageClient(actor, job.clientId) ||
-      (expectedClient && job.clientId !== expectedClient)
-    ) {
+    if (!expectedClient || !canManageClient(actor, expectedClient)) {
+      send(res, 404, { error: "job_not_found" });
+      return true;
+    }
+    const job = await store.getJobForClient(expectedClient, jobAction[1]);
+    if (!job) {
       send(res, 404, { error: "job_not_found" });
       return true;
     }

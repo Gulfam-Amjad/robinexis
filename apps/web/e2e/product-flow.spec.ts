@@ -7,6 +7,7 @@ const client = {
   published: false,
   serviceStatus: "trialing",
   elevenlabsAgentId: "agent_test_demo",
+  monthlyMinuteLimit: 100,
 };
 
 async function openWorkspaceSession(page: Page, role: "operator" | "salon" = "operator") {
@@ -36,7 +37,17 @@ async function openWorkspaceSession(page: Page, role: "operator" | "salon" = "op
     if (path === "/api/v1/calls") return route.fulfill({ json: { items: [] } });
     if (path === "/api/v1/analytics/summary") return route.fulfill({ json: { totalCalls: 0, answeredCalls: 0, bookedAppointments: 0, transferredCalls: 0, minutesUsed: 0, bookingRate: 0 } });
     if (path === "/api/v1/analytics/timeseries") return route.fulfill({ json: { items: [] } });
-    if (path === "/api/v1/calendar/bookings" || path === "/api/v1/calendar/slots" || path === "/api/v1/jobs" || path === "/api/v1/knowledge/documents") return route.fulfill({ json: { items: [] } });
+    if (path === "/api/v1/calendar/bookings") return route.fulfill({ json: { items: [{
+      uid: "booking_1",
+      title: "Cut and finish",
+      start: "2026-09-08T10:00:00.000Z",
+      end: "2026-09-08T10:45:00.000Z",
+      attendeeName: "Alex Customer",
+      attendeeEmail: "alex@example.test",
+      status: "confirmed",
+    }] } });
+    if (path === "/api/v1/calendar/slots") return route.fulfill({ json: { items: [{ start: "2026-09-09T11:00:00.000Z" }] } });
+    if (path === "/api/v1/jobs" || path === "/api/v1/knowledge/documents") return route.fulfill({ json: { items: [] } });
     if (path === "/api/v1/integrations/status") return route.fulfill({ json: { items: [{ id: "calcom", name: "Cal.com", connected: true }] } });
     if (path === "/api/v1/memberships") return route.fulfill({ json: { items: role === "salon" ? [{ id: "member_1", clientId: client.id, email: "owner@demo-salon.test", role: "owner", createdAt: "2026-09-01T00:00:00.000Z" }] : [] } });
     if (path === "/api/v1/usage") return route.fulfill({ json: { clientId: client.id, month: "2026-08", inboundMinutes: 10, outboundMinutes: 2 } });
@@ -65,7 +76,7 @@ test("operator can open the data-backed overview", async ({ page }) => {
 
   await page.goto("/app");
   await expect(page.getByRole("heading", { name: /Demo Salon is in good hands/i })).toBeVisible();
-  await expect(page.getByText("12", { exact: true })).toBeVisible();
+  await expect(page.getByText("12", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Needs setup").first()).toBeVisible();
 });
 
@@ -78,7 +89,8 @@ test("all operator areas render against their backend contracts", async ({ page 
     ["/app/playground", "Your receptionist, ready to talk"],
     ["/app/calls", "Every conversation, accounted for"],
     ["/app/analytics", "Know what’s happening on the phone"],
-    ["/app/calendar", "Appointments in one calm view"],
+    ["/app/calendar", "Bookings and availability in one view"],
+    ["/app/usage", "Voice minutes, clearly accounted for"],
     ["/app/knowledge", "Give your agent the right answers"],
     ["/app/integrations", "Connect the tools behind the conversation"],
     ["/app/team", "The people behind Demo Salon"],
@@ -92,6 +104,26 @@ test("all operator areas render against their backend contracts", async ({ page 
   }
 });
 
+test("operator admin is isolated under the admin route", async ({ page }) => {
+  await openWorkspaceSession(page);
+  await page.goto("/admin");
+  await expect(page.getByRole("heading", { name: "One place to run every client workspace" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Operator admin" })).toHaveCount(0);
+  await expect(page.getByText("Client portfolio")).toBeVisible();
+
+  await page.goto("/admin/clients/new");
+  await expect(page.getByRole("heading", { name: "Let’s learn the essentials" })).toBeVisible();
+});
+
+test("booking workflow exposes filters and details", async ({ page }) => {
+  await openWorkspaceSession(page);
+  await page.goto("/app/calendar");
+  await expect(page.getByPlaceholder("Search customer, email or title…")).toBeVisible();
+  await expect(page.getByText("Alex Customer")).toBeVisible();
+  await page.getByRole("button", { name: "Details" }).click();
+  await expect(page.getByRole("dialog").getByText("alex@example.test")).toBeVisible();
+});
+
 test("salon owners see only their workspace experience", async ({ page }) => {
   await openWorkspaceSession(page, "salon");
   await page.goto("/app");
@@ -99,10 +131,14 @@ test("salon owners see only their workspace experience", async ({ page }) => {
   await expect(page.getByText("Demo Salon", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("link", { name: "Campaigns" })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Billing" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Operator admin" })).toHaveCount(0);
 
   await page.goto("/app/team");
   await expect(page.locator("#main-content").getByText("owner@demo-salon.test", { exact: true })).toBeVisible();
 
   await page.goto("/app/billing");
+  await expect(page).toHaveURL(/\/app$/);
+
+  await page.goto("/admin");
   await expect(page).toHaveURL(/\/app$/);
 });

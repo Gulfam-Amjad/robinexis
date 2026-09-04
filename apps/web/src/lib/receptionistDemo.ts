@@ -21,8 +21,8 @@ export const BLADES_RECEPTIONIST_DEMO: ReceptionistDemoConfig = {
   greeting: "Hi, thanks for calling Blades Hair on Cullum Street — you're through to Sophie.",
   scenarios: [
     "What time do you close on Friday?",
+    "Can I book a layered cut next week?",
     "How much are full-head highlights?",
-    "Can you find me an appointment next Tuesday afternoon?",
     "I'd like to speak to someone about a restyle.",
   ],
 };
@@ -34,11 +34,6 @@ export function workspaceReceptionistDemo(input: {
   phone?: string;
   greeting?: string;
 }): ReceptionistDemoConfig {
-  // Blades is a named, fully scripted receptionist, so the workspace playground
-  // should be the same Sophie experience callers hear rather than a generic agent.
-  if (input.agentId === BLADES_RECEPTIONIST_DEMO.agentId) {
-    return BLADES_RECEPTIONIST_DEMO;
-  }
   return {
     agentId: input.agentId,
     agentName: "Your receptionist",
@@ -96,15 +91,21 @@ export const RECEPTIONIST_STATUS_COPY: Record<
   ReceptionistStatus,
   { label: string; detail: string }
 > = {
-  idle: { label: "Ready when you are", detail: "Start a private voice conversation with Sophie." },
-  permission: { label: "Microphone access", detail: "Your browser will ask permission so Sophie can hear you." },
-  connecting: { label: "Connecting to Sophie", detail: "This normally takes just a moment." },
-  listening: { label: "Sophie is listening", detail: "Speak naturally—you can pause or interrupt at any time." },
-  speaking: { label: "Sophie is speaking", detail: "You can interrupt whenever you need to." },
+  idle: { label: "Ready when you are", detail: "Start a private voice conversation with {{agent}}." },
+  permission: { label: "Microphone access", detail: "Your browser will ask permission so {{agent}} can hear you." },
+  connecting: { label: "Connecting to {{agent}}", detail: "This normally takes just a moment." },
+  listening: { label: "{{agent}} is listening", detail: "Speak naturally—you can pause or interrupt at any time." },
+  speaking: { label: "{{agent}} is speaking", detail: "You can interrupt whenever you need to." },
   muted: { label: "Microphone muted", detail: "Unmute when you're ready to continue." },
-  ended: { label: "Conversation ended", detail: "Thanks for trying the Blades Hair receptionist." },
+  ended: { label: "Conversation ended", detail: "Thanks for trying the {{business}} receptionist." },
   error: { label: "We couldn't start the call", detail: "Check microphone permission and try again." },
 };
+
+export function receptionistStatusCopy(status: ReceptionistStatus, agentName: string, businessName: string) {
+  const copy = RECEPTIONIST_STATUS_COPY[status];
+  const fill = (value: string) => value.replaceAll("{{agent}}", agentName).replaceAll("{{business}}", businessName);
+  return { label: fill(copy.label), detail: fill(copy.detail) };
+}
 
 export function formatCallDuration(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60);

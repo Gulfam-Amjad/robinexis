@@ -3,23 +3,34 @@ import pg from "pg";
 import { sortClientsForDashboard } from "./clientOrder.js";
 import type { PlatformStore } from "./memory.js";
 import type {
+  AgentInstance,
   AnalyticsRange,
   AnalyticsSummary,
   AnalyticsTimeseriesPoint,
+  BookingRecord,
+  CalendarConnection,
   CallListOptions,
   CallNote,
   CallSession,
   ClientConfig,
+  ClientConfigRevision,
+  CreditLedgerEntry,
   KnowledgeChunk,
   KnowledgeDocument,
   KnowledgeDocumentListOptions,
   KnowledgeSearchOptions,
+  Location,
   OutboundJob,
   Page,
+  PhoneEndpoint,
   PromptVersion,
+  ProvisioningRun,
+  StripeEvent,
+  Subscription,
   Suppression,
   ToolActionRow,
   UsageCounters,
+  UserProfile,
   WorkspaceMembership,
 } from "./types.js";
 
@@ -45,7 +56,12 @@ export class PostgresStore implements PlatformStore {
   }
   async getClientByElevenLabsAgentId(agentId: string) {
     const r = await this.pool.query(
-      "SELECT config FROM clients WHERE config->>'elevenlabsAgentId' = $1 LIMIT 1",
+      `SELECT c.config
+       FROM clients c
+       LEFT JOIN agent_instances a
+         ON a.client_id = c.id AND a.provider_agent_id = $1
+       WHERE a.provider_agent_id = $1 OR c.config->>'elevenlabsAgentId' = $1
+       LIMIT 1`,
       [agentId],
     );
     return r.rows[0]?.config as ClientConfig | undefined;
@@ -60,6 +76,88 @@ export class PostgresStore implements PlatformStore {
        ON CONFLICT (id) DO UPDATE SET slug = EXCLUDED.slug, config = EXCLUDED.config`,
       [c.id, c.slug, c],
     );
+  }
+  async getDraftClient(clientId: string) {
+    const r = await this.pool.query(
+      `SELECT * FROM client_config_revisions
+       WHERE client_id = $1 AND status = 'draft'
+       ORDER BY updated_at DESC LIMIT 1`,
+      [clientId],
+    );
+    return r.rows[0] ? clientRevisionFromRow(r.rows[0]) : undefined;
+  }
+  async saveDraftClient(revision: ClientConfigRevision) {
+    const connection = await this.pool.connect();
+    try {
+      await connection.query("BEGIN");
+      await connection.query(
+        `UPDATE client_config_revisions
+         SET status = 'superseded', updated_at = $2
+         WHERE client_id = $1 AND status = 'draft' AND id <> $3`,
+        [revision.clientId, revision.updatedAt, revision.id],
+      );
+      await connection.query(
+        `INSERT INTO client_config_revisions
+         (id, client_id, status, config, created_by, created_at, updated_at, published_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         ON CONFLICT (id) DO UPDATE SET config = EXCLUDED.config,
+           created_by = EXCLUDED.created_by, updated_at = EXCLUDED.updated_at
+         WHERE client_config_revisions.client_id = EXCLUDED.client_id
+           AND client_config_revisions.status = 'draft'`,
+        [
+          revision.id, revision.clientId, revision.status, revision.config,
+          revision.createdBy ?? null, revision.createdAt, revision.updatedAt,
+          revision.publishedAt ?? null,
+        ],
+      );
+      await connection.query("COMMIT");
+    } catch (error) {
+      await connection.query("ROLLBACK");
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+  async publishClientDraft(revision: ClientConfigRevision, prompt: PromptVersion) {
+    const connection = await this.pool.connect();
+    try {
+      await connection.query("BEGIN");
+      await connection.query(
+        `INSERT INTO client_config_revisions
+         (id, client_id, status, config, created_by, created_at, updated_at)
+         VALUES ($1,$2,'draft',$3,$4,$5,$6)
+         ON CONFLICT (id) DO NOTHING`,
+        [
+          revision.id, revision.clientId, revision.config,
+          revision.createdBy ?? null, revision.createdAt, revision.updatedAt,
+        ],
+      );
+      await connection.query(
+        `INSERT INTO prompt_versions (id, client_id, version, compiled)
+         VALUES ($1,$2,$3,$4)`,
+        [prompt.id, prompt.clientId, prompt.version, prompt.compiled],
+      );
+      const updated = await connection.query(
+        `UPDATE clients SET slug = $2, config = $3
+         WHERE id = $1 RETURNING id`,
+        [revision.clientId, revision.config.slug, revision.config],
+      );
+      if (updated.rowCount !== 1) throw new Error("client_not_found");
+      await connection.query(
+        `UPDATE client_config_revisions
+         SET status = CASE WHEN id = $2 THEN 'published' ELSE 'superseded' END,
+             published_at = CASE WHEN id = $2 THEN now() ELSE published_at END,
+             updated_at = now()
+         WHERE client_id = $1 AND status = 'draft'`,
+        [revision.clientId, revision.id],
+      );
+      await connection.query("COMMIT");
+    } catch (error) {
+      await connection.query("ROLLBACK");
+      throw error;
+    } finally {
+      connection.release();
+    }
   }
   async getPublishedClient(idOrSlug: string) {
     const c = (await this.getClient(idOrSlug)) ?? (await this.getClientBySlug(idOrSlug));
@@ -101,6 +199,309 @@ export class PostgresStore implements PlatformStore {
       [clientId, membershipId],
     );
     return Boolean(r.rowCount);
+  }
+  async getUserProfile(clientId: string, authUserId: string) {
+    const r = await this.pool.query(
+      "SELECT * FROM user_profiles WHERE client_id = $1 AND auth_user_id = $2",
+      [clientId, authUserId],
+    );
+    return r.rows[0] ? userProfileFromRow(r.rows[0]) : undefined;
+  }
+  async getUserProfileByAuthUserId(authUserId: string) {
+    const r = await this.pool.query(
+      "SELECT * FROM user_profiles WHERE auth_user_id = $1 LIMIT 1",
+      [authUserId],
+    );
+    return r.rows[0] ? userProfileFromRow(r.rows[0]) : undefined;
+  }
+  async listUserProfilesForAuthUser(authUserId: string) {
+    const r = await this.pool.query(
+      "SELECT * FROM user_profiles WHERE auth_user_id = $1 ORDER BY created_at, id",
+      [authUserId],
+    );
+    return r.rows.map(userProfileFromRow);
+  }
+  async listUserProfiles(clientId: string) {
+    const r = await this.pool.query(
+      "SELECT * FROM user_profiles WHERE client_id = $1 ORDER BY created_at, id",
+      [clientId],
+    );
+    return r.rows.map(userProfileFromRow);
+  }
+  async upsertUserProfile(profile: UserProfile) {
+    await this.pool.query(
+      `INSERT INTO user_profiles
+       (id, client_id, auth_user_id, email, display_name, platform_role, workspace_role, created_at, updated_at)
+       VALUES ($1,$2,$3,lower($4),$5,$6,$7,$8,$9)
+       ON CONFLICT (id) DO UPDATE SET client_id = EXCLUDED.client_id, auth_user_id = EXCLUDED.auth_user_id,
+         email = EXCLUDED.email, display_name = EXCLUDED.display_name,
+         platform_role = EXCLUDED.platform_role, workspace_role = EXCLUDED.workspace_role,
+         updated_at = EXCLUDED.updated_at`,
+      [profile.id, profile.clientId ?? null, profile.authUserId, profile.email.trim(),
+        profile.displayName ?? null, profile.platformRole, profile.workspaceRole ?? null,
+        profile.createdAt, profile.updatedAt],
+    );
+  }
+  async getLocation(clientId: string, id: string) {
+    const r = await this.pool.query("SELECT * FROM locations WHERE client_id = $1 AND id = $2", [clientId, id]);
+    return r.rows[0] ? locationFromRow(r.rows[0]) : undefined;
+  }
+  async listLocations(clientId: string) {
+    const r = await this.pool.query("SELECT * FROM locations WHERE client_id = $1 ORDER BY is_primary DESC, name", [clientId]);
+    return r.rows.map(locationFromRow);
+  }
+  async upsertLocation(location: Location) {
+    await this.pool.query(
+      `INSERT INTO locations
+       (id, client_id, slug, name, timezone, phone, address, is_primary, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       ON CONFLICT (id) DO UPDATE SET slug = EXCLUDED.slug, name = EXCLUDED.name,
+         timezone = EXCLUDED.timezone, phone = EXCLUDED.phone, address = EXCLUDED.address,
+         is_primary = EXCLUDED.is_primary, updated_at = EXCLUDED.updated_at
+       WHERE locations.client_id = EXCLUDED.client_id`,
+      [location.id, location.clientId, location.slug, location.name, location.timezone,
+        location.phone ?? null, location.address ?? {}, location.isPrimary, location.createdAt, location.updatedAt],
+    );
+  }
+  async getAgentInstance(clientId: string, id: string) {
+    const r = await this.pool.query("SELECT * FROM agent_instances WHERE client_id = $1 AND id = $2", [clientId, id]);
+    return r.rows[0] ? agentInstanceFromRow(r.rows[0]) : undefined;
+  }
+  async getAgentInstanceByProviderAgentId(providerAgentId: string) {
+    const r = await this.pool.query(
+      "SELECT * FROM agent_instances WHERE provider_agent_id = $1 LIMIT 1",
+      [providerAgentId],
+    );
+    return r.rows[0] ? agentInstanceFromRow(r.rows[0]) : undefined;
+  }
+  async getAgentInstanceByVoiceCredentialHash(hash: string) {
+    const r = await this.pool.query(
+      "SELECT * FROM agent_instances WHERE voice_credential_hash = $1 LIMIT 1",
+      [hash],
+    );
+    return r.rows[0] ? agentInstanceFromRow(r.rows[0]) : undefined;
+  }
+  async listAgentInstances(clientId: string) {
+    const r = await this.pool.query("SELECT * FROM agent_instances WHERE client_id = $1 ORDER BY created_at, id", [clientId]);
+    return r.rows.map(agentInstanceFromRow);
+  }
+  async upsertAgentInstance(agent: AgentInstance) {
+    await this.pool.query(
+      `INSERT INTO agent_instances
+       (id, client_id, location_id, provider, provider_agent_id, voice_credential_hash,
+        provider_secret_id, name, status, config, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       ON CONFLICT (id) DO UPDATE SET location_id = EXCLUDED.location_id, provider = EXCLUDED.provider,
+         provider_agent_id = EXCLUDED.provider_agent_id,
+         voice_credential_hash = EXCLUDED.voice_credential_hash,
+         provider_secret_id = EXCLUDED.provider_secret_id,
+         name = EXCLUDED.name, status = EXCLUDED.status,
+         config = EXCLUDED.config, updated_at = EXCLUDED.updated_at
+       WHERE agent_instances.client_id = EXCLUDED.client_id`,
+      [agent.id, agent.clientId, agent.locationId ?? null, agent.provider, agent.providerAgentId ?? null,
+        agent.voiceCredentialHash ?? null, agent.providerSecretId ?? null, agent.name, agent.status,
+        agent.config, agent.createdAt, agent.updatedAt],
+    );
+  }
+  async listPhoneEndpoints(clientId: string) {
+    const r = await this.pool.query("SELECT * FROM phone_endpoints WHERE client_id = $1 ORDER BY created_at, id", [clientId]);
+    return r.rows.map(phoneEndpointFromRow);
+  }
+  async upsertPhoneEndpoint(endpoint: PhoneEndpoint) {
+    await this.pool.query(
+      `INSERT INTO phone_endpoints
+       (id, client_id, location_id, agent_instance_id, provider, e164, provider_endpoint_id,
+        direction, status, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       ON CONFLICT (id) DO UPDATE SET location_id = EXCLUDED.location_id,
+         agent_instance_id = EXCLUDED.agent_instance_id, provider = EXCLUDED.provider,
+         e164 = EXCLUDED.e164, provider_endpoint_id = EXCLUDED.provider_endpoint_id,
+         direction = EXCLUDED.direction, status = EXCLUDED.status, updated_at = EXCLUDED.updated_at
+       WHERE phone_endpoints.client_id = EXCLUDED.client_id`,
+      [endpoint.id, endpoint.clientId, endpoint.locationId ?? null, endpoint.agentInstanceId ?? null,
+        endpoint.provider, endpoint.e164, endpoint.providerEndpointId ?? null, endpoint.direction,
+        endpoint.status, endpoint.createdAt, endpoint.updatedAt],
+    );
+  }
+  async listCalendarConnections(clientId: string) {
+    const r = await this.pool.query("SELECT * FROM calendar_connections WHERE client_id = $1 ORDER BY created_at, id", [clientId]);
+    return r.rows.map(calendarConnectionFromRow);
+  }
+  async upsertCalendarConnection(connection: CalendarConnection) {
+    await this.pool.query(
+      `INSERT INTO calendar_connections
+       (id, client_id, location_id, provider, external_account_id, credential_ref, calendar_id,
+        status, metadata, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       ON CONFLICT (id) DO UPDATE SET location_id = EXCLUDED.location_id, provider = EXCLUDED.provider,
+         external_account_id = EXCLUDED.external_account_id, credential_ref = EXCLUDED.credential_ref,
+         calendar_id = EXCLUDED.calendar_id, status = EXCLUDED.status, metadata = EXCLUDED.metadata,
+         updated_at = EXCLUDED.updated_at
+       WHERE calendar_connections.client_id = EXCLUDED.client_id`,
+      [connection.id, connection.clientId, connection.locationId ?? null, connection.provider,
+        connection.externalAccountId ?? null, connection.credentialRef, connection.calendarId ?? null,
+        connection.status, connection.metadata, connection.createdAt, connection.updatedAt],
+    );
+  }
+  async getCurrentSubscription(clientId: string) {
+    const r = await this.pool.query(
+      "SELECT * FROM subscriptions WHERE client_id = $1 ORDER BY updated_at DESC, id DESC LIMIT 1",
+      [clientId],
+    );
+    return r.rows[0] ? subscriptionFromRow(r.rows[0]) : undefined;
+  }
+  async upsertSubscription(subscription: Subscription) {
+    await this.pool.query(
+      `INSERT INTO subscriptions
+       (id, client_id, provider, provider_customer_id, provider_subscription_id, plan_tier,
+        status, price_id, trial_ends_at, current_period_start, current_period_end,
+        cancel_at_period_end, metadata, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+       ON CONFLICT (id) DO UPDATE SET provider_customer_id = EXCLUDED.provider_customer_id,
+         provider_subscription_id = EXCLUDED.provider_subscription_id, status = EXCLUDED.status,
+         provider = EXCLUDED.provider, plan_tier = EXCLUDED.plan_tier,
+         price_id = EXCLUDED.price_id, trial_ends_at = EXCLUDED.trial_ends_at,
+         current_period_start = EXCLUDED.current_period_start,
+         current_period_end = EXCLUDED.current_period_end, cancel_at_period_end = EXCLUDED.cancel_at_period_end,
+         metadata = EXCLUDED.metadata, updated_at = EXCLUDED.updated_at
+       WHERE subscriptions.client_id = EXCLUDED.client_id`,
+      [subscription.id, subscription.clientId, subscription.provider, subscription.providerCustomerId ?? null,
+        subscription.providerSubscriptionId ?? null, subscription.planTier, subscription.status,
+        subscription.priceId ?? null, subscription.trialEndsAt ?? null,
+        subscription.currentPeriodStart ?? null, subscription.currentPeriodEnd ?? null,
+        subscription.cancelAtPeriodEnd, subscription.metadata, subscription.createdAt,
+        subscription.updatedAt],
+    );
+  }
+  async claimStripeEvent(event: StripeEvent) {
+    const r = await this.pool.query(
+      `INSERT INTO stripe_events
+       (id, client_id, event_type, livemode, payload, status, error, received_at, processed_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO NOTHING RETURNING id`,
+      [event.id, event.clientId ?? null, event.eventType, event.livemode, event.payload, event.status,
+        event.error ?? null, event.receivedAt, event.processedAt ?? null],
+    );
+    return r.rowCount === 1;
+  }
+  async saveStripeEvent(event: StripeEvent) {
+    await this.pool.query(
+      `INSERT INTO stripe_events
+       (id, client_id, event_type, livemode, payload, status, error, received_at, processed_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, error = EXCLUDED.error,
+         processed_at = EXCLUDED.processed_at WHERE stripe_events.client_id = EXCLUDED.client_id`,
+      [event.id, event.clientId ?? null, event.eventType, event.livemode, event.payload, event.status,
+        event.error ?? null, event.receivedAt, event.processedAt ?? null],
+    );
+  }
+  async getStripeEvent(clientId: string, id: string) {
+    const r = await this.pool.query("SELECT * FROM stripe_events WHERE client_id = $1 AND id = $2", [clientId, id]);
+    return r.rows[0] ? stripeEventFromRow(r.rows[0]) : undefined;
+  }
+  async saveBookingRecord(booking: BookingRecord) {
+    await this.pool.query(
+      `INSERT INTO booking_records
+       (id, client_id, location_id, calendar_connection_id, call_id, provider, provider_booking_id,
+        idempotency_key, status, starts_at, ends_at, attendee_name, attendee_phone, attendee_email,
+        service_slug, metadata, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+       ON CONFLICT (id) DO UPDATE SET provider_booking_id = EXCLUDED.provider_booking_id,
+         status = EXCLUDED.status, starts_at = EXCLUDED.starts_at, ends_at = EXCLUDED.ends_at,
+         attendee_name = EXCLUDED.attendee_name, attendee_phone = EXCLUDED.attendee_phone,
+         attendee_email = EXCLUDED.attendee_email, service_slug = EXCLUDED.service_slug,
+         metadata = EXCLUDED.metadata, updated_at = EXCLUDED.updated_at
+       WHERE booking_records.client_id = EXCLUDED.client_id`,
+      [booking.id, booking.clientId, booking.locationId ?? null, booking.calendarConnectionId ?? null,
+        booking.callId ?? null, booking.provider, booking.providerBookingId ?? null,
+        booking.idempotencyKey ?? null, booking.status, booking.startsAt, booking.endsAt,
+        booking.attendeeName ?? null, booking.attendeePhone ?? null, booking.attendeeEmail ?? null,
+        booking.serviceSlug ?? null, booking.metadata, booking.createdAt, booking.updatedAt],
+    );
+  }
+  async findBookingByIdempotency(clientId: string, key: string) {
+    const r = await this.pool.query(
+      "SELECT * FROM booking_records WHERE client_id = $1 AND idempotency_key = $2",
+      [clientId, key],
+    );
+    return r.rows[0] ? bookingRecordFromRow(r.rows[0]) : undefined;
+  }
+  async listBookingRecords(clientId: string) {
+    const r = await this.pool.query(
+      "SELECT * FROM booking_records WHERE client_id = $1 ORDER BY starts_at DESC, id DESC",
+      [clientId],
+    );
+    return r.rows.map(bookingRecordFromRow);
+  }
+  async appendCreditLedgerEntry(entry: CreditLedgerEntry) {
+    const r = await this.pool.query(
+      `INSERT INTO credit_ledger
+       (id, client_id, minutes, kind, direction, reference_type, reference_id, description, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT DO NOTHING RETURNING id`,
+      [entry.id, entry.clientId, entry.minutes, entry.kind, entry.direction ?? null,
+        entry.referenceType ?? null, entry.referenceId ?? null, entry.description ?? null,
+        entry.createdAt],
+    );
+    return r.rowCount === 1;
+  }
+  async listCreditLedger(clientId: string) {
+    const r = await this.pool.query(
+      "SELECT * FROM credit_ledger WHERE client_id = $1 ORDER BY created_at DESC, id DESC",
+      [clientId],
+    );
+    return r.rows.map(creditLedgerEntryFromRow);
+  }
+  async getCreditBalance(clientId: string) {
+    const r = await this.pool.query(
+      "SELECT COALESCE(sum(minutes), 0) AS balance FROM credit_ledger WHERE client_id = $1",
+      [clientId],
+    );
+    return Number(r.rows[0]?.balance ?? 0);
+  }
+  async claimProvisioningRun(run: ProvisioningRun) {
+    const r = await this.pool.query(
+      `INSERT INTO provisioning_runs
+       (id, client_id, idempotency_key, status, step, input, output, error, started_at,
+        finished_at, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       ON CONFLICT (client_id, idempotency_key) DO NOTHING RETURNING id`,
+      [run.id, run.clientId, run.idempotencyKey, run.status, run.step ?? null, run.input,
+        run.output ?? null, run.error ?? null, run.startedAt ?? null, run.finishedAt ?? null,
+        run.createdAt, run.updatedAt],
+    );
+    return r.rowCount === 1;
+  }
+  async saveProvisioningRun(run: ProvisioningRun) {
+    await this.pool.query(
+      `INSERT INTO provisioning_runs
+       (id, client_id, idempotency_key, status, step, input, output, error, started_at,
+        finished_at, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, step = EXCLUDED.step,
+         output = EXCLUDED.output, error = EXCLUDED.error, started_at = EXCLUDED.started_at,
+         finished_at = EXCLUDED.finished_at, updated_at = EXCLUDED.updated_at
+       WHERE provisioning_runs.client_id = EXCLUDED.client_id`,
+      [run.id, run.clientId, run.idempotencyKey, run.status, run.step ?? null, run.input,
+        run.output ?? null, run.error ?? null, run.startedAt ?? null, run.finishedAt ?? null,
+        run.createdAt, run.updatedAt],
+    );
+  }
+  async getProvisioningRun(clientId: string, id: string) {
+    const r = await this.pool.query("SELECT * FROM provisioning_runs WHERE client_id = $1 AND id = $2", [clientId, id]);
+    return r.rows[0] ? provisioningRunFromRow(r.rows[0]) : undefined;
+  }
+  async getProvisioningRunByIdempotency(clientId: string, key: string) {
+    const r = await this.pool.query(
+      "SELECT * FROM provisioning_runs WHERE client_id = $1 AND idempotency_key = $2",
+      [clientId, key],
+    );
+    return r.rows[0] ? provisioningRunFromRow(r.rows[0]) : undefined;
+  }
+  async listProvisioningRuns(clientId: string) {
+    const r = await this.pool.query(
+      "SELECT * FROM provisioning_runs WHERE client_id = $1 ORDER BY created_at DESC, id DESC",
+      [clientId],
+    );
+    return r.rows.map(provisioningRunFromRow);
   }
   async getPromptVersion(id: string) {
     const r = await this.pool.query(
@@ -156,6 +557,13 @@ export class PostgresStore implements PlatformStore {
   }
   async getCall(id: string) {
     const r = await this.pool.query("SELECT payload FROM call_sessions WHERE id = $1", [id]);
+    return r.rows[0]?.payload as CallSession | undefined;
+  }
+  async getCallForClient(clientId: string, id: string) {
+    const r = await this.pool.query(
+      "SELECT payload FROM call_sessions WHERE client_id = $1 AND id = $2",
+      [clientId, id],
+    );
     return r.rows[0]?.payload as CallSession | undefined;
   }
   async getCallByTwilioSid(clientId: string, twilioCallSid: string) {
@@ -285,19 +693,28 @@ export class PostgresStore implements PlatformStore {
   }
   async saveJob(j: OutboundJob) {
     await this.pool.query(
-      `INSERT INTO outbound_jobs (id, payload) VALUES ($1, $2)
-       ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload`,
-      [j.id, j],
+      `INSERT INTO outbound_jobs (id, client_id, payload) VALUES ($1, $2, $3)
+       ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload
+       WHERE outbound_jobs.client_id = EXCLUDED.client_id`,
+      [j.id, j.clientId, j],
     );
   }
   async getJob(id: string) {
     const r = await this.pool.query("SELECT payload FROM outbound_jobs WHERE id = $1", [id]);
     return r.rows[0]?.payload as OutboundJob | undefined;
   }
+  async getJobForClient(clientId: string, id: string) {
+    const r = await this.pool.query(
+      "SELECT payload FROM outbound_jobs WHERE client_id = $1 AND id = $2",
+      [clientId, id],
+    );
+    return r.rows[0]?.payload as OutboundJob | undefined;
+  }
   async listJobs(clientId?: string) {
-    const r = await this.pool.query("SELECT payload FROM outbound_jobs");
-    const jobs = r.rows.map((row) => row.payload as OutboundJob);
-    return clientId ? jobs.filter((job) => job.clientId === clientId) : jobs;
+    const r = clientId
+      ? await this.pool.query("SELECT payload FROM outbound_jobs WHERE client_id = $1", [clientId])
+      : await this.pool.query("SELECT payload FROM outbound_jobs");
+    return r.rows.map((row) => row.payload as OutboundJob);
   }
   async claimJob(id: string, attemptedAt: string) {
     const r = await this.pool.query(
@@ -316,14 +733,18 @@ export class PostgresStore implements PlatformStore {
     return r.rowCount === 1;
   }
   async dueJobs(nowIso: string, limit: number) {
-    const r = await this.pool.query("SELECT payload FROM outbound_jobs");
-    return (r.rows.map((row) => row.payload as OutboundJob) as OutboundJob[])
-      .filter((j) => (j.status === "pending" || j.status === "approved") && j.scheduledAt <= nowIso)
-      .slice(0, limit);
+    const r = await this.pool.query(
+      `SELECT payload FROM outbound_jobs
+       WHERE payload->>'status' IN ('pending', 'approved')
+         AND (payload->>'scheduledAt')::timestamptz <= $1::timestamptz
+       ORDER BY (payload->>'scheduledAt')::timestamptz, id LIMIT $2`,
+      [nowIso, limit],
+    );
+    return r.rows.map((row) => row.payload as OutboundJob);
   }
   async cancelJob(id: string, clientId?: string) {
     const values: unknown[] = [id];
-    const tenantClause = clientId ? "AND payload->>'clientId' = $2" : "";
+    const tenantClause = clientId ? "AND client_id = $2" : "";
     if (clientId) values.push(clientId);
     const r = await this.pool.query(
       `UPDATE outbound_jobs
@@ -351,8 +772,10 @@ export class PostgresStore implements PlatformStore {
   }
   async saveNote(n: CallNote) {
     await this.pool.query(
-      `INSERT INTO call_notes (id, payload) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload`,
-      [n.id, n],
+      `INSERT INTO call_notes (id, client_id, payload) VALUES ($1, $2, $3)
+       ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload
+       WHERE call_notes.client_id = EXCLUDED.client_id`,
+      [n.id, n.clientId, n],
     );
   }
   async addUsage(clientId: string, inboundMin: number, outboundMin: number) {
@@ -550,6 +973,19 @@ function promptFromRow(row: Record<string, any>): PromptVersion {
   };
 }
 
+function clientRevisionFromRow(row: Record<string, any>): ClientConfigRevision {
+  return {
+    id: row.id,
+    clientId: row.client_id,
+    status: row.status,
+    config: row.config,
+    createdBy: row.created_by ?? undefined,
+    createdAt: toIso(row.created_at),
+    updatedAt: toIso(row.updated_at),
+    publishedAt: row.published_at ? toIso(row.published_at) : undefined,
+  };
+}
+
 function membershipFromRow(row: Record<string, any>): WorkspaceMembership {
   return {
     id: row.id,
@@ -557,6 +993,110 @@ function membershipFromRow(row: Record<string, any>): WorkspaceMembership {
     email: row.email,
     role: row.role,
     createdAt: toIso(row.created_at),
+  };
+}
+
+function userProfileFromRow(row: Record<string, any>): UserProfile {
+  return {
+    id: row.id, clientId: row.client_id ?? undefined, authUserId: row.auth_user_id, email: row.email,
+    displayName: row.display_name ?? undefined, platformRole: row.platform_role,
+    workspaceRole: row.workspace_role ?? undefined,
+    createdAt: toIso(row.created_at), updatedAt: toIso(row.updated_at),
+  };
+}
+
+function locationFromRow(row: Record<string, any>): Location {
+  return {
+    id: row.id, clientId: row.client_id, slug: row.slug, name: row.name, timezone: row.timezone,
+    phone: row.phone ?? undefined, address: row.address ?? {}, isPrimary: row.is_primary,
+    createdAt: toIso(row.created_at), updatedAt: toIso(row.updated_at),
+  };
+}
+
+function agentInstanceFromRow(row: Record<string, any>): AgentInstance {
+  return {
+    id: row.id, clientId: row.client_id, locationId: row.location_id ?? undefined,
+    provider: row.provider, providerAgentId: row.provider_agent_id ?? undefined,
+    voiceCredentialHash: row.voice_credential_hash ?? undefined,
+    providerSecretId: row.provider_secret_id ?? undefined,
+    name: row.name, status: row.status, config: row.config ?? {},
+    createdAt: toIso(row.created_at), updatedAt: toIso(row.updated_at),
+  };
+}
+
+function phoneEndpointFromRow(row: Record<string, any>): PhoneEndpoint {
+  return {
+    id: row.id, clientId: row.client_id, locationId: row.location_id ?? undefined,
+    agentInstanceId: row.agent_instance_id ?? undefined, provider: row.provider, e164: row.e164,
+    providerEndpointId: row.provider_endpoint_id ?? undefined, direction: row.direction, status: row.status,
+    createdAt: toIso(row.created_at), updatedAt: toIso(row.updated_at),
+  };
+}
+
+function calendarConnectionFromRow(row: Record<string, any>): CalendarConnection {
+  return {
+    id: row.id, clientId: row.client_id, locationId: row.location_id ?? undefined,
+    provider: row.provider, externalAccountId: row.external_account_id ?? undefined,
+    credentialRef: row.credential_ref, calendarId: row.calendar_id ?? undefined,
+    status: row.status, metadata: row.metadata ?? {},
+    createdAt: toIso(row.created_at), updatedAt: toIso(row.updated_at),
+  };
+}
+
+function subscriptionFromRow(row: Record<string, any>): Subscription {
+  return {
+    id: row.id, clientId: row.client_id, provider: row.provider,
+    providerCustomerId: row.provider_customer_id ?? undefined,
+    providerSubscriptionId: row.provider_subscription_id ?? undefined,
+    planTier: row.plan_tier, status: row.status, priceId: row.price_id ?? undefined,
+    trialEndsAt: row.trial_ends_at ? toIso(row.trial_ends_at) : undefined,
+    currentPeriodStart: row.current_period_start ? toIso(row.current_period_start) : undefined,
+    currentPeriodEnd: row.current_period_end ? toIso(row.current_period_end) : undefined,
+    cancelAtPeriodEnd: row.cancel_at_period_end, metadata: row.metadata ?? {},
+    createdAt: toIso(row.created_at), updatedAt: toIso(row.updated_at),
+  };
+}
+
+function stripeEventFromRow(row: Record<string, any>): StripeEvent {
+  return {
+    id: row.id, clientId: row.client_id ?? undefined, eventType: row.event_type, livemode: row.livemode,
+    payload: row.payload, status: row.status, error: row.error ?? undefined,
+    receivedAt: toIso(row.received_at),
+    processedAt: row.processed_at ? toIso(row.processed_at) : undefined,
+  };
+}
+
+function bookingRecordFromRow(row: Record<string, any>): BookingRecord {
+  return {
+    id: row.id, clientId: row.client_id, locationId: row.location_id ?? undefined,
+    calendarConnectionId: row.calendar_connection_id ?? undefined, callId: row.call_id ?? undefined,
+    provider: row.provider, providerBookingId: row.provider_booking_id ?? undefined,
+    idempotencyKey: row.idempotency_key ?? undefined, status: row.status,
+    startsAt: toIso(row.starts_at), endsAt: toIso(row.ends_at),
+    attendeeName: row.attendee_name ?? undefined, attendeePhone: row.attendee_phone ?? undefined,
+    attendeeEmail: row.attendee_email ?? undefined, serviceSlug: row.service_slug ?? undefined,
+    metadata: row.metadata ?? {}, createdAt: toIso(row.created_at), updatedAt: toIso(row.updated_at),
+  };
+}
+
+function creditLedgerEntryFromRow(row: Record<string, any>): CreditLedgerEntry {
+  return {
+    id: row.id, clientId: row.client_id, minutes: Number(row.minutes),
+    kind: row.kind, direction: row.direction ?? undefined,
+    referenceType: row.reference_type ?? undefined,
+    referenceId: row.reference_id ?? undefined, description: row.description ?? undefined,
+    createdAt: toIso(row.created_at),
+  };
+}
+
+function provisioningRunFromRow(row: Record<string, any>): ProvisioningRun {
+  return {
+    id: row.id, clientId: row.client_id, idempotencyKey: row.idempotency_key,
+    status: row.status, step: row.step ?? undefined, input: row.input ?? {},
+    output: row.output ?? undefined, error: row.error ?? undefined,
+    startedAt: row.started_at ? toIso(row.started_at) : undefined,
+    finishedAt: row.finished_at ? toIso(row.finished_at) : undefined,
+    createdAt: toIso(row.created_at), updatedAt: toIso(row.updated_at),
   };
 }
 

@@ -5,7 +5,7 @@
 - Blades Hair is a barbering and hairdressing salon for men and women.
 - Address: 8 Cullum Street, London EC3M 7JJ, in the City of London.
 - Telephone: 020 7623 1994 and 020 7929 6680.
-- Opening hours: Monday to Friday, 10am–7pm. Do not claim weekend opening.
+- Opening hours: Monday to Friday, 10am–7pm (speak naturally as weekdays ten till seven). Do not claim weekend opening.
 - Online booking is available 24/7. Customers receive email confirmation and a reminder two hours before.
 - During a consultation, the stylist discusses the look, the caller's work and clothing style, daily routine, hair texture and practical styling time. The aim is hair that works every day, not only when leaving the salon.
 - All men's treatments finish with a refreshing hot towel for the face and neck, included in the treatment.
@@ -31,7 +31,8 @@ Galyna, Cristina, Jana, Daiva, Denise, Stacey and Laima.
 - T-section highlights: from £100.
 - Full-head colour: from £95.
 - Colour regrowth: from £66.
-- Re-style, hair up and colour correction: priced at consultation.
+- Re-style, layered cut, hair up and colour correction: priced at consultation. Never invent a fixed layered-cut price; offer a short consultation visit first.
+- Ladies shampoo cut & finish (including a classic layered look once the stylist confirms) starts from £68.
 
 ## Gentlemen's services — FROM prices
 
@@ -47,7 +48,7 @@ Galyna, Cristina, Jana, Daiva, Denise, Stacey and Laima.
 ## Service guidance
 
 - Say “from sixty-eight pounds”, never “sixty-eight GBP”.
-- For colour correction, re-style and hair up, explain that the stylist prices it at consultation.
+- For colour correction, re-style, layered cut and hair up, explain that the stylist prices it at consultation.
 - Never invent add-ons, treatment prices, weekend hours, cancellation fees or specialist biographies.
 - For a major colour change, suggest a consultation before the main service.
 - The customer should arrive a few minutes before an appointment when practical.

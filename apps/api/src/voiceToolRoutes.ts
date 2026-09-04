@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import {
   BLADES_HAIR_ID,
   isAiServiceEnabled,
@@ -44,6 +44,19 @@ export function voiceToolClientId(
   }
 }
 
+export async function voiceToolClientIdForRequest(
+  store: PlatformStore,
+  header: string | string[] | undefined,
+): Promise<string | undefined> {
+  const legacy = voiceToolClientId(header);
+  if (legacy) return legacy;
+  const value = Array.isArray(header) ? header[0] || "" : header || "";
+  if (!value) return undefined;
+  const hash = createHash("sha256").update(value).digest("hex");
+  const agent = await store.getAgentInstanceByVoiceCredentialHash(hash);
+  return agent?.status === "active" ? agent.clientId : undefined;
+}
+
 function callFor(clientId: string, conversationId: string): CallSession {
   const now = new Date().toISOString();
   return {
@@ -86,6 +99,17 @@ export async function runVoiceTool(
       body: { ok: false, error: "service_unavailable", reason: access.reason },
     };
   }
+  const subscription = await store.getCurrentSubscription(client.id);
+  if (
+    subscription?.status === "trialing" &&
+    subscription.trialEndsAt &&
+    Date.parse(subscription.trialEndsAt) <= Date.now()
+  ) {
+    return {
+      status: 403,
+      body: { ok: false, error: "service_unavailable", reason: "trial_expired" },
+    };
+  }
   if (!client.enabledFeatures.includes("booking")) {
     return { status: 403, body: { ok: false, error: "booking_not_enabled" } };
   }
@@ -101,6 +125,7 @@ export async function runVoiceTool(
         return { status: 400, body: { ok: false, error: "missing_conversation_id" } };
       }
   const call = callFor(client.id, conversationId);
+  await store.saveCall(call);
 
   if (tool === "check-availability") {
     const start = String(input.start || "");
@@ -172,6 +197,32 @@ export async function runVoiceTool(
   if (!booking.uid) {
     return { status: 502, body: { ok: false, error: "booking_not_confirmed" } };
   }
+  const calendarConnection = (await store.listCalendarConnections(client.id))
+    .find((connection) => connection.status !== "disabled");
+  const bookingId = `booking_${createHash("sha256")
+    .update(`${client.id}:${booking.uid}`)
+    .digest("hex")
+    .slice(0, 24)}`;
+  await store.saveBookingRecord({
+    id: bookingId,
+    clientId: client.id,
+    locationId: calendarConnection?.locationId,
+    calendarConnectionId: calendarConnection?.id,
+    callId: conversationId,
+    provider: client.calendar.provider,
+    providerBookingId: booking.uid,
+    idempotencyKey: String(input.idempotencyKey || `${conversationId}:${eventTypeSlug}:${start}`),
+    status: "confirmed",
+    startsAt: new Date(start).toISOString(),
+    endsAt: new Date(Date.parse(start) + duration * 60_000).toISOString(),
+    attendeeName,
+    attendeePhone,
+    attendeeEmail: String(input.attendeeEmail || "").trim() || undefined,
+    serviceSlug: eventTypeSlug,
+    metadata: { source: "elevenlabs_voice_tool" },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
   return {
     status: 200,
     body: { ok: true, bookingUid: booking.uid, bookingStatus: booking.status || "accepted" },

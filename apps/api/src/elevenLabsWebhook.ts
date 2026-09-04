@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import {
+  newId,
   redactSecrets,
   type CallSession,
   type PlatformStore,
@@ -97,6 +98,10 @@ export async function ingestElevenLabsWebhook(
   if (!client) {
     return { status: 202, body: { received: true, ignored: true, reason: "unknown_agent" } };
   }
+  const previousCall = await store.getCall(conversationId);
+  if (previousCall && previousCall.clientId !== client.id) {
+    return { status: 409, body: { error: "conversation_tenant_conflict" } };
+  }
 
   const durationSeconds = Math.max(0, Number(data.metadata?.call_duration_secs || 0));
   const eventSeconds = Number(event.event_timestamp || Math.floor(Date.now() / 1000));
@@ -151,12 +156,25 @@ export async function ingestElevenLabsWebhook(
     updatedAt: new Date(eventSeconds * 1000).toISOString(),
   };
   await store.saveCall(call);
-  if (durationSeconds > 0) {
+  const previousDurationSeconds = Math.max(0, Number(previousCall?.durationSeconds || 0));
+  const usageDeltaSeconds = Math.max(0, durationSeconds - previousDurationSeconds);
+  if (usageDeltaSeconds > 0) {
     await store.addUsage(
       client.id,
-      call.direction === "inbound" ? durationSeconds / 60 : 0,
-      call.direction === "outbound" ? durationSeconds / 60 : 0,
+      call.direction === "inbound" ? usageDeltaSeconds / 60 : 0,
+      call.direction === "outbound" ? usageDeltaSeconds / 60 : 0,
     );
+    await store.appendCreditLedgerEntry({
+      id: newId("credit_usage_"),
+      clientId: client.id,
+      minutes: -(usageDeltaSeconds / 60),
+      kind: "usage",
+      direction: call.direction,
+      referenceType: "call_duration",
+      referenceId: `${call.id}:${durationSeconds}`,
+      description: `${call.direction} call usage`,
+      createdAt: call.updatedAt,
+    });
   }
   return { status: 200, body: { received: true, callId: call.id } };
 }

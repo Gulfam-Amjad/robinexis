@@ -46,3 +46,5 @@ brains/**/*.mp4
 brains/**/*.mov
 brains/**/*.wav
 brains/**/*.zip
+
+.vercel

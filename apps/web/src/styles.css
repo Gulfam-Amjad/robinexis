@@ -575,6 +575,25 @@ fieldset:disabled input, fieldset:disabled textarea, fieldset:disabled select { 
 @keyframes toast-in { from { opacity: 0; transform: translateX(20px) } }
 .not-found { align-items: center; background: #f0f0f0; display: flex; min-height: 100vh; justify-content: center; }
 .mobile-only { display: none; }
+.admin-client-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+.admin-client-card { background: #fafafa; border: 1px solid var(--line); border-radius: 14px; padding: 17px; }
+.admin-client-heading { align-items: center; display: flex; gap: 10px; }
+.admin-client-heading > div { flex: 1; min-width: 0; }
+.admin-client-heading strong, .admin-client-heading small { display: block; }
+.admin-client-heading strong { font-size: 12px; }
+.admin-client-heading small { color: var(--faint); font-size: 9px; margin-top: 3px; }
+.admin-client-card .detail-list { margin: 15px 0; }
+.admin-client-card > .button { width: 100%; }
+.availability-panel { margin-bottom: 18px; }
+.availability-controls { align-items: end; display: grid; gap: 10px; grid-template-columns: minmax(240px, 1fr) auto; }
+.booking-filters .filter-control { min-width: 155px; }
+.booking-detail-dialog .detail-list { margin-top: 18px; }
+.booking-detail-dialog .detail-list dd { max-width: 65%; overflow-wrap: anywhere; }
+.usage-detail-card { max-width: 800px; }
+.usage-unmetered { align-items: center; background: var(--accent-soft); border-radius: 13px; color: #06603a; display: flex; gap: 13px; padding: 17px; }
+.usage-unmetered > svg { flex: 0 0 auto; }
+.usage-unmetered strong { font-size: 12px; }
+.usage-unmetered p { font-size: 10px; margin: 3px 0 0; }
 
 @media (max-width: 1100px) {
   .feature-grid, .integration-grid { grid-template-columns: repeat(2, 1fr); }
@@ -612,6 +631,8 @@ fieldset:disabled input, fieldset:disabled textarea, fieldset:disabled select { 
   .settings-nav { display: flex; overflow: auto; position: static; }
   .team-access-form form { grid-template-columns: 1fr; }
   .team-access-form .button { width: 100%; }
+  .availability-controls { grid-template-columns: 1fr; }
+  .availability-controls .button { width: 100%; }
 }
 
 @media (max-width: 600px) {

@@ -21,9 +21,10 @@ const adminEmails = (process.env.ADMIN_EMAILS || "gulfamamjad633@gmail.com")
 
 function skipAuthEnabled() {
   if (process.env.SKIP_AUTH !== "true") return false;
-  if (!isProductionRuntime()) return true;
-  // Testing only. Anyone who can load the Vercel URL can mutate production data.
-  return process.env.ALLOW_INSECURE_SKIP_AUTH === "true";
+  // Never permit an environment flag to open the production API. This used to
+  // honor ALLOW_INSECURE_SKIP_AUTH and caused the live operator API to become
+  // anonymously writable.
+  return !isProductionRuntime();
 }
 
 export function corsHeaders(origin: string | undefined): Record<string, string> {
@@ -133,6 +134,23 @@ export async function authenticateRequest(
   try {
     const identity = await identityFromSupabaseToken(token);
     if (!identity) return undefined;
+    const profile = await store.getUserProfileByAuthUserId(identity.subject);
+    if (profile?.platformRole === "admin") {
+      return { ...identity, role: "operator", clientRoles: {} };
+    }
+    if (
+      profile?.platformRole === "client" &&
+      profile.clientId &&
+      profile.workspaceRole
+    ) {
+      return {
+        ...identity,
+        role: "salon",
+        clientRoles: { [profile.clientId]: profile.workspaceRole },
+      };
+    }
+    // Compatibility bridge while existing Supabase users are linked to
+    // profiles. ADMIN_EMAILS remains authoritative for current operators.
     if (adminEmails.includes(identity.email)) {
       return { ...identity, role: "operator", clientRoles: {} };
     }
@@ -150,15 +168,19 @@ export async function authenticateRequest(
   }
 }
 
-export function canAccessClient(actor: AuthenticatedActor, clientId: string): boolean {
-  return actor.role === "operator" || Boolean(actor.clientRoles[clientId]);
+export function requireAdmin(actor: AuthenticatedActor): boolean {
+  return actor.role === "operator";
 }
 
-export function canManageClient(actor: AuthenticatedActor, clientId: string): boolean {
-  if (actor.role === "operator") return true;
+export function requireTenantAccess(actor: AuthenticatedActor, clientId: string): boolean {
+  return requireAdmin(actor) || Boolean(actor.clientRoles[clientId]);
+}
+
+export function requireTenantWrite(actor: AuthenticatedActor, clientId: string): boolean {
+  if (requireAdmin(actor)) return true;
   return ["owner", "manager"].includes(actor.clientRoles[clientId] || "");
 }
 
-export function canAdministerPlatform(actor: AuthenticatedActor): boolean {
-  return actor.role === "operator";
-}
+export const canAccessClient = requireTenantAccess;
+export const canManageClient = requireTenantWrite;
+export const canAdministerPlatform = requireAdmin;

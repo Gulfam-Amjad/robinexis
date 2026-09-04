@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 import { BLADES_HAIR_ID, MemoryStore, seedStore } from "@robinexis/database";
 import { FakeCalendar } from "@robinexis/integrations";
-import { runVoiceTool, voiceToolAuthorized, voiceToolClientId } from "./voiceToolRoutes.js";
+import {
+  runVoiceTool,
+  voiceToolAuthorized,
+  voiceToolClientId,
+  voiceToolClientIdForRequest,
+} from "./voiceToolRoutes.js";
 
 describe("ElevenLabs voice tool routes", () => {
   it("requires a non-empty shared secret", () => {
@@ -20,6 +26,27 @@ describe("ElevenLabs voice tool routes", () => {
       ),
     ).toBe("client_second");
     expect(voiceToolClientId("wrong", "legacy", JSON.stringify({ client_second: "tenant-secret" }))).toBeUndefined();
+  });
+
+  it("resolves a hashed per-agent credential without storing its raw value", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    const secret = "tenant-db-secret";
+    await store.upsertAgentInstance({
+      id: "agent-instance-second",
+      clientId: "client_second",
+      provider: "elevenlabs",
+      providerAgentId: "agent_second",
+      voiceCredentialHash: createHash("sha256").update(secret).digest("hex"),
+      name: "Second receptionist",
+      status: "active",
+      config: {},
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    await expect(voiceToolClientIdForRequest(store, secret)).resolves.toBe("client_second");
+    await expect(voiceToolClientIdForRequest(store, "wrong")).resolves.toBeUndefined();
   });
 
   it("returns only calendar slots for a supported Blades service", async () => {
@@ -96,6 +123,38 @@ describe("ElevenLabs voice tool routes", () => {
     });
   });
 
+  it("blocks an app-managed trial after its explicit expiry", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    await store.upsertSubscription({
+      id: "trial-expired",
+      clientId: BLADES_HAIR_ID,
+      provider: "internal",
+      planTier: "starter",
+      status: "trialing",
+      trialEndsAt: "2020-01-01T00:00:00.000Z",
+      cancelAtPeriodEnd: false,
+      metadata: {},
+      createdAt: "2019-12-29T00:00:00.000Z",
+      updatedAt: "2019-12-29T00:00:00.000Z",
+    });
+    const result = await runVoiceTool(
+      store,
+      "check-availability",
+      {
+        eventTypeSlug: "30min",
+        start: "2026-09-02T00:00:00.000Z",
+        end: "2026-09-03T00:00:00.000Z",
+        conversationId: "conv_expired",
+      },
+      { store, calendar: new FakeCalendar() },
+    );
+    expect(result).toMatchObject({
+      status: 403,
+      body: { reason: "trial_expired" },
+    });
+  });
+
   it("books once with name and mobile but no email", async () => {
     const store = new MemoryStore();
     await seedStore(store);
@@ -116,6 +175,14 @@ describe("ElevenLabs voice tool routes", () => {
     expect(first.body.bookingUid).toBe("bk_1");
     expect(second.body.bookingUid).toBe("bk_1");
     expect(calendar.bookings.size).toBe(1);
+    expect(await store.listBookingRecords(BLADES_HAIR_ID)).toMatchObject([
+      {
+        providerBookingId: "bk_1",
+        callId: "conv_test",
+        status: "confirmed",
+        attendeeName: "Gultham",
+      },
+    ]);
   });
 
   it("does not book an unavailable or unconfirmed slot", async () => {

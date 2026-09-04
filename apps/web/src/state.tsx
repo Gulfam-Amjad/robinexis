@@ -80,9 +80,17 @@ type ClientValue = {
 
 const ClientContext = createContext<ClientValue | null>(null);
 
+function defaultClientId(clients: ClientSummary[]): string {
+  return clients[0].id;
+}
+
+function readStoredClientId(): string | undefined {
+  return sessionStorage.getItem(CLIENT_STORAGE) || undefined;
+}
+
 export function ClientProvider({ children }: { children: ReactNode }) {
   const { apiKey } = useSession();
-  const [activeClientId, setId] = useState<string | undefined>(() => sessionStorage.getItem(CLIENT_STORAGE) || undefined);
+  const [activeClientId, setId] = useState<string | undefined>(readStoredClientId);
   const clientsQuery = useQuery({
     queryKey: ["clients", apiKey],
     queryFn: api.clients,
@@ -93,10 +101,11 @@ export function ClientProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!clients.length) return;
-    if (!activeClientId || !clients.some((client) => client.id === activeClientId)) {
-      setId(clients[0].id);
-      sessionStorage.setItem(CLIENT_STORAGE, clients[0].id);
-    }
+    const saved = activeClientId ? clients.find((client) => client.id === activeClientId) : undefined;
+    if (saved) return;
+    const nextId = defaultClientId(clients);
+    setId(nextId);
+    sessionStorage.setItem(CLIENT_STORAGE, nextId);
   }, [activeClientId, clients]);
 
   const setActiveClientId = useCallback((id: string) => {

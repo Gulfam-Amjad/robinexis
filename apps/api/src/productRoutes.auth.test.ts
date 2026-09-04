@@ -28,17 +28,19 @@ async function request(
   store: MemoryStore,
   actor: AuthenticatedActor,
   path: string,
+  method = "GET",
+  requestBody?: unknown,
 ) {
   let status = 0;
   let body: any;
   const url = new URL(path, "http://localhost");
   const handled = await handleProductRoute({
-    req: { method: "GET" } as http.IncomingMessage,
+    req: { method } as http.IncomingMessage,
     res: {} as http.ServerResponse,
     url,
     store,
     actor,
-    readRaw: async () => Buffer.from(""),
+    readRaw: async () => Buffer.from(requestBody === undefined ? "" : JSON.stringify(requestBody)),
     send: (_res, responseStatus, responseBody) => {
       status = responseStatus;
       body = responseBody;
@@ -85,5 +87,35 @@ describe("product route tenant authorization", () => {
 
     const forbiddenCall = await request(store, salonActor, `/api/v1/calls/${call.id}`);
     expect(forbiddenCall).toMatchObject({ status: 404, body: { error: "call_not_found" } });
+  });
+
+  it("keeps edits in a draft until config and prompt publish atomically", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    const liveBefore = await store.getClient(BLADES_HAIR_ID);
+    const draftGreeting = "Draft greeting that must not affect live calls.";
+
+    const patched = await request(
+      store,
+      operatorActor,
+      `/api/v1/clients/${BLADES_HAIR_ID}`,
+      "PATCH",
+      { greeting: draftGreeting },
+    );
+    expect(patched).toMatchObject({ status: 200, body: { hasUnpublishedChanges: true } });
+    expect((await store.getClient(BLADES_HAIR_ID))?.greeting).toBe(liveBefore?.greeting);
+
+    const published = await request(
+      store,
+      operatorActor,
+      `/api/v1/clients/${BLADES_HAIR_ID}/publish`,
+      "POST",
+    );
+    expect(published.status).toBe(200);
+    expect((await store.getClient(BLADES_HAIR_ID))?.greeting).toBe(draftGreeting);
+    expect(await store.getDraftClient(BLADES_HAIR_ID)).toBeUndefined();
+    expect((await store.latestPrompt(BLADES_HAIR_ID))?.id).toBe(
+      (await store.getClient(BLADES_HAIR_ID))?.promptVersionId,
+    );
   });
 });

@@ -17,11 +17,13 @@ import {
   Users,
   X,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { api, initials } from "../lib/api";
 import { AUTH_REQUIRED } from "../lib/auth";
+import { usePermissions } from "../lib/permissions";
 import { useClient, useSession } from "../state";
 import { Badge } from "./ui";
 
@@ -32,15 +34,23 @@ const navigation = [
   { label: "Calls", to: "/app/calls", icon: PhoneCall },
   { label: "Analytics", to: "/app/analytics", icon: BarChart3 },
   { label: "Calendar", to: "/app/calendar", icon: CalendarDays },
+  { label: "Usage", to: "/app/usage", icon: CircleDollarSign },
   { label: "Knowledge", to: "/app/knowledge", icon: BookOpen },
   { label: "Integrations", to: "/app/integrations", icon: PlugZap },
 ] as const;
 
 const secondary = [
   { label: "Team", to: "/app/team", icon: Users },
-  { label: "Billing", to: "/app/billing", icon: CircleDollarSign },
   { label: "Settings", to: "/app/settings", icon: Settings },
 ] as const;
+
+const adminNavigation = [
+  { label: "Operations", to: "/admin", icon: LayoutDashboard, end: true },
+  { label: "Add client", to: "/admin/clients/new", icon: Users },
+  { label: "Plan & usage", to: "/admin/billing", icon: CircleDollarSign },
+] as const;
+
+type NavigationItem = { label: string; to: string; icon: LucideIcon; end?: boolean };
 
 export function Logo({ light = false }: { light?: boolean }) {
   return (
@@ -52,14 +62,16 @@ export function Logo({ light = false }: { light?: boolean }) {
 }
 
 function NavItems({
-  actorRole,
+  isOperator,
+  adminArea,
   onNavigate,
 }: {
-  actorRole: "operator" | "salon";
+  isOperator: boolean;
+  adminArea: boolean;
   onNavigate?: () => void;
 }) {
-  const render = ({ label, to, icon: Icon, ...item }: (typeof navigation)[number] | (typeof secondary)[number]) => (
-    <NavLink className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`} end={"end" in item && item.end} key={to} to={to} onClick={onNavigate}>
+  const render = ({ label, to, icon: Icon, end }: NavigationItem) => (
+    <NavLink className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`} end={end} key={to} to={to} onClick={onNavigate}>
       <Icon size={18} />
       <span>{label}</span>
     </NavLink>
@@ -67,13 +79,14 @@ function NavItems({
   return (
     <>
       <nav className="sidebar-nav" aria-label="Product navigation">
-        {navigation.map(render)}
+        {(adminArea ? adminNavigation : navigation).map(render)}
       </nav>
       <div className="sidebar-spacer" />
       <nav className="sidebar-nav sidebar-secondary" aria-label="Workspace navigation">
-        {secondary
-          .filter((item) => actorRole === "operator" || item.label !== "Billing")
-          .map(render)}
+        {adminArea
+          ? render({ label: "Client workspace", to: "/app", icon: LayoutDashboard, end: true })
+          : secondary.map(render)}
+        {!adminArea && isOperator && render({ label: "Operator admin", to: "/admin", icon: Settings })}
       </nav>
     </>
   );
@@ -85,10 +98,12 @@ export function AppShell() {
   const profileRef = useRef<HTMLDivElement>(null);
   const { clients, activeClient, activeClientId, setActiveClientId } = useClient();
   const { actor, logout } = useSession();
-  const actorRole = actor?.role || "operator";
+  const { isOperator } = usePermissions(activeClientId);
+  const actorRole = isOperator ? "operator" : "salon";
   const navigate = useNavigate();
   const location = useLocation();
-  const current = [...navigation, ...secondary].find((item) =>
+  const adminArea = location.pathname === "/admin" || location.pathname.startsWith("/admin/");
+  const current = [...(adminArea ? adminNavigation : navigation), ...secondary].find((item) =>
     item.to === "/app" ? location.pathname === "/app" : location.pathname.startsWith(item.to),
   );
   const integrations = useQuery({
@@ -140,7 +155,7 @@ export function AppShell() {
           </label>
           {(actorRole === "operator" || clients.length > 1) && <ChevronsUpDown size={15} />}
         </div>
-        <NavItems actorRole={actorRole} onNavigate={() => setMobileOpen(false)} />
+        <NavItems isOperator={isOperator} adminArea={adminArea} onNavigate={() => setMobileOpen(false)} />
         {activeClientId && <div className="sidebar-health"><span className={connected === total && total ? "health-dot ready" : "health-dot"} /><div><strong>System connections</strong><small>{integrations.isLoading ? "Checking…" : `${connected} of ${total} ready`}</small></div><Link to="/app/integrations">View</Link></div>}
         <div className="sidebar-help">
           <span><Sparkles size={16} /> Need a hand?</span>
@@ -156,13 +171,12 @@ export function AppShell() {
             <div><small>{actorRole === "operator" ? "Robinexis operations" : activeClient?.businessName || "Salon workspace"}</small><strong>{current?.label || "Robinexis"}</strong></div>
           </div>
           <div className="topbar-actions" ref={profileRef}>
-            <Badge tone="accent">Sandbox aware</Badge>
             <Badge tone={actorRole === "operator" ? "accent" : "neutral"}>
               {actorRole === "operator" ? "Operator" : "Salon owner"}
             </Badge>
             {activeClient && <Badge tone={activeClient.access?.inbound ? "success" : activeClient.published ? "accent" : "warning"}>{activeClient.access?.inbound ? "Phone active" : activeClient.published ? "Approved" : "Draft"}</Badge>}
             <button className="profile-button" aria-haspopup="menu" aria-expanded={profileOpen} onClick={() => setProfileOpen((value) => !value)}>
-              <span className="profile-avatar">RE</span>
+              <span className="profile-avatar">{initials(actor?.email || "Salon user")}</span>
               <span className="profile-copy">
                 <strong>{actorRole === "operator" ? "Robinexis operator" : actor?.email || "Salon user"}</strong>
                 <small>{actorRole === "operator" ? "All workspaces" : "Assigned workspaces only"}</small>

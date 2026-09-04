@@ -91,8 +91,25 @@ export const api = {
   bootstrap: (clientId?: string) =>
     request<BootstrapResponse>(`/api/v1/bootstrap${query({ clientId })}`),
   clients: async () => list(await request<ClientSummary[] | ListResponse<ClientSummary>>("/api/v1/clients")),
+  adminSummary: () => request<{
+    month: string;
+    mrrPence: number;
+    totalUsedMinutes: number;
+    totalFailedCalls: number;
+    clients: Array<{
+      clientId: string;
+      plan: "starter" | "pro" | "enterprise";
+      subscriptionStatus: string;
+      usedMinutes: number;
+      remainingMinutes: number;
+      failedCalls: number;
+    }>;
+  }>("/api/v1/admin/summary"),
   client: (id: string) => request<Client>(`/api/v1/clients/${encodeURIComponent(id)}`),
-  createClient: (input: Partial<Client>) =>
+  createClient: (input: Partial<Client> & {
+    planTier?: "starter" | "pro" | "enterprise";
+    calendar?: Client["calendar"] & { credentialRef?: string };
+  }) =>
     request<Client>("/api/v1/clients", { method: "POST", body: JSON.stringify(input) }),
   updateClient: (id: string, input: Partial<Client>) =>
     request<{ client?: Client; republishRequired?: boolean } | Client>(`/api/v1/clients/${encodeURIComponent(id)}`, {
@@ -103,6 +120,33 @@ export const api = {
     request<{ client?: Client; promptVersion?: PromptVersion }>(`/api/v1/clients/${encodeURIComponent(id)}/publish`, {
       method: "POST",
     }),
+  provisionClient: (id: string, operationKey: string, twilioNumber?: string) =>
+    request<{
+      runId: string;
+      elevenlabsAgentId: string;
+      phoneNumberId?: string;
+    }>(`/api/v1/clients/${encodeURIComponent(id)}/provision`, {
+      method: "POST",
+      body: JSON.stringify({ operationKey, twilioNumber }),
+    }),
+  provisioningRuns: (id: string) =>
+    request<{ items: Array<{
+      id: string;
+      status: "pending" | "running" | "succeeded" | "failed" | "cancelled";
+      step?: string;
+      error?: string;
+      updatedAt: string;
+    }> }>(`/api/v1/clients/${encodeURIComponent(id)}/provisioning`),
+  setServiceStatus: (id: string, action: "suspend" | "reactivate") =>
+    request<{ clientId: string; serviceStatus: string }>(
+      `/api/v1/clients/${encodeURIComponent(id)}/service-status`,
+      { method: "POST", body: JSON.stringify({ action }) },
+    ),
+  adjustCredits: (id: string, minutes: number, reason: string, idempotencyKey: string) =>
+    request<{ appended: boolean; remainingMinutes: number }>(
+      `/api/v1/clients/${encodeURIComponent(id)}/credit-adjustments`,
+      { method: "POST", body: JSON.stringify({ minutes, reason, idempotencyKey }) },
+    ),
   promptVersions: async (id: string) =>
     list(await request<PromptVersion[] | ListResponse<PromptVersion>>(`/api/v1/clients/${encodeURIComponent(id)}/prompt-versions`)),
   calls: async (clientId: string, filters: Record<string, string | undefined> = {}) =>
@@ -115,6 +159,11 @@ export const api = {
     list(await request<TimeseriesPoint[] | ListResponse<TimeseriesPoint>>(`/api/v1/analytics/timeseries${query({ clientId, ...range })}`)),
   usage: (clientId: string, month?: string) =>
     request<Usage>(`/api/v1/usage${query({ clientId, month })}`),
+  createCheckout: (clientId: string, plan: "starter" | "pro") =>
+    request<{ checkoutSessionId: string; url: string | null }>("/api/v1/billing/checkout", {
+      method: "POST",
+      body: JSON.stringify({ clientId, plan }),
+    }),
   slots: async (clientId: string, eventTypeSlug: string) =>
     list(await request<CalendarSlot[] | ListResponse<CalendarSlot>>(`/api/v1/calendar/slots${query({ clientId, eventTypeSlug })}`)),
   bookings: async (clientId: string) =>

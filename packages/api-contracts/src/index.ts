@@ -47,6 +47,7 @@ export interface ClientService {
 }
 
 export interface Client extends ClientSummary {
+  hasUnpublishedChanges?: boolean;
   role?: string;
   greeting?: string;
   tone?: string;
@@ -120,6 +121,10 @@ export interface Usage {
   month: string;
   inboundMinutes: number;
   outboundMinutes: number;
+  plan?: "starter" | "pro" | "enterprise";
+  allocatedMinutes?: number;
+  usedMinutes?: number;
+  remainingMinutes?: number;
 }
 
 export interface TimeseriesPoint {
@@ -137,6 +142,7 @@ export interface Booking {
   attendeeName?: string;
   attendeeEmail?: string;
   status?: string;
+  sourceCallId?: string;
 }
 
 export interface CalendarSlot {

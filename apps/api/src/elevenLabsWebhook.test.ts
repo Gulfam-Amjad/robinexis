@@ -61,5 +61,13 @@ describe("ElevenLabs post-call webhook", () => {
       durationSeconds: 10,
     });
     expect((await store.getCall("conv_live_1"))?.transcript).toHaveLength(2);
+    const month = new Date().toISOString().slice(0, 7);
+    expect((await store.getUsage(BLADES_HAIR_ID, month))?.inboundMinutes).toBeCloseTo(10 / 60);
+    expect(await store.getCreditBalance(BLADES_HAIR_ID)).toBeCloseTo(-(10 / 60));
+
+    const replay = await ingestElevenLabsWebhook(store, event.raw, event.header, secret);
+    expect(replay.status).toBe(200);
+    expect((await store.getUsage(BLADES_HAIR_ID, month))?.inboundMinutes).toBeCloseTo(10 / 60);
+    expect(await store.getCreditBalance(BLADES_HAIR_ID)).toBeCloseTo(-(10 / 60));
   });
 });

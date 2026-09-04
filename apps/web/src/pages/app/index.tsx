@@ -60,10 +60,11 @@ import {
   YAxis,
 } from "recharts";
 import { z } from "zod";
-import type { Call, Client, Job, TimeseriesPoint } from "@robinexis/api-contracts";
+import type { Booking, Call, Client, Job, TimeseriesPoint } from "@robinexis/api-contracts";
 import { api, formatDate } from "../../lib/api";
+import { usePermissions } from "../../lib/permissions";
 import { workspaceReceptionistDemo } from "../../lib/receptionistDemo";
-import { useClient, useSession, useToast } from "../../state";
+import { useClient, useToast } from "../../state";
 import { ReceptionistCall } from "../../components/ReceptionistCall";
 import {
   Badge,
@@ -84,12 +85,12 @@ import {
 
 function ClientGate({ children }: { children: (clientId: string) => React.ReactNode }) {
   const { activeClientId, isLoading, error } = useClient();
-  const { actor } = useSession();
+  const { canCreateClients } = usePermissions();
   if (isLoading) return <LoadingState label="Loading client workspace…" />;
   if (error) return <ErrorState error={error} />;
   if (!activeClientId) {
-    return actor?.role === "operator"
-      ? <EmptyState icon={Sparkles} title="Create your first client" description="Add the business details your voice agent will use, then test and publish it." action={<LinkButton to="/app/onboarding">Start setup</LinkButton>} />
+    return canCreateClients
+      ? <EmptyState icon={Sparkles} title="Create your first client" description="Add the business details your voice agent will use, then test and publish it." action={<LinkButton to="/admin/clients/new">Start setup</LinkButton>} />
       : <EmptyState icon={ShieldCheck} title="No workspace assigned" description="Ask a Robinexis operator or workspace owner to add your email to a salon." />;
   }
   return <>{children(activeClientId)}</>;
@@ -124,12 +125,16 @@ export function OverviewPage() {
 function OverviewContent({ clientId }: { clientId: string }) {
   const { activeClient } = useClient();
   const bootstrap = useQuery({ queryKey: ["bootstrap", clientId], queryFn: () => api.bootstrap(clientId), retry: false });
+  const usage = useQuery({ queryKey: ["usage", clientId], queryFn: () => api.usage(clientId), retry: false });
+  const client = useQuery({ queryKey: ["client", clientId], queryFn: () => api.client(clientId), retry: false });
   if (bootstrap.isLoading) return <LoadingState />;
   if (bootstrap.error) return <ErrorState error={bootstrap.error} onRetry={() => bootstrap.refetch()} />;
   const summary = bootstrap.data?.summary;
   const calls = bootstrap.data?.recentCalls || [];
   const integrations = bootstrap.data?.integrations || [];
   const integration = (id: string) => integrations.find((item) => item.id.toLowerCase() === id);
+  const monthlyMinutes = usage.data ? usage.data.inboundMinutes + usage.data.outboundMinutes : undefined;
+  const minuteLimit = client.data?.monthlyMinuteLimit;
   return (
     <>
       <PageHeader eyebrow="Good afternoon" title={`${activeClient?.businessName || "Your business"} is in good hands`} description="Here’s what your receptionist has been doing for your customers." actions={<LinkButton to="/app/playground" variant="secondary"><Play size={15} /> Test agent</LinkButton>} />
@@ -138,8 +143,22 @@ function OverviewContent({ clientId }: { clientId: string }) {
         <MetricCard label="Total calls" value={summary?.totalCalls ?? 0} detail="Current period" icon={PhoneCall} tone="cream" />
         <MetricCard label="Appointments booked" value={summary?.bookedAppointments ?? 0} detail={`${Math.round(summary?.bookingRate || 0)}% booking rate`} icon={CalendarCheck2} tone="sage" />
         <MetricCard label="Minutes handled" value={summary?.minutesUsed ?? 0} detail="Time back for your team" icon={Clock3} tone="peach" />
-        <MetricCard label="Calls transferred" value={summary?.transferredCalls ?? 0} detail="Human handoffs" icon={Users} tone="lilac" />
+        <MetricCard
+          label="Monthly usage"
+          value={usage.isLoading ? "…" : monthlyMinutes ?? "—"}
+          detail={usage.error ? "Usage unavailable" : minuteLimit ? `of ${minuteLimit} minute allowance` : usage.data?.month || "Current billing month"}
+          icon={CircleDollarSign}
+          tone="lilac"
+        />
       </div>
+      <Card className="panel">
+        <SectionHeading title="Recovery metrics" description="Robinexis shows outcomes only when the underlying booking events can support them." />
+        <div className="metrics-grid metrics-compact">
+          <MetricCard label="Appointments rescheduled" value="Unavailable" detail="Reschedule event history is not complete yet" icon={RefreshCw} />
+          <MetricCard label="No-shows recovered" value="Unavailable" detail="No-show outcomes are not connected yet" icon={CalendarCheck2} />
+          <MetricCard label="Recovered revenue" value="Unavailable" detail="No verified revenue attribution is available" icon={CircleDollarSign} />
+        </div>
+      </Card>
       <div className="overview-grid">
         <Card className="panel">
           <SectionHeading title="Recent calls" description="The latest customer conversations" action={<Link to="/app/calls" className="subtle-link">View all <ChevronRight size={14} /></Link>} />
@@ -161,6 +180,110 @@ function OverviewContent({ clientId }: { clientId: string }) {
   );
 }
 
+export function AdminOverviewPage() {
+  const { clients, isLoading, error, setActiveClientId } = useClient();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { push } = useToast();
+  const summary = useQuery({ queryKey: ["admin-summary"], queryFn: api.adminSummary, retry: false });
+  const serviceAction = useMutation({
+    mutationFn: ({ clientId, action }: { clientId: string; action: "suspend" | "reactivate" }) =>
+      api.setServiceStatus(clientId, action),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["clients"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin-summary"] }),
+      ]);
+      push({ title: "Service status updated", tone: "success" });
+    },
+    onError: (mutationError) => push({ title: "Status update failed", message: mutationError.message, tone: "error" }),
+  });
+  const creditAdjustment = useMutation({
+    mutationFn: ({ clientId, minutes, reason }: { clientId: string; minutes: number; reason: string }) =>
+      api.adjustCredits(clientId, minutes, reason, crypto.randomUUID()),
+    onSuccess: async (result) => {
+      await queryClient.invalidateQueries({ queryKey: ["admin-summary"] });
+      push({ title: "Credit adjustment recorded", message: `${result.remainingMinutes} minutes remain.`, tone: "success" });
+    },
+    onError: (mutationError) => push({ title: "Credit adjustment failed", message: mutationError.message, tone: "error" }),
+  });
+  if (isLoading) return <LoadingState label="Loading client operations…" />;
+  if (error) return <ErrorState error={error} />;
+
+  const active = clients.filter((client) => client.access?.inbound).length;
+  const drafts = clients.filter((client) => !client.published).length;
+  const attention = clients.filter((client) => ["past_due", "unpaid", "canceled"].includes(client.serviceStatus)).length;
+  const openWorkspace = (clientId: string) => {
+    setActiveClientId(clientId);
+    navigate("/app");
+  };
+  const adjustCredits = (clientId: string) => {
+    const rawMinutes = window.prompt("Minutes to add (negative removes minutes)");
+    if (rawMinutes === null) return;
+    const minutes = Number(rawMinutes);
+    if (!Number.isFinite(minutes) || minutes === 0) {
+      push({ title: "Enter a non-zero number of minutes", tone: "error" });
+      return;
+    }
+    const reason = window.prompt("Reason for this audited adjustment")?.trim();
+    if (!reason) return;
+    creditAdjustment.mutate({ clientId, minutes, reason });
+  };
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="Operator admin"
+        title="One place to run every client workspace"
+        description="Review tenant status, open the right workspace, and keep operator-only controls separate from the salon experience."
+        actions={<LinkButton to="/admin/clients/new"><Plus size={15} /> Add client</LinkButton>}
+      />
+      <div className="metrics-grid metrics-compact">
+        <MetricCard label="Client workspaces" value={clients.length} detail="Visible to this operator" icon={Users} />
+        <MetricCard label="Inbound active" value={active} detail="Reported by access controls" icon={PhoneCall} tone="sage" />
+        <MetricCard label="Stripe MRR" value={`£${((summary.data?.mrrPence || 0) / 100).toFixed(0)}`} detail="Active paid subscriptions" icon={CircleDollarSign} tone="lilac" />
+        <MetricCard label="Minutes used" value={Math.round(summary.data?.totalUsedMinutes || 0)} detail={`${summary.data?.totalFailedCalls || 0} failed calls`} icon={Clock3} />
+        <MetricCard label="Needs attention" value={attention + drafts} detail={`${drafts} draft · ${attention} service status`} icon={ShieldCheck} tone="peach" />
+      </div>
+      <Card className="panel">
+        <SectionHeading title="Client portfolio" description="Status comes directly from the client summaries returned by the API." />
+        {!clients.length ? (
+          <EmptyState icon={Users} title="No client workspaces" description="Create the first tenant without exposing operator setup controls to salon users." action={<LinkButton to="/admin/clients/new">Add first client</LinkButton>} />
+        ) : (
+          <div className="admin-client-grid">
+            {clients.map((client) => (
+              (() => {
+              const health = summary.data?.clients.find((item) => item.clientId === client.id);
+              return (
+              <article className="admin-client-card" key={client.id}>
+                <div className="admin-client-heading">
+                  <span className="client-avatar">{client.businessName.slice(0, 2).toUpperCase()}</span>
+                  <div><strong>{client.businessName}</strong><small>{client.slug}</small></div>
+                  <Badge tone={client.access?.inbound ? "success" : client.published ? "warning" : "neutral"}>{client.access?.inbound ? "Inbound active" : client.published ? "Published" : "Draft"}</Badge>
+                </div>
+                <dl className="detail-list">
+                  <div><dt>Service</dt><dd className="capitalize">{client.serviceStatus.replaceAll("_", " ")}</dd></div>
+                  <div><dt>Workspace</dt><dd>{client.published ? "Published" : "Draft"}</dd></div>
+                  <div><dt>Plan</dt><dd className="capitalize">{health?.plan || "starter"}</dd></div>
+                  <div><dt>Credits</dt><dd>{Math.round(health?.remainingMinutes || 0)} min remaining</dd></div>
+                  <div><dt>Failures</dt><dd>{health?.failedCalls || 0}</dd></div>
+                </dl>
+                <div className="row-actions">
+                  <Button variant="secondary" onClick={() => openWorkspace(client.id)}>Open workspace <ChevronRight size={15} /></Button>
+                  <Button variant="ghost" onClick={() => serviceAction.mutate({ clientId: client.id, action: client.serviceStatus === "paused" ? "reactivate" : "suspend" })}>{client.serviceStatus === "paused" ? "Reactivate" : "Suspend"}</Button>
+                  <Button variant="ghost" onClick={() => adjustCredits(client.id)}>Adjust credits</Button>
+                </div>
+              </article>
+              );
+              })()
+            ))}
+          </div>
+        )}
+      </Card>
+    </>
+  );
+}
+
 const clientSchema = z.object({
   businessName: z.string().min(2, "Business name is required"),
   slug: z.string().min(2, "Use at least 2 characters").regex(/^[a-z0-9-]+$/, "Use lowercase letters, numbers, and hyphens"),
@@ -168,6 +291,9 @@ const clientSchema = z.object({
   phone: z.string().optional(),
   email: z.string().email("Enter a valid email").or(z.literal("")),
   calendarProvider: z.enum(["calcom", "google", "outlook", "fresha"]),
+  calendarCredentialRef: z.string().regex(/^[A-Z][A-Z0-9_]*$/, "Use the Railway environment variable name"),
+  transferNumber: z.string().regex(/^\+[1-9]\d{7,14}$/, "Use an international number such as +447700900123"),
+  planTier: z.enum(["starter", "pro", "enterprise"]),
 });
 
 export function OnboardingPage() {
@@ -177,7 +303,11 @@ export function OnboardingPage() {
   const { setActiveClientId } = useClient();
   const { register, handleSubmit, formState: { errors } } = useForm<z.infer<typeof clientSchema>>({
     resolver: zodResolver(clientSchema),
-    defaultValues: { calendarProvider: "calcom" },
+    defaultValues: {
+      calendarProvider: "calcom",
+      calendarCredentialRef: "CALCOM_API_KEY",
+      planTier: "starter",
+    },
   });
   const create = useMutation({
     mutationFn: (values: z.infer<typeof clientSchema>) => api.createClient({
@@ -186,7 +316,12 @@ export function OnboardingPage() {
       location: values.location,
       phone: values.phone,
       email: values.email,
-      calendar: { provider: values.calendarProvider },
+      transferNumber: values.transferNumber,
+      planTier: values.planTier,
+      calendar: {
+        provider: values.calendarProvider,
+        credentialRef: values.calendarCredentialRef,
+      },
       role: "AI receptionist",
       tone: "Warm, professional and concise",
       publishedFacts: [],
@@ -197,7 +332,7 @@ export function OnboardingPage() {
       await queryClient.invalidateQueries({ queryKey: ["clients"] });
       setActiveClientId(created.id);
       push({ title: "Workspace created", message: "Now shape your first voice agent.", tone: "success" });
-      navigate("/app/agents/new");
+      navigate("/admin/agents/new");
     },
     onError: (error) => push({ title: "Couldn’t create client", message: error.message, tone: "error" }),
   });
@@ -216,6 +351,9 @@ export function OnboardingPage() {
               <Field label="Business phone"><input placeholder="+44 113 000 0000" {...register("phone")} /></Field>
               <Field label="Customer email" error={errors.email?.message}><input placeholder="hello@business.co.uk" {...register("email")} /></Field>
               <Field label="Calendar provider"><select {...register("calendarProvider")}><option value="calcom">Cal.com</option><option value="google">Google Calendar</option><option value="outlook">Outlook</option><option value="fresha">Fresha</option></select></Field>
+              <Field label="Calendar credential reference" hint="The environment variable name, never the API key." error={errors.calendarCredentialRef?.message}><input placeholder="CALCOM_CLIENT_API_KEY" {...register("calendarCredentialRef")} /></Field>
+              <Field label="Owner / front desk number" hint="Required for a warm conference transfer." error={errors.transferNumber?.message}><input placeholder="+447700900123" {...register("transferNumber")} /></Field>
+              <Field label="Plan"><select {...register("planTier")}><option value="starter">Starter — £99/month</option><option value="pro">Pro — £249/month</option><option value="enterprise">Enterprise — contact sales</option></select></Field>
             </div>
             <div className="form-actions"><Link className="button button-ghost button-md" to="/app">Cancel</Link><Button disabled={create.isPending}>{create.isPending ? "Creating…" : "Continue to agent"} <ChevronRight size={16} /></Button></div>
           </form>
@@ -230,14 +368,14 @@ export function AgentsPage() {
 }
 
 function AgentsContent({ clientId }: { clientId: string }) {
-  const { actor } = useSession();
+  const { isOperator } = usePermissions(clientId);
   const client = useQuery({ queryKey: ["client", clientId], queryFn: () => api.client(clientId), retry: false });
   if (client.isLoading) return <LoadingState label="Loading your agent…" />;
   if (client.error) return <ErrorState error={client.error} onRetry={() => client.refetch()} />;
   const item = client.data!;
   return (
     <>
-      <PageHeader eyebrow="Voice agents" title="Your reception team" description="Configure how Robinexis answers, acts, and hands conversations back to people." actions={actor?.role === "operator" ? <LinkButton to="/app/agents/new"><Plus size={15} /> New agent</LinkButton> : undefined} />
+      <PageHeader eyebrow="Voice agents" title="Your reception team" description="Configure how Robinexis answers, acts, and hands conversations back to people." actions={isOperator ? <LinkButton to="/admin/agents/new"><Plus size={15} /> New agent</LinkButton> : undefined} />
       <div className="agent-grid">
         <Card className="agent-card">
           <div className="agent-card-top"><span className="agent-avatar"><Bot /></span><Badge tone={item.published ? "success" : "warning"}>{item.published ? "Approved" : "Draft"}</Badge></div>
@@ -245,7 +383,7 @@ function AgentsContent({ clientId }: { clientId: string }) {
           <div className="agent-meta"><span><PhoneCall /> {item.inboundNumbers?.length || 0} number{item.inboundNumbers?.length === 1 ? "" : "s"}</span><span><BookOpen /> {item.publishedFacts?.length || 0} facts</span></div>
           <div className="agent-card-actions"><Link className="button button-secondary button-md" to={`/app/agents/${item.id}`}>Open agent</Link><Link className="icon-button" to="/app/playground"><Play size={17} /></Link></div>
         </Card>
-        {actor?.role === "operator" && <button className="new-agent-card" onClick={() => { window.location.href = "/app/agents/new"; }}><span><Plus /></span><strong>Create another agent</strong><p>Set up a different role, location, or conversation flow.</p></button>}
+        {isOperator && <button className="new-agent-card" onClick={() => { window.location.href = "/admin/agents/new"; }}><span><Plus /></span><strong>Create another agent</strong><p>Set up a different role, location, or conversation flow.</p></button>}
       </div>
     </>
   );
@@ -271,10 +409,8 @@ const agentSchema = z.object({
 function AgentForm({ client, isNew = false }: { client: Client; isNew?: boolean }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const { actor } = useSession();
   const { push } = useToast();
-  const canEdit = actor?.role === "operator" || ["owner", "manager"].includes(actor?.clientRoles[client.id] || "");
-  const isOperator = actor?.role === "operator";
+  const { canEditWorkspace: canEdit, isOperator } = usePermissions(client.id);
   const { register, handleSubmit, formState: { errors, isDirty } } = useForm<z.infer<typeof agentSchema>>({
     resolver: zodResolver(agentSchema),
     defaultValues: {
@@ -368,7 +504,7 @@ function AgentForm({ client, isNew = false }: { client: Client; isNew?: boolean 
 export function NewAgentPage() {
   const { activeClientId } = useClient();
   const client = useQuery({ queryKey: ["client", activeClientId], queryFn: () => api.client(activeClientId!), enabled: Boolean(activeClientId), retry: false });
-  if (!activeClientId) return <EmptyState icon={Bot} title="Create a client first" description="Agents belong to a client workspace." action={<LinkButton to="/app/onboarding">Start setup</LinkButton>} />;
+  if (!activeClientId) return <EmptyState icon={Bot} title="Create a client first" description="Agents belong to a client workspace." action={<LinkButton to="/admin/clients/new">Start setup</LinkButton>} />;
   if (client.isLoading) return <LoadingState />;
   if (client.error) return <ErrorState error={client.error} />;
   return <><PageHeader eyebrow="New voice agent" title="Shape the conversation" description="Start with a clear role, safe knowledge, and a warm opening." /><AgentForm client={client.data!} isNew /></>;
@@ -376,11 +512,12 @@ export function NewAgentPage() {
 
 export function AgentDetailPage() {
   const { id } = useParams();
-  const { actor } = useSession();
   const queryClient = useQueryClient();
   const { push } = useToast();
+  const { canEditWorkspace: canEdit, isOperator } = usePermissions(id);
   const client = useQuery({ queryKey: ["client", id], queryFn: () => api.client(id!), enabled: Boolean(id), retry: false });
   const versions = useQuery({ queryKey: ["promptVersions", id], queryFn: () => api.promptVersions(id!), enabled: Boolean(id), retry: false });
+  const provisioning = useQuery({ queryKey: ["provisioning", id], queryFn: () => api.provisioningRuns(id!), enabled: Boolean(id && isOperator), retry: false });
   const publish = useMutation({
     mutationFn: () => api.publishClient(id!),
     onSuccess: async () => {
@@ -389,17 +526,31 @@ export function AgentDetailPage() {
     },
     onError: (error) => push({ title: "Publish failed", message: error.message, tone: "error" }),
   });
+  const provision = useMutation({
+    mutationFn: () => api.provisionClient(
+      id!,
+      `publish-${id}-${client.data?.promptVersionId || "draft"}`,
+    ),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["client", id] }),
+        queryClient.invalidateQueries({ queryKey: ["provisioning", id] }),
+        queryClient.invalidateQueries({ queryKey: ["integrations", id] }),
+      ]);
+      push({ title: "Agent provisioned", message: "A tenant-isolated ElevenLabs agent and tools are connected.", tone: "success" });
+    },
+    onError: (error) => push({ title: "Provisioning failed safely", message: error.message, tone: "error" }),
+  });
   if (client.isLoading) return <LoadingState />;
   if (client.error) return <ErrorState error={client.error} onRetry={() => client.refetch()} />;
-  const canEdit = actor?.role === "operator" || (id ? ["owner", "manager"].includes(actor?.clientRoles[id] || "") : false);
   return (
     <>
       <Link className="back-link" to="/app/agents"><ArrowLeft size={15} /> All agents</Link>
-      <PageHeader eyebrow={canEdit ? "Agent editor" : "Agent details"} title={client.data?.role || "Voice receptionist"} description={`${client.data?.businessName} · ${client.data?.tone || "Warm and professional"}`} actions={<><Link className="button button-secondary button-md" to="/app/playground"><Play size={15} /> Test</Link>{canEdit && <Button onClick={() => publish.mutate()} disabled={publish.isPending}>{publish.isPending ? "Approving…" : "Approve version"} <UploadCloud size={15} /></Button>}</>} />
+      <PageHeader eyebrow={canEdit ? "Agent editor" : "Agent details"} title={client.data?.role || "Voice receptionist"} description={`${client.data?.businessName} · ${client.data?.tone || "Warm and professional"}`} actions={<><Link className="button button-secondary button-md" to="/app/playground"><Play size={15} /> Test</Link>{canEdit && <Button onClick={() => publish.mutate()} disabled={publish.isPending}>{publish.isPending ? "Approving…" : "Approve version"} <UploadCloud size={15} /></Button>}{isOperator && <Button variant="secondary" onClick={() => provision.mutate()} disabled={provision.isPending || !client.data?.published}>{provision.isPending ? "Provisioning…" : client.data?.elevenlabsAgentId ? "Sync provider" : "Provision agent"}</Button>}</>} />
       <div className="editor-layout">
         <div><AgentForm client={client.data!} /></div>
         <aside className="editor-aside">
-          <Card className="panel"><SectionHeading title="Workspace version" /><div className="publish-status"><span className={client.data?.published ? "status-orb live" : "status-orb"}><Cloud /></span><div><strong>{client.data?.published ? "Approved" : "Draft changes"}</strong><p>{client.data?.published ? "Stored for audit. Live provider sync is managed separately." : "Review and approve this workspace configuration."}</p></div></div></Card>
+          <Card className="panel"><SectionHeading title="Workspace version" /><div className="publish-status"><span className={client.data?.published && !client.data?.hasUnpublishedChanges ? "status-orb live" : "status-orb"}><Cloud /></span><div><strong>{client.data?.hasUnpublishedChanges ? "Draft changes" : client.data?.published ? "Approved" : "Draft changes"}</strong><p>{client.data?.hasUnpublishedChanges ? "The live receptionist is unchanged until you approve this draft." : client.data?.published ? "Stored for audit. Operators can sync this exact version to its isolated provider agent." : "Review and approve this workspace configuration."}</p></div></div>{isOperator && provisioning.data?.items[0] && <p className="muted capitalize">Provisioning: {provisioning.data.items[0].status} · {(provisioning.data.items[0].step || "queued").replaceAll("_", " ")}</p>}</Card>
           <Card className="panel"><SectionHeading title="Prompt history" />{versions.isLoading ? <SkeletonRows count={3} /> : versions.data?.length ? <div className="version-list">{versions.data.slice(0, 5).map((version) => <span key={version.id}><i>v{version.version}</i><div><strong>Published prompt</strong><small>{formatDate(version.createdAt)}</small></div></span>)}</div> : <p className="muted">No published versions yet.</p>}</Card>
           <Card className="safety-card"><ShieldCheck /><h3>Built-in safety</h3><p>Agent prompts are frozen per call. Updating settings never changes a conversation already in progress.</p></Card>
         </aside>
@@ -421,8 +572,17 @@ export function PlaygroundPage() {
   if (!client.data?.elevenlabsAgentId) {
     return (
       <>
-        <PageHeader eyebrow="Agent playground" title="Connect this workspace’s live agent" description="The browser playground becomes available after a Robinexis operator assigns the workspace’s ElevenLabs agent ID." />
-        <EmptyState icon={PhoneCall} title="Voice agent not connected" description="The workspace remains isolated; Robinexis must connect its own agent before browser calls can start." action={<LinkButton to="/app/agents">Review agent</LinkButton>} />
+        <PageHeader
+          eyebrow="Agent playground"
+          title="Connect this workspace’s live agent"
+          description="The browser playground becomes available after a Robinexis operator provisions this workspace’s isolated ElevenLabs agent."
+        />
+        <EmptyState
+          icon={PhoneCall}
+          title="Voice agent not connected"
+          description="The workspace remains isolated and cannot borrow another client’s agent."
+          action={<LinkButton to="/app/agents">Review agent</LinkButton>}
+        />
       </>
     );
   }
@@ -528,15 +688,23 @@ export function CalendarPage() {
 }
 
 function CalendarContent({ clientId }: { clientId: string }) {
-  const { actor } = useSession();
-  const canEdit = actor?.role === "operator" || ["owner", "manager"].includes(actor?.clientRoles[clientId] || "");
+  const { canEditWorkspace: canEdit } = usePermissions(clientId);
   const queryClient = useQueryClient();
   const { push } = useToast();
-  const [eventSlug, setEventSlug] = useState("15min");
-  const [cancelUid, setCancelUid] = useState<string | null>(null);
-  const [rescheduleTarget, setRescheduleTarget] = useState<{ uid: string; start: string } | null>(null);
+  const [eventSlug, setEventSlug] = useState("");
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState("");
+  const [timeWindow, setTimeWindow] = useState("all");
+  const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<Booking | null>(null);
+  const [rescheduleTarget, setRescheduleTarget] = useState<Booking | null>(null);
   const bookings = useQuery({ queryKey: ["bookings", clientId], queryFn: () => api.bookings(clientId), retry: false });
-  const slots = useQuery({ queryKey: ["slots", clientId, eventSlug], queryFn: () => api.slots(clientId, eventSlug), retry: false });
+  const slots = useQuery({
+    queryKey: ["slots", clientId, eventSlug],
+    queryFn: () => api.slots(clientId, eventSlug),
+    enabled: Boolean(eventSlug.trim()),
+    retry: false,
+  });
   const calendarAction = useMutation({
     mutationFn: async ({ uid, action, newStart }: { uid: string; action: "reschedule" | "cancel"; newStart?: string }) => {
       if (action === "cancel") {
@@ -547,41 +715,83 @@ function CalendarContent({ clientId }: { clientId: string }) {
       await api.rescheduleBooking(uid, clientId, newStart);
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["bookings", clientId] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["bookings", clientId] }),
+        queryClient.invalidateQueries({ queryKey: ["slots", clientId] }),
+      ]);
       push({ title: "Calendar updated", tone: "success" });
     },
     onError: (error) => push({ title: "Calendar update failed", message: error.message, tone: "error" }),
   });
+  const filteredBookings = useMemo(() => {
+    const now = new Date();
+    const today = now.toISOString().slice(0, 10);
+    const weekEnd = new Date(now.getTime() + 7 * 86_400_000);
+    return [...(bookings.data || [])]
+      .filter((booking) => {
+        const haystack = `${booking.attendeeName || ""} ${booking.attendeeEmail || ""} ${booking.title || ""}`.toLowerCase();
+        if (search && !haystack.includes(search.toLowerCase())) return false;
+        if (status && booking.status !== status) return false;
+        const start = new Date(booking.start);
+        if (timeWindow === "today" && booking.start.slice(0, 10) !== today) return false;
+        if (timeWindow === "week" && (start < now || start > weekEnd)) return false;
+        return true;
+      })
+      .sort((left, right) => new Date(left.start).getTime() - new Date(right.start).getTime());
+  }, [bookings.data, search, status, timeWindow]);
   const grouped = useMemo(() => {
-    const result = new Map<string, NonNullable<typeof bookings.data>>();
-    for (const booking of bookings.data || []) {
+    const result = new Map<string, Booking[]>();
+    for (const booking of filteredBookings) {
       const day = new Date(booking.start).toISOString().slice(0, 10);
       result.set(day, [...(result.get(day) || []), booking]);
     }
     return [...result.entries()];
-  }, [bookings.data]);
+  }, [filteredBookings]);
+  const statusOptions = [...new Set((bookings.data || []).map((booking) => booking.status).filter((value): value is string => Boolean(value)))];
+  const nextBooking = [...(bookings.data || [])].sort((left, right) => new Date(left.start).getTime() - new Date(right.start).getTime())[0];
   return (
     <>
-      <PageHeader eyebrow="Calendar" title="Appointments in one calm view" description="Review bookings made through conversations and keep an eye on upcoming demand." actions={<Link className="button button-secondary button-md" to="/app/integrations"><Link2 size={15} /> Calendar settings</Link>} />
-      <div className="calendar-summary"><Card><CalendarCheck2 /><div><strong>{bookings.data?.length || 0}</strong><span>Upcoming bookings</span></div></Card><Card><Clock3 /><div><strong>Live</strong><span>Availability sync</span></div></Card><Card><Sparkles /><div><strong>AI</strong><span>Booking source</span></div></Card></div>
-      <Card className="panel"><SectionHeading title="Live availability" description="Read-only slots returned by the connected calendar." /><div className="form-grid"><Field label="Event type slug"><input value={eventSlug} onChange={(event) => setEventSlug(event.target.value)} placeholder="15min" /></Field><div className="form-actions"><Button variant="secondary" onClick={() => slots.refetch()} disabled={!eventSlug || slots.isFetching}><RefreshCw size={15} /> {slots.isFetching ? "Checking…" : "Refresh slots"}</Button></div></div>{slots.error ? <ErrorState error={slots.error} /> : <div className="slot-grid">{(slots.data || []).slice(0, 8).map((slot) => <span key={slot.start}>{formatDate(slot.start)}</span>)}{!slots.isLoading && !slots.data?.length && <p className="muted">No slots returned for this event type.</p>}</div>}</Card>
-      <Card className={`panel ${canEdit ? "" : "calendar-readonly"}`}>
-        <SectionHeading title="Upcoming appointments" description="Times shown in your workspace timezone" />
-        {bookings.isLoading ? <SkeletonRows count={5} /> : bookings.error ? <ErrorState error={bookings.error} onRetry={() => bookings.refetch()} /> : !grouped.length ? <EmptyState icon={CalendarDays} title="No appointments yet" description="Connect a calendar and add service event types so your agent can offer real availability." action={<LinkButton to="/app/integrations" variant="secondary">Connect calendar</LinkButton>} /> : <div className="agenda">{grouped.map(([day, items]) => <div className="agenda-day" key={day}><div className="agenda-date"><strong>{new Date(day).toLocaleDateString("en-GB", { day: "2-digit" })}</strong><span>{new Date(day).toLocaleDateString("en-GB", { month: "short", weekday: "short" })}</span></div><div>{items.map((booking) => <div className="booking-row" key={booking.uid}><span className="booking-time">{new Date(booking.start).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</span><i /><div><strong>{booking.attendeeName || booking.title || "Customer appointment"}</strong><small>{booking.attendeeEmail || "Booked by voice agent"}</small></div><Badge tone={statusTone(booking.status || "active")}>{booking.status || "confirmed"}</Badge><div className="row-actions"><Button size="sm" variant="ghost" disabled={calendarAction.isPending} onClick={() => setRescheduleTarget({ uid: booking.uid, start: booking.start })}>Move</Button><button aria-label="Cancel appointment" className="icon-button danger-icon" disabled={calendarAction.isPending} onClick={() => setCancelUid(booking.uid)}><XCircle size={17} /></button></div></div>)}</div></div>)}</div>}
+      <PageHeader eyebrow="Calendar" title="Bookings and availability in one view" description="Find customers, review the exact status returned by the calendar, and make confirmed changes." actions={<Link className="button button-secondary button-md" to="/app/integrations"><Link2 size={15} /> Calendar settings</Link>} />
+      <div className="calendar-summary">
+        <Card><CalendarCheck2 /><div><strong>{bookings.data?.length || 0}</strong><span>Appointments returned</span></div></Card>
+        <Card><Clock3 /><div><strong>{nextBooking ? formatDate(nextBooking.start, { day: "2-digit", month: "short" }) : "—"}</strong><span>Next appointment</span></div></Card>
+        <Card><CalendarDays /><div><strong>{eventSlug ? slots.data?.length ?? "…" : "—"}</strong><span>{eventSlug ? "Available slots returned" : "Choose an event type"}</span></div></Card>
+      </div>
+      <Card className="panel availability-panel">
+        <SectionHeading title="Check live availability" description="Enter an existing calendar event-type slug; only slots returned by the API are shown." />
+        <div className="availability-controls"><Field label="Event type slug"><input value={eventSlug} onChange={(event) => setEventSlug(event.target.value)} placeholder="Your configured event type" /></Field><Button variant="secondary" onClick={() => slots.refetch()} disabled={!eventSlug.trim() || slots.isFetching}><RefreshCw size={15} /> {slots.isFetching ? "Checking…" : "Check slots"}</Button></div>
+        {slots.error ? <ErrorState error={slots.error} /> : eventSlug && <div className="slot-grid">{(slots.data || []).slice(0, 8).map((slot) => <span key={slot.start}>{formatDate(slot.start)}</span>)}{!slots.isLoading && !slots.data?.length && <p className="muted">No slots were returned for this event type.</p>}</div>}
       </Card>
-      {canEdit && <ConfirmDialog open={Boolean(cancelUid)} title="Cancel this appointment?" description="This updates the connected live calendar immediately and cannot be undone from Robinexis." confirmLabel="Cancel appointment" busy={calendarAction.isPending} onClose={() => setCancelUid(null)} onConfirm={() => { if (cancelUid) calendarAction.mutate({ uid: cancelUid, action: "cancel" }, { onSuccess: () => setCancelUid(null) }); }} />}
-      {canEdit && <RescheduleDialog target={rescheduleTarget} busy={calendarAction.isPending} onClose={() => setRescheduleTarget(null)} onConfirm={(newStart) => { if (rescheduleTarget) calendarAction.mutate({ uid: rescheduleTarget.uid, action: "reschedule", newStart }, { onSuccess: () => setRescheduleTarget(null) }); }} />}
+      <Card className={`panel ${canEdit ? "" : "calendar-readonly"}`}>
+        <SectionHeading title="Appointments" description={`${filteredBookings.length} of ${bookings.data?.length || 0} bookings shown`} />
+        <div className="filter-bar booking-filters">
+          <label className="search-field"><span className="sr-only">Search booking customers</span><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search customer, email or title…" /></label>
+          <label className="filter-control"><span className="sr-only">Filter booking status</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">All statuses</option>{statusOptions.map((value) => <option value={value} key={value}>{value.replaceAll("_", " ")}</option>)}</select></label>
+          <label className="filter-control"><span className="sr-only">Filter booking time</span><select value={timeWindow} onChange={(event) => setTimeWindow(event.target.value)}><option value="all">All upcoming times</option><option value="today">Today</option><option value="week">Next 7 days</option></select></label>
+        </div>
+        {bookings.isLoading ? <SkeletonRows count={5} /> : bookings.error ? <ErrorState error={bookings.error} onRetry={() => bookings.refetch()} /> : !bookings.data?.length ? <EmptyState icon={CalendarDays} title="No appointments returned" description="Connect a calendar and add service event types so your agent can offer real availability." action={<LinkButton to="/app/integrations" variant="secondary">Connect calendar</LinkButton>} /> : !grouped.length ? <EmptyState icon={Search} title="No matching bookings" description="Clear or broaden the customer, status, and time filters." action={<Button variant="secondary" onClick={() => { setSearch(""); setStatus(""); setTimeWindow("all"); }}>Clear filters</Button>} /> : (
+          <div className="agenda">{grouped.map(([day, items]) => <div className="agenda-day" key={day}><div className="agenda-date"><strong>{new Date(day).toLocaleDateString("en-GB", { day: "2-digit" })}</strong><span>{new Date(day).toLocaleDateString("en-GB", { month: "short", weekday: "short" })}</span></div><div>{items.map((booking) => <div className="booking-row" key={booking.uid}><span className="booking-time">{new Date(booking.start).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</span><i /><div><strong>{booking.attendeeName || "Customer name not supplied"}</strong><small>{booking.title || booking.attendeeEmail || "No booking details supplied"}</small></div>{booking.status ? <Badge tone={statusTone(booking.status)}>{booking.status.replaceAll("_", " ")}</Badge> : <Badge tone="neutral">Status unavailable</Badge>}<div className="row-actions"><Button size="sm" variant="ghost" onClick={() => setSelectedBooking(booking)}>Details</Button>{canEdit && <Button size="sm" variant="ghost" disabled={calendarAction.isPending} onClick={() => setRescheduleTarget(booking)}>Reschedule</Button>}{canEdit && <button aria-label={`Cancel appointment for ${booking.attendeeName || "customer"}`} className="icon-button danger-icon" disabled={calendarAction.isPending} onClick={() => setCancelTarget(booking)}><XCircle size={17} /></button>}</div></div>)}</div></div>)}</div>
+        )}
+      </Card>
+      <BookingDetailDialog booking={selectedBooking} canEdit={canEdit} onClose={() => setSelectedBooking(null)} onReschedule={(booking) => { setSelectedBooking(null); setRescheduleTarget(booking); }} onCancel={(booking) => { setSelectedBooking(null); setCancelTarget(booking); }} />
+      {canEdit && <ConfirmDialog open={Boolean(cancelTarget)} title="Cancel this appointment?" description={`${cancelTarget?.attendeeName || "This customer"} is booked for ${formatDate(cancelTarget?.start)}. Confirming updates the connected calendar immediately.`} confirmLabel="Confirm cancellation" busy={calendarAction.isPending} onClose={() => setCancelTarget(null)} onConfirm={() => { if (cancelTarget) calendarAction.mutate({ uid: cancelTarget.uid, action: "cancel" }, { onSuccess: () => setCancelTarget(null) }); }} />}
+      {canEdit && <RescheduleDialog target={rescheduleTarget} slots={slots.data || []} eventSlug={eventSlug} busy={calendarAction.isPending} onClose={() => setRescheduleTarget(null)} onConfirm={(newStart) => { if (rescheduleTarget) calendarAction.mutate({ uid: rescheduleTarget.uid, action: "reschedule", newStart }, { onSuccess: () => setRescheduleTarget(null) }); }} />}
     </>
   );
 }
 
-function RescheduleDialog({ target, busy, onClose, onConfirm }: { target: { uid: string; start: string } | null; busy: boolean; onClose: () => void; onConfirm: (start: string) => void }) {
+function BookingDetailDialog({ booking, canEdit, onClose, onReschedule, onCancel }: { booking: Booking | null; canEdit: boolean; onClose: () => void; onReschedule: (booking: Booking) => void; onCancel: (booking: Booking) => void }) {
+  if (!booking) return null;
+  return <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="dialog booking-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="booking-title"><button className="icon-button dialog-close" type="button" aria-label="Close booking details" onClick={onClose}><XCircle size={18} /></button><span className="dialog-icon"><CalendarCheck2 size={22} /></span><h2 id="booking-title">{booking.attendeeName || "Customer appointment"}</h2><dl className="detail-list"><div><dt>Starts</dt><dd>{formatDate(booking.start)}</dd></div><div><dt>Ends</dt><dd>{booking.end ? formatDate(booking.end) : "Not supplied"}</dd></div><div><dt>Status</dt><dd className="capitalize">{booking.status?.replaceAll("_", " ") || "Not supplied"}</dd></div><div><dt>Title</dt><dd>{booking.title || "Not supplied"}</dd></div><div><dt>Customer email</dt><dd>{booking.attendeeEmail || "Not supplied"}</dd></div>{booking.sourceCallId && <div><dt>Source call</dt><dd><Link to={`/app/calls/${booking.sourceCallId}`}>Open conversation</Link></dd></div>}</dl><div className="dialog-actions"><Button type="button" variant="secondary" onClick={onClose}>Close</Button>{canEdit && <Button type="button" variant="secondary" onClick={() => onReschedule(booking)}>Reschedule</Button>}{canEdit && <Button type="button" variant="danger" onClick={() => onCancel(booking)}>Cancel booking</Button>}</div></section></div>;
+}
+
+function RescheduleDialog({ target, slots, eventSlug, busy, onClose, onConfirm }: { target: Booking | null; slots: Array<{ start: string; end?: string }>; eventSlug: string; busy: boolean; onClose: () => void; onConfirm: (start: string) => void }) {
   const [value, setValue] = useState("");
   useEffect(() => {
-    setValue(target ? new Date(target.start).toISOString().slice(0, 16) : "");
+    setValue("");
   }, [target]);
   if (!target) return null;
-  return <div className="dialog-backdrop" role="presentation"><section className="dialog" role="dialog" aria-modal="true" aria-labelledby="move-title"><h2 id="move-title">Move appointment</h2><p>Choose the new confirmed start time. This updates the live calendar.</p><Field label="New start time"><input type="datetime-local" value={value} onChange={(event) => setValue(event.target.value)} /></Field><div className="dialog-actions"><Button type="button" variant="secondary" onClick={onClose}>Keep current time</Button><Button type="button" disabled={!value || busy} onClick={() => onConfirm(new Date(value).toISOString())}>{busy ? "Moving…" : "Confirm new time"}</Button></div></section></div>;
+  return <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="dialog" role="dialog" aria-modal="true" aria-labelledby="move-title"><h2 id="move-title">Reschedule appointment</h2><p>Current time: {formatDate(target.start)}. Select a slot returned by the connected calendar.</p>{!eventSlug ? <div className="compact-alert">Close this dialog and enter the booking’s configured event-type slug to load available times.</div> : !slots.length ? <div className="compact-alert">No available slots were returned for “{eventSlug}”. Refresh availability before rescheduling.</div> : <Field label="Available time"><select value={value} onChange={(event) => setValue(event.target.value)}><option value="">Choose a returned slot</option>{slots.map((slot) => <option value={slot.start} key={slot.start}>{formatDate(slot.start)}</option>)}</select></Field>}<div className="dialog-actions"><Button type="button" variant="secondary" onClick={onClose}>Keep current time</Button><Button type="button" disabled={!value || busy} onClick={() => onConfirm(value)}>{busy ? "Rescheduling…" : "Confirm reschedule"}</Button></div></section></div>;
 }
 
 const jobSchema = z.object({
@@ -638,8 +848,7 @@ export function KnowledgePage() {
 }
 
 function KnowledgeContent({ clientId }: { clientId: string }) {
-  const { actor } = useSession();
-  const canEdit = actor?.role === "operator" || ["owner", "manager"].includes(actor?.clientRoles[clientId] || "");
+  const { canEditWorkspace: canEdit } = usePermissions(clientId);
   const [adding, setAdding] = useState(false);
   const [searchText, setSearchText] = useState("");
   const [sourceFile, setSourceFile] = useState<File | null>(null);
@@ -696,7 +905,6 @@ function IntegrationsContent({ clientId }: { clientId: string }) {
 
 export function TeamPage() {
   const { activeClientId, activeClient } = useClient();
-  const { actor } = useSession();
   const { push } = useToast();
   const queryClient = useQueryClient();
   const [email, setEmail] = useState("");
@@ -707,9 +915,7 @@ export function TeamPage() {
     enabled: Boolean(activeClientId),
     retry: false,
   });
-  const canAdminister =
-    actor?.role === "operator" ||
-    (activeClientId ? actor?.clientRoles[activeClientId] === "owner" : false);
+  const { canManageMembers: canAdminister } = usePermissions(activeClientId);
   const add = useMutation({
     mutationFn: () => api.addMembership(activeClientId!, email.trim(), role),
     onSuccess: async () => {
@@ -771,31 +977,82 @@ export function BillingPage() {
   return <ClientGate>{(clientId) => <BillingContent clientId={clientId} />}</ClientGate>;
 }
 
+export function UsagePage() {
+  return <ClientGate>{(clientId) => <UsageContent clientId={clientId} />}</ClientGate>;
+}
+
+function UsageContent({ clientId }: { clientId: string }) {
+  const usage = useQuery({ queryKey: ["usage", clientId], queryFn: () => api.usage(clientId), retry: false });
+  const client = useQuery({ queryKey: ["client", clientId], queryFn: () => api.client(clientId), retry: false });
+  if (usage.isLoading || client.isLoading) return <LoadingState label="Loading monthly usage…" />;
+  if (usage.error || client.error) return <ErrorState error={usage.error || client.error} onRetry={() => { usage.refetch(); client.refetch(); }} />;
+  const inbound = usage.data?.inboundMinutes || 0;
+  const outbound = usage.data?.outboundMinutes || 0;
+  const total = inbound + outbound;
+  const allowance = usage.data?.allocatedMinutes ?? client.data?.monthlyMinuteLimit;
+  const meteredUsed = usage.data?.usedMinutes ?? total;
+  const remaining = usage.data?.remainingMinutes ?? (allowance ? Math.max(0, allowance - meteredUsed) : undefined);
+  const usagePercent = allowance ? Math.min(100, Math.round((meteredUsed / allowance) * 100)) : undefined;
+
+  return (
+    <>
+      <PageHeader eyebrow="Usage" title="Voice minutes, clearly accounted for" description={`Usage reported by the platform for ${usage.data?.month || "the current month"}.`} />
+      <div className="metrics-grid metrics-compact">
+        <MetricCard label="Total minutes" value={total} detail={usage.data?.month || "Current month"} icon={Clock3} />
+        <MetricCard label="Inbound minutes" value={inbound} detail="Customer calls received" icon={PhoneCall} tone="sage" />
+        <MetricCard label="Outbound minutes" value={outbound} detail="Platform-reported outbound usage" icon={Headphones} tone="lilac" />
+      </div>
+      <Card className="panel usage-detail-card">
+        <SectionHeading title="Monthly allowance" description={allowance ? `${meteredUsed} of ${allowance} allocated minutes used` : "No monthly minute allowance is configured for this workspace."} />
+        {usagePercent !== undefined ? (
+          <>
+            <div className="usage-count"><strong>{usagePercent}%</strong><span>used</span></div>
+            <div className="progress" aria-label={`${usagePercent}% of monthly voice allowance used`}><i style={{ width: `${usagePercent}%` }} /></div>
+            <p className="muted">{remaining} minutes remaining.</p>
+          </>
+        ) : (
+          <div className="usage-unmetered"><ShieldCheck /><div><strong>Usage is still measured</strong><p>The API has not supplied a plan limit, so Robinexis won’t display a made-up allowance.</p></div></div>
+        )}
+      </Card>
+    </>
+  );
+}
+
 function BillingContent({ clientId }: { clientId: string }) {
+  const { push } = useToast();
   const usage = useQuery({ queryKey: ["usage", clientId], queryFn: () => api.usage(clientId), retry: false });
   const client = useQuery({ queryKey: ["client", clientId], queryFn: () => api.client(clientId), retry: false });
   const minutes = (usage.data?.inboundMinutes || 0) + (usage.data?.outboundMinutes || 0);
-  const allowance = client.data?.monthlyMinuteLimit || 500;
-  const usagePercent = Math.min(100, Math.round((minutes / allowance) * 100));
+  const checkout = useMutation({
+    mutationFn: (plan: "starter" | "pro") => api.createCheckout(clientId, plan),
+    onSuccess: (result) => {
+      if (result.url) window.location.assign(result.url);
+      else push({ title: "Checkout unavailable", message: "Stripe did not return a checkout URL.", tone: "error" });
+    },
+    onError: (error) => push({ title: "Checkout is not configured yet", message: error.message, tone: "error" }),
+  });
   if (usage.isLoading || client.isLoading) return <LoadingState label="Loading plan and usage…" />;
   if (usage.error || client.error) return <ErrorState error={usage.error || client.error} onRetry={() => { usage.refetch(); client.refetch(); }} />;
-  const product = client.data?.subscribedProduct || "Managed voice service";
+  const allowance = usage.data?.allocatedMinutes ?? client.data?.monthlyMinuteLimit;
+  const meteredUsed = usage.data?.usedMinutes ?? minutes;
+  const usagePercent = allowance ? Math.min(100, Math.round((meteredUsed / allowance) * 100)) : undefined;
+  const tier = usage.data?.plan || (["starter", "pro", "enterprise"].includes(client.data?.subscribedProduct || "") ? client.data!.subscribedProduct as "starter" | "pro" | "enterprise" : "starter");
+  const product = tier[0].toUpperCase() + tier.slice(1);
   return (
     <>
       <PageHeader eyebrow="Billing" title="A plan that grows with every call" description="Review your current allowance and the features available to this workspace." />
       <div className="billing-grid">
-        <Card className="current-plan"><span className="pill pill-light">{client.data?.serviceStatus || "Trial"}</span><h2>{product}</h2><p>{allowance} voice minutes with the workspace features enabled for this client.</p><div className="plan-price"><strong>Managed</strong><span>pricing confirmed off-platform</span></div><a className="button button-secondary button-md" href="mailto:hello@robinexis.com?subject=Manage%20Robinexis%20subscription">Manage subscription</a></Card>
-        <Card className="panel usage-card"><SectionHeading title="Monthly usage" description={`Billing period ${usage.data?.month || "current month"}`} /><div className="usage-count"><strong>{minutes}</strong><span>of {allowance} minutes</span></div><div className="progress"><i style={{ width: `${usagePercent}%` }} /></div><p><ShieldCheck /> {usage.isLoading ? "Loading usage…" : usage.error ? "Usage is temporarily unavailable." : `${usage.data?.inboundMinutes || 0} inbound · ${usage.data?.outboundMinutes || 0} outbound minutes`}</p></Card>
+        <Card className="current-plan"><span className="pill pill-light">{client.data?.serviceStatus || "Not reported"}</span><h2>{product}</h2><p>{allowance ? `${allowance} voice minutes allocated to this workspace.` : "No minute allowance is configured in the current client data."}</p><div className="plan-price"><strong>{tier === "starter" ? "£99" : tier === "pro" ? "£249" : "Contact sales"}</strong><span>{tier === "enterprise" ? "tailored plan" : "per month"}</span></div>{tier === "enterprise" ? <a className="button button-secondary button-md" href="mailto:hello@robinexis.com?subject=Enterprise%20Robinexis">Contact sales</a> : <Button onClick={() => checkout.mutate(tier)} disabled={checkout.isPending}>{checkout.isPending ? "Opening checkout…" : "Continue with Stripe"}</Button>}</Card>
+        <Card className="panel usage-card"><SectionHeading title="Monthly usage" description={`Billing period ${usage.data?.month || "current month"}`} /><div className="usage-count"><strong>{meteredUsed}</strong><span>{allowance ? `of ${allowance} minutes` : "minutes recorded"}</span></div>{usagePercent !== undefined && <div className="progress"><i style={{ width: `${usagePercent}%` }} /></div>}<p><ShieldCheck /> {`${usage.data?.inboundMinutes || 0} inbound · ${usage.data?.outboundMinutes || 0} outbound minutes`}</p></Card>
       </div>
-      <Card className="panel"><SectionHeading title="Billing details" description="Stripe Checkout and self-serve invoices are intentionally deferred." /><div className="deferred-row"><CircleDollarSign /><div><strong>Need to change your plan?</strong><p>Contact Robinexis and we’ll update your subscription securely.</p></div><a className="button button-secondary button-md" href="mailto:hello@robinexis.com">Contact billing</a></div></Card>
+      <Card className="panel"><SectionHeading title="Billing details" description="Every plan begins with a three-day trial and no card is required to start." /><div className="deferred-row"><CircleDollarSign /><div><strong>Stripe activates when keys are connected</strong><p>The dashboard remains usable while billing is unconfigured; checkout never receives voice or salon credentials.</p></div><a className="button button-secondary button-md" href="mailto:hello@robinexis.com">Contact billing</a></div></Card>
     </>
   );
 }
 
 export function SettingsPage() {
   const { activeClientId } = useClient();
-  const { actor } = useSession();
-  const canEdit = actor?.role === "operator" || (activeClientId ? ["owner", "manager"].includes(actor?.clientRoles[activeClientId] || "") : false);
+  const { canEditWorkspace: canEdit, canCreateClients, isOperator } = usePermissions(activeClientId);
   const queryClient = useQueryClient();
   const { push } = useToast();
   const client = useQuery({ queryKey: ["client", activeClientId], queryFn: () => api.client(activeClientId!), enabled: Boolean(activeClientId), retry: false });
@@ -806,18 +1063,18 @@ export function SettingsPage() {
     onSuccess: async () => { await Promise.all([queryClient.invalidateQueries({ queryKey: ["client", activeClientId] }), queryClient.invalidateQueries({ queryKey: ["clients"] })]); push({ title: "Settings saved", message: "Approve a new workspace version if these details affect conversations.", tone: "success" }); },
     onError: (error) => push({ title: "Save failed", message: error.message, tone: "error" }),
   });
-  if (!activeClientId) return <EmptyState title="No client selected" description="Select a client workspace before changing settings." action={actor?.role === "operator" ? <LinkButton to="/app/onboarding">Create client</LinkButton> : undefined} />;
+  if (!activeClientId) return <EmptyState title="No client selected" description="Select a client workspace before changing settings." action={canCreateClients ? <LinkButton to="/admin/clients/new">Create client</LinkButton> : undefined} />;
   if (client.isLoading) return <LoadingState />;
   if (client.error) return <ErrorState error={client.error} />;
   return (
     <>
       <PageHeader eyebrow="Workspace settings" title="The business behind the voice" description="Manage operational details used across your agents, calls, and reports." />
       <div className="settings-layout">
-        <nav className="settings-nav"><a className="active" href="#business"><Settings2 /> Business profile</a><a href="#security"><ShieldCheck /> Security</a>{actor?.role === "operator" && <a href="#developer"><Code2 /> Developer</a>}</nav>
+        <nav className="settings-nav"><a className="active" href="#business"><Settings2 /> Business profile</a><a href="#security"><ShieldCheck /> Security</a>{isOperator && <a href="#developer"><Code2 /> Developer</a>}</nav>
         <div>
           <Card className="form-card" id="business"><SectionHeading title="Business profile" description={canEdit ? "Changing approved business details marks the current agent configuration as a draft." : "Your viewer role can review these details but cannot change them."} /><form onSubmit={form.handleSubmit((values) => save.mutate(values))}><fieldset disabled={!canEdit || save.isPending}><div className="form-grid"><Field label="Business name"><input {...form.register("businessName")} /></Field><Field label="Location"><input {...form.register("location")} /></Field><Field label="Public email"><input {...form.register("email")} /></Field><Field label="Public phone"><input {...form.register("phone")} /></Field></div>{canEdit && <div className="form-actions"><Button disabled={save.isPending}>{save.isPending ? "Saving…" : "Save changes"}</Button></div>}</fieldset></form></Card>
           <Card className="form-card" id="security"><SectionHeading title="Session security" description="The dashboard stores a short-lived access token for this tab only." /><div className="security-setting"><span><KeyRound /></span><div><strong>Supabase session</strong><p>A signed JWT is verified by the Railway API, then restricted to assigned workspaces and roles.</p></div><Badge tone="success">Protected</Badge></div></Card>
-          {actor?.role === "operator" && <Card className="form-card" id="developer"><SectionHeading title="API environment" description="Production dashboard requests use the versioned Railway API." /><div className="code-line"><code>/api/v1</code><button className="icon-button" onClick={() => navigator.clipboard.writeText("/api/v1")}><Copy size={16} /></button></div></Card>}
+          {isOperator && <Card className="form-card" id="developer"><SectionHeading title="API environment" description="Production dashboard requests use the versioned Railway API." /><div className="code-line"><code>/api/v1</code><button className="icon-button" onClick={() => navigator.clipboard.writeText("/api/v1")}><Copy size={16} /></button></div></Card>}
         </div>
       </div>
     </>
