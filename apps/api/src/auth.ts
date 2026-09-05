@@ -162,8 +162,9 @@ export async function authenticateRequest(
     }
     const memberships = await store.listMembershipsForEmail(identity.email);
     if (!memberships.length) {
-      // A verified identity is allowed to discover its onboarding state, but
-      // empty clientRoles keeps every tenant and admin guard closed.
+      // Keep this server-derived: a verified identity may discover its
+      // onboarding state, while empty clientRoles keeps every tenant and
+      // platform-admin guard closed.
       return { ...identity, role: "pending", clientRoles: {} };
     }
     return {
