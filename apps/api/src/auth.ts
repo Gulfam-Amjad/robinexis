@@ -14,10 +14,12 @@ const allowedOrigins = (process.env.WEB_ORIGIN || "http://localhost:5173")
   .map((value) => value.trim())
   .filter(Boolean);
 
-const adminEmails = (process.env.ADMIN_EMAILS || "gulfamamjad633@gmail.com")
-  .split(",")
-  .map((value) => value.trim().toLowerCase())
-  .filter(Boolean);
+function adminEmails() {
+  return (process.env.ADMIN_EMAILS || "")
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+}
 
 function skipAuthEnabled() {
   if (process.env.SKIP_AUTH !== "true") return false;
@@ -158,7 +160,7 @@ export async function authenticateRequest(
     }
     // Compatibility bridge while existing Supabase users are linked to
     // profiles. ADMIN_EMAILS remains authoritative for current operators.
-    if (adminEmails.includes(identity.email)) {
+    if (adminEmails().includes(identity.email)) {
       return { ...identity, role: "operator", clientRoles: {} };
     }
     const memberships = await store.listMembershipsForEmail(identity.email);

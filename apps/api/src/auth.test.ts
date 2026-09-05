@@ -17,6 +17,7 @@ const original = {
   ALLOW_INSECURE_SKIP_AUTH: process.env.ALLOW_INSECURE_SKIP_AUTH,
   SUPABASE_URL: process.env.SUPABASE_URL,
   SUPABASE_JWT_SECRET: process.env.SUPABASE_JWT_SECRET,
+  ADMIN_EMAILS: process.env.ADMIN_EMAILS,
 };
 
 afterEach(() => {
@@ -70,10 +71,34 @@ describe("production authentication", () => {
     });
   });
 
+  it("maps a case-normalized allowlisted Supabase email to an operator", async () => {
+    process.env.NODE_ENV = "test";
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_JWT_SECRET = "test-secret-at-least-32-characters";
+    process.env.ADMIN_EMAILS = "existing-admin@example.test, admin@example.test";
+    delete process.env.SKIP_AUTH;
+    const token = await new SignJWT({ email: "Admin@Example.Test" })
+      .setProtectedHeader({ alg: "HS256" })
+      .setSubject("auth-operator")
+      .setIssuedAt()
+      .setExpirationTime("5m")
+      .sign(new TextEncoder().encode(process.env.SUPABASE_JWT_SECRET));
+    const request = {
+      headers: { authorization: `Bearer ${token}` },
+    } as http.IncomingMessage;
+
+    await expect(authenticateRequest(request, new MemoryStore())).resolves.toMatchObject({
+      role: "operator",
+      email: "admin@example.test",
+      clientRoles: {},
+    });
+  });
+
   it("keeps a verified but unassigned signup outside every tenant and admin boundary", async () => {
     process.env.NODE_ENV = "test";
     process.env.SUPABASE_URL = "https://example.supabase.co";
     process.env.SUPABASE_JWT_SECRET = "test-secret-at-least-32-characters";
+    process.env.ADMIN_EMAILS = "admin@example.test";
     delete process.env.SKIP_AUTH;
     const token = await new SignJWT({ email: "new-signup@example.test" })
       .setProtectedHeader({ alg: "HS256" })

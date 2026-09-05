@@ -55,7 +55,7 @@ export default defineRailway(() => {
       ...apiSecrets,
       RAILWAY_BUILD_TARGET: "api",
       API_PUBLIC_BASE_URL: "https://${{RAILWAY_PUBLIC_DOMAIN}}",
-      ADMIN_EMAILS: "gulfamamjad633@gmail.com",
+      ADMIN_EMAILS: preserve(),
       RAG_TOP_K: "5",
       RAG_MIN_SIMILARITY: "0.55",
       RAG_EMBEDDING_DIMENSIONS: "768",
