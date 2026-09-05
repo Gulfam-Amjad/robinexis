@@ -75,6 +75,12 @@ export type AuthenticatedActor =
       email: string;
       role: "salon";
       clientRoles: Record<string, WorkspaceRole>;
+    }
+  | {
+      subject: string;
+      email: string;
+      role: "pending";
+      clientRoles: Record<string, never>;
     };
 
 async function identityFromSupabaseToken(token: string): Promise<VerifiedIdentity | undefined> {
@@ -155,7 +161,11 @@ export async function authenticateRequest(
       return { ...identity, role: "operator", clientRoles: {} };
     }
     const memberships = await store.listMembershipsForEmail(identity.email);
-    if (!memberships.length) return undefined;
+    if (!memberships.length) {
+      // A verified identity is allowed to discover its onboarding state, but
+      // empty clientRoles keeps every tenant and admin guard closed.
+      return { ...identity, role: "pending", clientRoles: {} };
+    }
     return {
       ...identity,
       role: "salon",

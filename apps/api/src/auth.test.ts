@@ -69,6 +69,28 @@ describe("production authentication", () => {
     });
   });
 
+  it("keeps a verified but unassigned signup outside every tenant and admin boundary", async () => {
+    process.env.NODE_ENV = "test";
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_JWT_SECRET = "test-secret-at-least-32-characters";
+    delete process.env.SKIP_AUTH;
+    const token = await new SignJWT({ email: "new-signup@example.test" })
+      .setProtectedHeader({ alg: "HS256" })
+      .setSubject("auth-pending")
+      .setIssuedAt()
+      .setExpirationTime("5m")
+      .sign(new TextEncoder().encode(process.env.SUPABASE_JWT_SECRET));
+    const request = {
+      headers: { authorization: `Bearer ${token}` },
+    } as http.IncomingMessage;
+
+    const actor = await authenticateRequest(request, new MemoryStore());
+    expect(actor).toMatchObject({ role: "pending", clientRoles: {} });
+    expect(requireAdmin(actor!)).toBe(false);
+    expect(requireTenantAccess(actor!, "client-a")).toBe(false);
+    expect(requireTenantWrite(actor!, "client-a")).toBe(false);
+  });
+
   it("centralizes admin, tenant-read, and tenant-write decisions", () => {
     const viewer = {
       subject: "viewer",

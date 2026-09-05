@@ -11,15 +11,22 @@ import {
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
-import { Link, Navigate } from "react-router-dom";
+import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { z } from "zod";
 import { PublicHeader } from "../components/layout";
 import { Button, Card, Field } from "../components/ui";
 import { AUTH_REQUIRED } from "../lib/auth";
-import { signInWithEmail } from "../lib/supabase";
-import { useSession, useToast } from "../state";
+import {
+  completeAuthCallback,
+  selectedPlan,
+  signInWithEmail,
+  signInWithGoogle,
+  validPlan,
+  type AuthIntent,
+} from "../lib/supabase";
+import { useSession } from "../state";
 
 export function LandingPage() {
   return (
@@ -115,18 +122,47 @@ function LogoFooter() {
 const loginSchema = z.object({ email: z.string().email("Enter the allowlisted work email") });
 type LoginFields = z.infer<typeof loginSchema>;
 
+function authIntent(search: URLSearchParams, from?: string): AuthIntent {
+  return {
+    plan: validPlan(search.get("plan")),
+    returnTo: from || "/dashboard",
+  };
+}
+
+function GoogleButton({ onClick, busy }: { onClick: () => void; busy: boolean }) {
+  return (
+    <Button type="button" variant="secondary" className="google-auth-button" onClick={onClick} disabled={busy}>
+      <span className="google-mark" aria-hidden="true">G</span>
+      {busy ? "Opening Google…" : "Continue with Google"}
+    </Button>
+  );
+}
+
 export function LoginPage() {
-  const { apiKey } = useSession();
+  const { actor } = useSession();
+  const location = useLocation();
+  const [search] = useSearchParams();
   const { register, handleSubmit, formState: { errors } } = useForm<LoginFields>({ resolver: zodResolver(loginSchema) });
   const [serverError, setServerError] = useState("");
   const [checking, setChecking] = useState(false);
   const [sent, setSent] = useState(false);
-  if (!AUTH_REQUIRED || apiKey) return <Navigate to="/app" replace />;
+  const intent = authIntent(search, (location.state as { from?: string } | null)?.from);
+  if (!AUTH_REQUIRED || actor) return <Navigate to="/dashboard" replace />;
+  const google = async () => {
+    setChecking(true);
+    setServerError("");
+    try {
+      await signInWithGoogle(intent);
+    } catch (error) {
+      setServerError(error instanceof Error ? error.message : "Google sign-in could not be started.");
+      setChecking(false);
+    }
+  };
   const submit = async ({ email }: LoginFields) => {
     setChecking(true);
     setServerError("");
     try {
-      await signInWithEmail(email.trim());
+      await signInWithEmail(email.trim(), intent);
       setSent(true);
     } catch (error) {
       setServerError(error instanceof Error ? error.message : "The workspace could not be reached.");
@@ -135,7 +171,9 @@ export function LoginPage() {
     }
   };
   return (
-    <AuthShell title="Welcome back" copy="Sign in with a magic link. Robinexis operators and assigned salon teams can open their workspaces.">
+    <AuthShell title="Welcome back" copy="Sign in securely to your Robinexis workspace.">
+      <GoogleButton onClick={() => void google()} busy={checking} />
+      <div className="auth-divider"><span>or use email</span></div>
       <form className="auth-form" onSubmit={handleSubmit(submit)}>
         <Field label="Work email" hint="We email a one-time sign-in link. No password is stored here." error={errors.email?.message}>
           <input type="email" autoComplete="email" placeholder="you@company.com" {...register("email")} />
@@ -149,27 +187,89 @@ export function LoginPage() {
   );
 }
 
-const signupSchema = z.object({
-  name: z.string().min(2, "Enter your name"),
-  email: z.string().email("Enter a valid work email"),
-  business: z.string().min(2, "Enter your business name"),
-});
-
 export function SignupPage() {
-  const { push } = useToast();
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<z.infer<typeof signupSchema>>({ resolver: zodResolver(signupSchema) });
+  const { actor } = useSession();
+  const [search] = useSearchParams();
+  const { register, handleSubmit, formState: { errors } } = useForm<LoginFields>({ resolver: zodResolver(loginSchema) });
+  const [serverError, setServerError] = useState("");
+  const [checking, setChecking] = useState(false);
+  const [sent, setSent] = useState(false);
+  const intent = authIntent(search);
+  if (!AUTH_REQUIRED || actor) return <Navigate to="/dashboard" replace />;
+  const google = async () => {
+    setChecking(true);
+    setServerError("");
+    try {
+      await signInWithGoogle(intent);
+    } catch (error) {
+      setServerError(error instanceof Error ? error.message : "Google sign-up could not be started.");
+      setChecking(false);
+    }
+  };
+  const submit = async ({ email }: LoginFields) => {
+    setChecking(true);
+    setServerError("");
+    try {
+      await signInWithEmail(email.trim(), intent);
+      setSent(true);
+    } catch (error) {
+      setServerError(error instanceof Error ? error.message : "Account creation could not be started.");
+    } finally {
+      setChecking(false);
+    }
+  };
+  const planLabel = intent.plan ? `${intent.plan[0].toUpperCase()}${intent.plan.slice(1)} plan selected` : "Choose a plan later";
   return (
-    <AuthShell title="Meet your new receptionist" copy="Tell us where to reach you and we’ll help create your first voice agent.">
-      <form className="auth-form" onSubmit={handleSubmit(() => { push({ title: "You’re on the list", message: "Self-serve account creation is coming soon. We’ll be in touch.", tone: "success" }); reset(); })}>
-        <div className="form-grid">
-          <Field label="Your name" error={errors.name?.message}><input placeholder="Alex Morgan" {...register("name")} /></Field>
-          <Field label="Work email" error={errors.email?.message}><input type="email" placeholder="alex@business.co.uk" {...register("email")} /></Field>
-        </div>
-        <Field label="Business name" error={errors.business?.message}><input placeholder="Flourish Salon" {...register("business")} /></Field>
-        <Button type="submit">Request early access <ArrowRight size={16} /></Button>
-        <small className="form-disclaimer">Account provisioning is currently completed by the Robinexis team.</small>
+    <AuthShell title="Create your Robinexis account" copy="Start with Google or a secure email link. We’ll connect your business workspace after sign-up.">
+      <div className="selected-plan" role="status">{planLabel}</div>
+      <GoogleButton onClick={() => void google()} busy={checking} />
+      <div className="auth-divider"><span>or use email</span></div>
+      <form className="auth-form" onSubmit={handleSubmit(submit)}>
+        <Field label="Work email" hint="Use the email your Robinexis workspace will be assigned to." error={errors.email?.message}>
+          <input type="email" autoComplete="email" placeholder="you@company.com" {...register("email")} />
+        </Field>
+        {serverError && <div className="form-alert" role="alert">{serverError}</div>}
+        {sent && <div className="form-alert" role="status">Check your inbox to finish creating your account.</div>}
+        <Button type="submit" disabled={checking}>{checking ? "Sending link…" : "Continue with email"} <ArrowRight size={16} /></Button>
+        <small className="form-disclaimer">Payment is not taken yet. Your selected plan is saved for onboarding.</small>
       </form>
-      <p className="auth-switch">Already have access? <Link to="/login">Log in</Link></p>
+      <p className="auth-switch">Already have access? <Link to={`/login${intent.plan ? `?plan=${intent.plan}` : ""}`}>Log in</Link></p>
+    </AuthShell>
+  );
+}
+
+export function AuthCallbackPage() {
+  const navigate = useNavigate();
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let active = true;
+    void completeAuthCallback()
+      .then((intent) => {
+        if (active) navigate(intent.returnTo, { replace: true });
+      })
+      .catch((cause) => {
+        if (active) setError(cause instanceof Error ? cause.message : "Sign-in could not be completed.");
+      });
+    return () => { active = false; };
+  }, [navigate]);
+  return (
+    <AuthShell title={error ? "Sign-in needs attention" : "Finishing sign-in"} copy={error || "Securely connecting your account to Robinexis…"}>
+      {error ? <Link className="button button-primary button-md" to="/login">Return to login</Link> : <div className="auth-callback-loader" aria-label="Signing in" />}
+    </AuthShell>
+  );
+}
+
+export function PendingOnboardingPage() {
+  const { actor, logout } = useSession();
+  const plan = selectedPlan();
+  return (
+    <AuthShell title="Your account is ready" copy="Your business workspace still needs to be assigned by Robinexis.">
+      <div className="auth-note"><ShieldCheck size={17} /><p>Signed in as <strong>{actor?.email}</strong>. {plan ? `Your ${plan} plan preference is saved.` : "You can choose a plan during onboarding."}</p></div>
+      <div className="auth-form">
+        <Link className="button button-primary button-md" to="/demo/blades-hair"><Play size={15} /> Test Sophie</Link>
+        <a className="button button-secondary button-md" href="mailto:hello@robinexis.com?subject=Assign%20my%20Robinexis%20workspace">Request workspace access</a>
+        <Button type="button" variant="ghost" onClick={logout}>Sign out</Button>
+      </div>
     </AuthShell>
   );
 }

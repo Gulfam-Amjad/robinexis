@@ -53,4 +53,18 @@ describe("workspace permissions", () => {
       canCreateClients: false,
     });
   });
+
+  it("grants no workspace or platform permissions to pending signups", () => {
+    expect(permissionsFor({
+      email: "new@business.test",
+      role: "pending",
+      clientRoles: {},
+    }, "client_1")).toEqual({
+      isOperator: false,
+      canAdministerPlatform: false,
+      canCreateClients: false,
+      canEditWorkspace: false,
+      canManageMembers: false,
+    });
+  });
 });

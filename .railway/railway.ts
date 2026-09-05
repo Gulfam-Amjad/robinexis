@@ -64,7 +64,7 @@ export default defineRailway(() => {
       PLAN_ENTERPRISE_INCLUDED_MINUTES: "5000",
       OUTBOUND_AUTOMATION_ENABLED: "false",
       SAAS_PROVISIONING_ENABLED: "false",
-      WEB_ORIGIN: "https://robinexis-pink.vercel.app",
+      WEB_ORIGIN: "https://app.robinexis.com,https://robinexis-pink.vercel.app",
       SUPABASE_URL: "https://cdbcbzvhzdiwwcrmxjgi.supabase.co",
       SUPABASE_JWT_SECRET: preserve(),
       SUPABASE_JWT_KEY_ID: "01130f21-cdc6-49c9-8739-a41e4beed5c2",

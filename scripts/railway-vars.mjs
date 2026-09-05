@@ -70,7 +70,7 @@ const services = {
     CALCOM_API_KEY: value("CALCOM_API_KEY"),
     CALCOM_USERNAME: value("CALCOM_USERNAME", "admin"),
     VOICE_TOOL_SECRET: value("VOICE_TOOL_SECRET"),
-    WEB_ORIGIN: value("WEB_ORIGIN", "https://robinexis-pink.vercel.app"),
+    WEB_ORIGIN: value("WEB_ORIGIN", "https://app.robinexis.com,https://robinexis-pink.vercel.app"),
     ADMIN_EMAILS: value("ADMIN_EMAILS", "gulfamamjad633@gmail.com"),
     SUPABASE_URL: supabaseUrl(),
     SUPABASE_JWT_SECRET: value("SUPABASE_JWT_SECRET"),

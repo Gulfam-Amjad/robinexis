@@ -204,6 +204,12 @@ svg { flex: 0 0 auto; }
 .auth-card h1 { font-family: var(--font-display); font-size: 45px; font-weight: 500; letter-spacing: -.04em; margin-bottom: 12px; }
 .auth-card > p { color: var(--muted); font-size: 14px; margin-bottom: 30px; }
 .auth-form { display: grid; gap: 18px; }
+.google-auth-button { margin-bottom: 18px; width: 100%; }
+.google-mark { align-items: center; background: #fff; border: 1px solid var(--line); border-radius: 50%; color: #4285f4; display: inline-flex; font-family: Arial, sans-serif; font-weight: 800; height: 22px; justify-content: center; width: 22px; }
+.auth-divider { align-items: center; color: var(--muted); display: flex; font-size: 10px; gap: 12px; margin-bottom: 18px; text-transform: uppercase; }
+.auth-divider::before, .auth-divider::after { background: var(--line); content: ""; flex: 1; height: 1px; }
+.selected-plan { background: var(--accent-soft); border: 1px solid rgba(9, 181, 111, .2); border-radius: 10px; color: #06603a; font-size: 12px; font-weight: 700; margin-bottom: 18px; padding: 10px 12px; text-align: center; }
+.auth-callback-loader { animation: spin 1s linear infinite; border: 3px solid var(--line); border-radius: 50%; border-top-color: var(--accent); height: 34px; margin: 30px auto 0; width: 34px; }
 .auth-note { align-items: flex-start; background: var(--accent-soft); border-radius: 12px; color: #06603a; display: flex; font-size: 11px; gap: 10px; margin-top: 20px; padding: 12px; }
 .auth-note p { line-height: 1.45; margin: 0; }
 .auth-switch { font-size: 12px !important; margin: 20px 0 0 !important; text-align: center; }

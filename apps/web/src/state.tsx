@@ -17,43 +17,57 @@ const SessionContext = createContext<SessionValue | null>(null);
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [apiKey, setApiKey] = useState(() => sessionStorage.getItem(API_KEY_STORAGE));
+  const [authReady, setAuthReady] = useState(!AUTH_REQUIRED);
   const actorQuery = useQuery({
     queryKey: ["session-actor", apiKey],
     queryFn: api.session,
-    enabled: AUTH_REQUIRED ? Boolean(apiKey) : true,
+    enabled: AUTH_REQUIRED ? Boolean(apiKey && authReady) : true,
     retry: false,
   });
   const login = useCallback((key: string) => {
     sessionStorage.setItem(API_KEY_STORAGE, key.trim());
     setApiKey(key.trim());
   }, []);
-  const logout = useCallback(() => {
+  const clearSession = useCallback(() => {
     sessionStorage.removeItem(API_KEY_STORAGE);
     sessionStorage.removeItem(CLIENT_STORAGE);
     setApiKey(null);
-    void signOut();
   }, []);
+  const logout = useCallback(() => {
+    clearSession();
+    void signOut();
+  }, [clearSession]);
   useEffect(() => {
     window.addEventListener("robinexis:unauthorized", logout);
     return () => window.removeEventListener("robinexis:unauthorized", logout);
   }, [logout]);
   useEffect(() => {
-    if (!supabase) return;
-    void currentSession().then((session) => {
-      if (session?.access_token) login(session.access_token);
-    });
+    if (!AUTH_REQUIRED) return;
+    if (!supabase) {
+      clearSession();
+      setAuthReady(true);
+      return;
+    }
+    void currentSession()
+      .then((session) => {
+        if (session?.access_token) login(session.access_token);
+        else clearSession();
+      })
+      .catch(clearSession)
+      .finally(() => setAuthReady(true));
     const { data } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.access_token) login(session.access_token);
-      else setApiKey(null);
+      else clearSession();
+      setAuthReady(true);
     });
     return () => data.subscription.unsubscribe();
-  }, [login]);
+  }, [clearSession, login]);
   return (
     <SessionContext.Provider
       value={{
         apiKey,
         actor: actorQuery.data,
-        actorLoading: actorQuery.isLoading,
+        actorLoading: !authReady || actorQuery.isLoading,
         login,
         logout,
       }}

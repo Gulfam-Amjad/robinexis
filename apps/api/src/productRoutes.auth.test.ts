@@ -24,6 +24,13 @@ const operatorActor: AuthenticatedActor = {
   clientRoles: {},
 };
 
+const pendingActor: AuthenticatedActor = {
+  subject: "user_pending",
+  email: "new@business.test",
+  role: "pending",
+  clientRoles: {},
+};
+
 async function request(
   store: MemoryStore,
   actor: AuthenticatedActor,
@@ -50,6 +57,21 @@ async function request(
 }
 
 describe("product route tenant authorization", () => {
+  it("lets pending signups inspect only their empty onboarding state", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+
+    const session = await request(store, pendingActor, "/api/v1/session");
+    expect(session).toMatchObject({
+      status: 200,
+      body: { role: "pending", capabilities: { administerPlatform: false } },
+    });
+    const clients = await request(store, pendingActor, "/api/v1/clients");
+    expect(clients).toMatchObject({ status: 200, body: { items: [] } });
+    const admin = await request(store, pendingActor, "/api/v1/admin/summary");
+    expect(admin).toMatchObject({ status: 403, body: { error: "platform_admin_required" } });
+  });
+
   it("limits salon users to assigned workspaces while operators see every tenant", async () => {
     const store = new MemoryStore();
     await seedStore(store);

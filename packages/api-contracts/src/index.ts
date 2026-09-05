@@ -15,7 +15,7 @@ export type WorkspaceRole = "owner" | "manager" | "viewer";
 
 export interface SessionActor {
   email: string;
-  role: "operator" | "salon";
+  role: "operator" | "salon" | "pending";
   clientRoles: Record<string, WorkspaceRole | "operator">;
   capabilities?: {
     administerPlatform?: boolean;

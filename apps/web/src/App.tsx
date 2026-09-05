@@ -9,6 +9,8 @@ import { useSession } from "./state";
 const LandingPage = lazy(() => import("./pages/public").then((m) => ({ default: m.LandingPage })));
 const LoginPage = lazy(() => import("./pages/public").then((m) => ({ default: m.LoginPage })));
 const SignupPage = lazy(() => import("./pages/public").then((m) => ({ default: m.SignupPage })));
+const AuthCallbackPage = lazy(() => import("./pages/public").then((m) => ({ default: m.AuthCallbackPage })));
+const PendingOnboardingPage = lazy(() => import("./pages/public").then((m) => ({ default: m.PendingOnboardingPage })));
 const PricingPage = lazy(() => import("./pages/public").then((m) => ({ default: m.PricingPage })));
 const BladesReceptionistDemoPage = lazy(() => import("./pages/blades-demo"));
 const appPages = () => import("./pages/app");
@@ -34,7 +36,7 @@ const AdminOverviewPage = lazy(() => appPages().then((m) => ({ default: m.AdminO
 function RequireSession() {
   const { apiKey, actor, actorLoading } = useSession();
   const location = useLocation();
-  if (AUTH_REQUIRED && apiKey && actorLoading) {
+  if (AUTH_REQUIRED && actorLoading) {
     return <div className="not-found">Verifying workspace access…</div>;
   }
   if (AUTH_REQUIRED && (!apiKey || !actor)) {
@@ -43,11 +45,27 @@ function RequireSession() {
   return <Outlet />;
 }
 
+function RequireWorkspace() {
+  const { actor } = useSession();
+  return actor?.role === "pending" ? <Navigate to="/dashboard" replace /> : <Outlet />;
+}
+
 function RequireOperator() {
   const { actorLoading } = useSession();
+  const { actor } = useSession();
   const { canAdministerPlatform } = usePermissions();
   if (actorLoading) return <div className="not-found">Loading workspace…</div>;
-  return canAdministerPlatform ? <Outlet /> : <Navigate to="/app" replace />;
+  return canAdministerPlatform ? <Outlet /> : <Navigate to={actor?.role === "pending" ? "/dashboard" : "/app"} replace />;
+}
+
+function DashboardRoute() {
+  const { actor, actorLoading } = useSession();
+  if (actorLoading) return <div className="not-found">Loading your dashboard…</div>;
+  // TODO(stripe): require an active/trialing subscription here before routing
+  // a client actor into /app. Operators and pending onboarding remain exempt.
+  if (actor?.role === "operator") return <Navigate to="/admin" replace />;
+  if (actor?.role === "salon") return <Navigate to="/app" replace />;
+  return <PendingOnboardingPage />;
 }
 
 function NotFoundPage() {
@@ -65,35 +83,39 @@ export default function App() {
         <Route path="/" element={AUTH_REQUIRED ? <LandingPage /> : <Navigate to="/app" replace />} />
         <Route path="/login" element={AUTH_REQUIRED ? <LoginPage /> : <Navigate to="/app" replace />} />
         <Route path="/signup" element={AUTH_REQUIRED ? <SignupPage /> : <Navigate to="/app" replace />} />
+        <Route path="/auth/callback" element={AUTH_REQUIRED ? <AuthCallbackPage /> : <Navigate to="/app" replace />} />
         <Route path="/pricing" element={<PricingPage />} />
         <Route path="/demo/blades-hair" element={<BladesReceptionistDemoPage />} />
         <Route element={<RequireSession />}>
-          <Route path="/app" element={<AppShell />}>
-            <Route index element={<OverviewPage />} />
-            <Route path="agents" element={<AgentsPage />} />
-            <Route path="agents/:id" element={<AgentDetailPage />} />
-            <Route path="playground" element={<PlaygroundPage />} />
-            <Route path="calls" element={<CallsPage />} />
-            <Route path="calls/:id" element={<CallDetailPage />} />
-            <Route path="analytics" element={<AnalyticsPage />} />
-            <Route path="calendar" element={<CalendarPage />} />
-            <Route path="usage" element={<UsagePage />} />
-            <Route path="knowledge" element={<KnowledgePage />} />
-            <Route path="integrations" element={<IntegrationsPage />} />
-            <Route path="team" element={<TeamPage />} />
-            <Route path="settings" element={<SettingsPage />} />
-            <Route element={<RequireOperator />}>
-              <Route path="onboarding" element={<Navigate to="/admin/clients/new" replace />} />
-              <Route path="agents/new" element={<Navigate to="/admin/agents/new" replace />} />
-              <Route path="billing" element={<Navigate to="/admin/billing" replace />} />
+          <Route path="/dashboard" element={<DashboardRoute />} />
+          <Route element={<RequireWorkspace />}>
+            <Route path="/app" element={<AppShell />}>
+              <Route index element={<OverviewPage />} />
+              <Route path="agents" element={<AgentsPage />} />
+              <Route path="agents/:id" element={<AgentDetailPage />} />
+              <Route path="playground" element={<PlaygroundPage />} />
+              <Route path="calls" element={<CallsPage />} />
+              <Route path="calls/:id" element={<CallDetailPage />} />
+              <Route path="analytics" element={<AnalyticsPage />} />
+              <Route path="calendar" element={<CalendarPage />} />
+              <Route path="usage" element={<UsagePage />} />
+              <Route path="knowledge" element={<KnowledgePage />} />
+              <Route path="integrations" element={<IntegrationsPage />} />
+              <Route path="team" element={<TeamPage />} />
+              <Route path="settings" element={<SettingsPage />} />
+              <Route element={<RequireOperator />}>
+                <Route path="onboarding" element={<Navigate to="/admin/clients/new" replace />} />
+                <Route path="agents/new" element={<Navigate to="/admin/agents/new" replace />} />
+                <Route path="billing" element={<Navigate to="/admin/billing" replace />} />
+              </Route>
             </Route>
-          </Route>
-          <Route element={<RequireOperator />}>
-            <Route path="/admin" element={<AppShell />}>
-              <Route index element={<AdminOverviewPage />} />
-              <Route path="clients/new" element={<OnboardingPage />} />
-              <Route path="agents/new" element={<NewAgentPage />} />
-              <Route path="billing" element={<BillingPage />} />
+            <Route element={<RequireOperator />}>
+              <Route path="/admin" element={<AppShell />}>
+                <Route index element={<AdminOverviewPage />} />
+                <Route path="clients/new" element={<OnboardingPage />} />
+                <Route path="agents/new" element={<NewAgentPage />} />
+                <Route path="billing" element={<BillingPage />} />
+              </Route>
             </Route>
           </Route>
         </Route>
