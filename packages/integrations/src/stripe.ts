@@ -1,7 +1,7 @@
 import Stripe from "stripe";
-import type { PlatformStore } from "@robinexis/database";
+import type { ClientConfig, PlatformStore, ServiceStatus } from "@robinexis/database";
 import { stripeStatusToLocal, structuredLog } from "@robinexis/database";
-import { isPlanTier, type PlanTier } from "./plans.js";
+import { isPlanTier, planDefinition, type PlanTier } from "./plans.js";
 
 export function createStripe(secret = process.env.STRIPE_SECRET_KEY || "") {
   return secret ? new Stripe(secret) : null;
@@ -20,6 +20,14 @@ function stripePriceId(tier: PlanTier): string | undefined {
   }
 }
 
+function tenantMetadata(opts: { clientId: string; plan: PlanTier; authUserId?: string }) {
+  return {
+    clientId: opts.clientId,
+    plan: opts.plan,
+    ...(opts.authUserId ? { authUserId: opts.authUserId } : {}),
+  };
+}
+
 export async function createCheckoutSession(opts: {
   clientId: string;
   plan: PlanTier;
@@ -27,6 +35,7 @@ export async function createCheckoutSession(opts: {
   cancelUrl: string;
   customerId?: string;
   customerEmail?: string;
+  authUserId?: string;
   stripe?: Stripe | null;
 }): Promise<
   | { configured: false; reason: "stripe_not_configured" | "plan_price_not_configured" }
@@ -37,29 +46,23 @@ export async function createCheckoutSession(opts: {
   const price = stripePriceId(opts.plan);
   if (!price) return { configured: false, reason: "plan_price_not_configured" };
 
-  const session = await stripe.checkout.sessions.create(
-    {
-      mode: "subscription",
-      line_items: [{ price, quantity: 1 }],
-      success_url: opts.successUrl,
-      cancel_url: opts.cancelUrl,
-      allow_promotion_codes: true,
-      client_reference_id: opts.clientId,
-      customer: opts.customerId,
-      customer_email: opts.customerId ? undefined : opts.customerEmail,
-      metadata: {
-        clientId: opts.clientId,
-        plan: opts.plan,
-      },
-      subscription_data: {
-        metadata: {
-          clientId: opts.clientId,
-          plan: opts.plan,
-        },
-      },
+  const metadata = tenantMetadata(opts);
+  const session = await stripe.checkout.sessions.create({
+    mode: "subscription",
+    line_items: [{ price, quantity: 1 }],
+    success_url: opts.successUrl,
+    cancel_url: opts.cancelUrl,
+    allow_promotion_codes: true,
+    payment_method_collection: "if_required",
+    client_reference_id: opts.clientId,
+    customer: opts.customerId,
+    customer_email: opts.customerId ? undefined : opts.customerEmail,
+    metadata,
+    subscription_data: {
+      trial_period_days: planDefinition(opts.plan).trialDays,
+      metadata,
     },
-    { idempotencyKey: `checkout:${opts.clientId}:${opts.plan}` },
-  );
+  });
   return { configured: true, id: session.id, url: session.url };
 }
 
@@ -86,9 +89,12 @@ export async function handleStripeWebhook(opts: {
   ];
   if (!handled.includes(event.type)) return { ok: true, status: "ignored" };
 
+  const checkout =
+    event.type === "checkout.session.completed"
+      ? (event.data.object as Stripe.Checkout.Session)
+      : undefined;
   let sub = subscriptionFrom(event);
-  if (!sub && event.type === "checkout.session.completed") {
-    const checkout = event.data.object as Stripe.Checkout.Session;
+  if (!sub && checkout) {
     const subscriptionId =
       typeof checkout.subscription === "string"
         ? checkout.subscription
@@ -105,15 +111,12 @@ export async function handleStripeWebhook(opts: {
 
   const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer?.id;
   if (!customerId) return { ok: true, status: "no_customer" };
-  const clients = await opts.store.listClients();
-  const metadataClientId = String(sub.metadata?.clientId || "");
-  const metadataPlan = sub.metadata?.plan;
-  const client = clients.find(
-    (c) =>
-      c.stripeCustomerId === customerId ||
-      c.stripeSubscriptionId === sub.id ||
-      (metadataClientId && c.id === metadataClientId),
-  );
+  const metadataPlan = sub.metadata?.plan || checkout?.metadata?.plan;
+  const client = await resolveStripeClient(opts.store, {
+    subscription: sub,
+    checkout,
+    customerId,
+  });
   if (!client) {
     await opts.store.claimStripeEvent({
       id: event.id,
@@ -144,7 +147,7 @@ export async function handleStripeWebhook(opts: {
   }
 
   try {
-    const local = event.type === "customer.subscription.deleted" ? "canceled" : stripeStatusToLocal(sub.status);
+    const local = localStatusForEvent(event.type, sub.status);
     client.serviceStatus = local;
     client.stripeSubscriptionId = sub.id;
     if (customerId) client.stripeCustomerId = customerId;
@@ -196,8 +199,47 @@ export async function handleStripeWebhook(opts: {
   }
 }
 
+function localStatusForEvent(eventType: string, stripeStatus: string): ServiceStatus {
+  if (eventType === "customer.subscription.deleted") return "canceled";
+  if (eventType === "invoice.payment_failed") return "past_due";
+  return stripeStatusToLocal(stripeStatus);
+}
+
+async function resolveStripeClient(
+  store: PlatformStore,
+  opts: {
+    subscription: Stripe.Subscription;
+    checkout?: Stripe.Checkout.Session;
+    customerId: string;
+  },
+): Promise<ClientConfig | undefined> {
+  const metadataClientId = String(
+    opts.subscription.metadata?.clientId ||
+      opts.checkout?.metadata?.clientId ||
+      opts.checkout?.client_reference_id ||
+      "",
+  );
+  if (metadataClientId) {
+    const byId = await store.getClient(metadataClientId);
+    if (byId) return byId;
+  }
+  const authUserId = String(
+    opts.subscription.metadata?.authUserId || opts.checkout?.metadata?.authUserId || "",
+  );
+  if (authUserId) {
+    const profile = await store.getUserProfileByAuthUserId(authUserId);
+    if (profile?.clientId) {
+      const byProfile = await store.getClient(profile.clientId);
+      if (byProfile) return byProfile;
+    }
+  }
+  const clients = await store.listClients();
+  return clients.find(
+    (c) => c.stripeCustomerId === opts.customerId || c.stripeSubscriptionId === opts.subscription.id,
+  );
+}
+
 function subscriptionFrom(event: Stripe.Event): Stripe.Subscription | undefined {
-  const obj = event.data.object as { object?: string; subscription?: string | Stripe.Subscription };
   if (event.type.startsWith("customer.subscription")) return event.data.object as Stripe.Subscription;
   if (event.type.startsWith("invoice.")) {
     const inv = event.data.object as Stripe.Invoice & { subscription?: string | Stripe.Subscription };

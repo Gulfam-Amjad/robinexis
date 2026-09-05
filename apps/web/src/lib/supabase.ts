@@ -5,6 +5,12 @@ const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
 
 export type AuthPlan = "starter" | "pro";
 export type AuthIntent = { plan?: AuthPlan; returnTo: string };
+export type AuthCallbackResult = AuthIntent & { accessToken: string };
+
+type CallbackAuthClient = Pick<
+  NonNullable<typeof supabase>["auth"],
+  "getSession" | "exchangeCodeForSession"
+>;
 
 export const AUTH_INTENT_STORAGE = "robinexis_auth_intent";
 export const SELECTED_PLAN_STORAGE = "robinexis_selected_plan";
@@ -58,6 +64,20 @@ export async function currentSession(): Promise<Session | null> {
   return data.session;
 }
 
+export async function sessionForCallback(
+  code: string | null,
+  auth: CallbackAuthClient,
+): Promise<Session | null> {
+  if (code) {
+    const { data, error } = await auth.exchangeCodeForSession(code);
+    if (error) throw error;
+    return data.session;
+  }
+  const { data, error } = await auth.getSession();
+  if (error) throw error;
+  return data.session;
+}
+
 function callbackUrl() {
   return `${window.location.origin}/auth/callback`;
 }
@@ -82,19 +102,14 @@ export async function signInWithEmail(email: string, intent: Partial<AuthIntent>
   if (error) throw error;
 }
 
-export async function completeAuthCallback(currentUrl = window.location.href): Promise<AuthIntent> {
+export async function completeAuthCallback(currentUrl = window.location.href): Promise<AuthCallbackResult> {
   if (!supabase) throw new Error("Supabase is not configured for this frontend.");
   const callback = new URL(currentUrl);
   const providerError = callback.searchParams.get("error_description") || callback.searchParams.get("error");
   if (providerError) throw new Error(providerError);
 
   const code = callback.searchParams.get("code");
-  let session = await currentSession();
-  if (!session && code) {
-    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-    if (error) throw error;
-    session = data.session;
-  }
+  const session = await sessionForCallback(code, supabase.auth);
   if (!session) throw new Error("The sign-in callback did not contain a valid session.");
 
   const intent = readAuthIntent();
@@ -103,7 +118,7 @@ export async function completeAuthCallback(currentUrl = window.location.href): P
     if (error) throw error;
   }
   localStorage.removeItem(AUTH_INTENT_STORAGE);
-  return intent;
+  return { ...intent, accessToken: session.access_token };
 }
 
 export async function signOut() {

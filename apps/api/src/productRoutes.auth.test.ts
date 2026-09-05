@@ -72,6 +72,42 @@ describe("product route tenant authorization", () => {
     expect(admin).toMatchObject({ status: 403, body: { error: "platform_admin_required" } });
   });
 
+  it("provisions a tenant-scoped workspace when a pending user starts checkout", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    const existing = (await store.listClients()).map((client) => client.id);
+    const previousSecret = process.env.STRIPE_SECRET_KEY;
+    delete process.env.STRIPE_SECRET_KEY;
+
+    const checkout = await request(store, pendingActor, "/api/v1/billing/checkout", "POST", {
+      plan: "starter",
+    });
+    if (previousSecret === undefined) delete process.env.STRIPE_SECRET_KEY;
+    else process.env.STRIPE_SECRET_KEY = previousSecret;
+
+    expect(checkout).toMatchObject({ status: 503, body: { error: "stripe_not_configured" } });
+    const created = (await store.listClients()).find((client) => !existing.includes(client.id));
+    expect(created).toMatchObject({
+      email: pendingActor.email,
+      serviceStatus: "incomplete",
+      published: false,
+      subscribedProduct: "starter",
+    });
+    await expect(store.getUserProfileByAuthUserId(pendingActor.subject)).resolves.toMatchObject({
+      clientId: created?.id,
+      workspaceRole: "owner",
+    });
+    const session = await request(store, {
+      ...pendingActor,
+      role: "salon",
+      clientRoles: { [created!.id]: "owner" },
+    }, "/api/v1/session");
+    expect(session.body).toMatchObject({
+      clientId: created!.id,
+      subscriptionStatus: "incomplete",
+    });
+  });
+
   it("limits salon users to assigned workspaces while operators see every tenant", async () => {
     const store = new MemoryStore();
     await seedStore(store);

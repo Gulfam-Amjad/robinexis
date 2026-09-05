@@ -87,7 +87,7 @@ async function fileToBase64(file: File): Promise<string> {
 
 export const api = {
   validateKey: (key: string) => request<BootstrapResponse>("/api/v1/bootstrap", {}, key),
-  session: () => request<SessionActor>("/api/v1/session"),
+  session: (accessKey?: string) => request<SessionActor>("/api/v1/session", {}, accessKey),
   bootstrap: (clientId?: string) =>
     request<BootstrapResponse>(`/api/v1/bootstrap${query({ clientId })}`),
   clients: async () => list(await request<ClientSummary[] | ListResponse<ClientSummary>>("/api/v1/clients")),
@@ -159,10 +159,10 @@ export const api = {
     list(await request<TimeseriesPoint[] | ListResponse<TimeseriesPoint>>(`/api/v1/analytics/timeseries${query({ clientId, ...range })}`)),
   usage: (clientId: string, month?: string) =>
     request<Usage>(`/api/v1/usage${query({ clientId, month })}`),
-  createCheckout: (clientId: string, plan: "starter" | "pro") =>
-    request<{ checkoutSessionId: string; url: string | null }>("/api/v1/billing/checkout", {
+  createCheckout: (plan: "starter" | "pro", clientId?: string) =>
+    request<{ checkoutSessionId: string; url: string | null; clientId?: string }>("/api/v1/billing/checkout", {
       method: "POST",
-      body: JSON.stringify({ clientId, plan }),
+      body: JSON.stringify(clientId ? { clientId, plan } : { plan }),
     }),
   slots: async (clientId: string, eventTypeSlug: string) =>
     list(await request<CalendarSlot[] | ListResponse<CalendarSlot>>(`/api/v1/calendar/slots${query({ clientId, eventTypeSlug })}`)),

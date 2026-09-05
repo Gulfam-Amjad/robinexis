@@ -1,3 +1,4 @@
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   ArrowRight,
@@ -11,13 +12,14 @@ import {
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { z } from "zod";
 import { PublicHeader } from "../components/layout";
 import { Button, Card, Field } from "../components/ui";
 import { AUTH_REQUIRED } from "../lib/auth";
+import { api } from "../lib/api";
 import {
   completeAuthCallback,
   selectedPlan,
@@ -25,6 +27,7 @@ import {
   signInWithGoogle,
   validPlan,
   type AuthIntent,
+  type AuthPlan,
 } from "../lib/supabase";
 import { useSession } from "../state";
 
@@ -195,7 +198,8 @@ export function SignupPage() {
   const [checking, setChecking] = useState(false);
   const [sent, setSent] = useState(false);
   const intent = authIntent(search);
-  if (!AUTH_REQUIRED || actor) return <Navigate to="/dashboard" replace />;
+  if (!AUTH_REQUIRED) return <Navigate to="/app" replace />;
+  if (actor) return <Navigate to="/dashboard" replace />;
   const google = async () => {
     setChecking(true);
     setServerError("");
@@ -231,7 +235,7 @@ export function SignupPage() {
         {serverError && <div className="form-alert" role="alert">{serverError}</div>}
         {sent && <div className="form-alert" role="status">Check your inbox to finish creating your account.</div>}
         <Button type="submit" disabled={checking}>{checking ? "Sending link…" : "Continue with email"} <ArrowRight size={16} /></Button>
-        <small className="form-disclaimer">Payment is not taken yet. Your selected plan is saved for onboarding.</small>
+        <small className="form-disclaimer">Starter and Pro include a 3-day trial. Stripe hosts checkout after you sign in.</small>
       </form>
       <p className="auth-switch">Already have access? <Link to={`/login${intent.plan ? `?plan=${intent.plan}` : ""}`}>Log in</Link></p>
     </AuthShell>
@@ -240,18 +244,32 @@ export function SignupPage() {
 
 export function AuthCallbackPage() {
   const navigate = useNavigate();
+  const { login, logout } = useSession();
   const [error, setError] = useState("");
   useEffect(() => {
     let active = true;
     void completeAuthCallback()
-      .then((intent) => {
-        if (active) navigate(intent.returnTo, { replace: true });
+      .then(async (result) => {
+        const actor = await api.session(result.accessToken);
+        return { result, actor };
+      })
+      .then(({ result, actor }) => {
+        if (!active) return;
+        login(result.accessToken, actor);
+        navigate(result.returnTo, { replace: true });
       })
       .catch((cause) => {
-        if (active) setError(cause instanceof Error ? cause.message : "Sign-in could not be completed.");
+        if (!active) return;
+        logout();
+        const message = cause instanceof Error ? cause.message : "Sign-in could not be completed.";
+        setError(
+          message === "unauthorized"
+            ? "Your Google sign-in completed, but the workspace could not verify the session. Please sign in again."
+            : message,
+        );
       });
     return () => { active = false; };
-  }, [navigate]);
+  }, [login, logout, navigate]);
   return (
     <AuthShell title={error ? "Sign-in needs attention" : "Finishing sign-in"} copy={error || "Securely connecting your account to Robinexis…"}>
       {error ? <Link className="button button-primary button-md" to="/login">Return to login</Link> : <div className="auth-callback-loader" aria-label="Signing in" />}
@@ -259,15 +277,77 @@ export function AuthCallbackPage() {
   );
 }
 
-export function PendingOnboardingPage() {
-  const { actor, logout } = useSession();
-  const plan = selectedPlan();
+export function SelfServeBillingPage() {
+  const { actor, actorLoading, logout } = useSession();
+  const [search] = useSearchParams();
+  const queryClient = useQueryClient();
+  const started = useRef(false);
+  const checkoutStatus = search.get("checkout");
+  const selected = validPlan(search.get("plan")) || selectedPlan();
+  const paid = actor?.subscriptionStatus === "active" || actor?.subscriptionStatus === "trialing";
+  const checkout = useMutation({
+    mutationFn: (plan: AuthPlan) => api.createCheckout(plan, actor?.clientId),
+    onSuccess: (result) => {
+      if (result.url) window.location.assign(result.url);
+    },
+  });
+
+  useEffect(() => {
+    if (actorLoading || paid || started.current) return;
+    if (search.get("startCheckout") !== "1" || !selected) return;
+    started.current = true;
+    checkout.mutate(selected);
+  }, [actorLoading, paid, search, selected, checkout]);
+
+  useEffect(() => {
+    if (checkoutStatus === "success") {
+      void queryClient.invalidateQueries({ queryKey: ["session-actor"] });
+    }
+  }, [checkoutStatus, queryClient]);
+
+  if (actorLoading) return <div className="not-found">Loading billing…</div>;
+  if (actor?.role === "operator") return <Navigate to="/admin/billing" replace />;
+
+  const error = checkout.error instanceof Error ? checkout.error.message : checkout.error ? "Checkout could not be started." : "";
   return (
-    <AuthShell title="Your account is ready" copy="Your business workspace still needs to be assigned by Robinexis.">
-      <div className="auth-note"><ShieldCheck size={17} /><p>Signed in as <strong>{actor?.email}</strong>. {plan ? `Your ${plan} plan preference is saved.` : "You can choose a plan during onboarding."}</p></div>
+    <AuthShell
+      title={paid ? "Your Robinexis plan" : "Choose a plan to continue"}
+      copy={
+        checkoutStatus === "success"
+          ? "Stripe confirmed checkout. We’ll unlock the dashboard as soon as the subscription is marked trialing or active."
+          : paid
+            ? `This workspace is ${actor?.subscriptionStatus}. You can change plan from Stripe checkout if you need to.`
+            : "Starter and Pro include a 3-day trial. A card is only collected if Stripe requires one for the trial."
+      }
+    >
+      <div className="auth-note">
+        <ShieldCheck size={17} />
+        <p>
+          Signed in as <strong>{actor?.email}</strong>
+          {actor?.subscriptionStatus ? `. Status: ${actor.subscriptionStatus}.` : "."}
+        </p>
+      </div>
+      {checkoutStatus === "cancelled" && (
+        <div className="form-alert" role="status">Checkout was cancelled. Pick a plan when you are ready.</div>
+      )}
+      {error && <div className="form-alert" role="alert">{error}</div>}
       <div className="auth-form">
-        <Link className="button button-primary button-md" to="/demo/blades-hair"><Play size={15} /> Test Sophie</Link>
-        <a className="button button-secondary button-md" href="mailto:hello@robinexis.com?subject=Assign%20my%20Robinexis%20workspace">Request workspace access</a>
+        {(["starter", "pro"] as const).map((plan) => (
+          <Button
+            key={plan}
+            type="button"
+            variant={plan === "pro" ? "primary" : "secondary"}
+            disabled={checkout.isPending}
+            onClick={() => checkout.mutate(plan)}
+          >
+            {checkout.isPending && selected === plan
+              ? "Opening Stripe…"
+              : plan === "starter"
+                ? "Starter · £99/month"
+                : "Pro · £249/month"}
+          </Button>
+        ))}
+        {paid && <Link className="button button-ghost button-md" to="/dashboard">Open dashboard</Link>}
         <Button type="button" variant="ghost" onClick={logout}>Sign out</Button>
       </div>
     </AuthShell>
@@ -288,24 +368,26 @@ function AuthShell({ title, copy, children }: { title: string; copy: string; chi
 
 export function PricingPage() {
   const plans = [
-    { name: "Starter", price: "£149", copy: "For independent businesses ready to stop missing calls.", features: ["One AI receptionist", "150 included minutes", "Booking & call summaries", "Email support"] },
-    { name: "Growth", price: "£299", copy: "For busy teams turning more calls into appointments.", features: ["Everything in Starter", "500 included minutes", "Advanced call insights", "Analytics & custom handoffs"], featured: true },
-    { name: "Pro", price: "Let’s talk", copy: "For multi-location teams with more complex workflows.", features: ["Multiple locations", "Custom integrations", "Priority onboarding", "Dedicated optimisation"] },
+    { name: "Starter", price: "£99", plan: "starter" as const, copy: "For independent businesses ready to stop missing calls.", features: ["One AI receptionist", "300 included minutes", "Booking & call summaries", "3-day trial"] },
+    { name: "Pro", price: "£249", plan: "pro" as const, copy: "For busy teams turning more calls into appointments.", features: ["Everything in Starter", "1,500 included minutes", "Smart rebooking & waitlist", "Revenue recovery dashboard"], featured: true },
+    { name: "Enterprise", price: "Let’s talk", copy: "For multi-location teams with more complex workflows.", features: ["Multiple locations", "Custom integrations", "Priority onboarding", "Dedicated optimisation"] },
   ];
   return (
     <div className="public-page pricing-page">
       <PublicHeader />
       <main className="pricing-main">
-        <div className="section-intro"><span className="eyebrow">Pricing</span><h1>Simple managed plans</h1><p>Guide pricing for a receptionist configured and supported by Robinexis. Final scope is confirmed before activation.</p></div>
+        <div className="section-intro"><span className="eyebrow">Pricing</span><h1>Simple self-serve plans</h1><p>Start with a 3-day trial on Starter or Pro. Stripe hosts checkout after you sign in with Google.</p></div>
         <div className="pricing-grid">
           {plans.map((plan) => <Card className={`price-card ${plan.featured ? "price-featured" : ""}`} key={plan.name}>
             {plan.featured && <span className="popular">Most popular</span>}
             <h2>{plan.name}</h2><p>{plan.copy}</p><strong>{plan.price}{plan.price.startsWith("£") && <small>/month</small>}</strong>
-            <Link className={`button button-${plan.featured ? "primary" : "secondary"} button-md`} to="/signup">Request access <ArrowRight size={15} /></Link>
+            {"plan" in plan && plan.plan
+              ? <Link className={`button button-${plan.featured ? "primary" : "secondary"} button-md`} to={`/signup?plan=${plan.plan}`}>Start trial <ArrowRight size={15} /></Link>
+              : <a className="button button-secondary button-md" href="mailto:hello@robinexis.com?subject=Enterprise%20Robinexis">Contact sales <ArrowRight size={15} /></a>}
             <ul>{plan.features.map((feature) => <li key={feature}><Check size={16} />{feature}</li>)}</ul>
           </Card>)}
         </div>
-        <p className="pricing-footnote">Guide pricing only. Final allowance, overage and VAT are confirmed by the Robinexis team before activation; self-serve checkout is not yet available.</p>
+        <p className="pricing-footnote">Test-mode Stripe checkout in this environment. VAT and live billing are confirmed before production go-live.</p>
       </main>
     </div>
   );

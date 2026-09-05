@@ -10,7 +10,11 @@ const client = {
   monthlyMinuteLimit: 100,
 };
 
-async function openWorkspaceSession(page: Page, role: "operator" | "salon" = "operator") {
+async function openWorkspaceSession(
+  page: Page,
+  role: "operator" | "salon" = "operator",
+  subscriptionStatus: "trialing" | "active" | "past_due" = "trialing",
+) {
   await page.addInitScript(() => {
     sessionStorage.setItem("robinexis_admin_api_key", "test-admin-key");
     sessionStorage.setItem("robinexis_active_client", "client_demo");
@@ -24,6 +28,8 @@ async function openWorkspaceSession(page: Page, role: "operator" | "salon" = "op
       role,
       clientRoles: role === "salon" ? { [client.id]: "owner" } : {},
       capabilities: { administerPlatform: role === "operator", createClients: role === "operator" },
+      clientId: role === "salon" ? client.id : undefined,
+      subscriptionStatus: role === "salon" ? subscriptionStatus : undefined,
     } });
     if (path === "/api/v1/clients") return route.fulfill({ json: { items: [client] } });
     if (path === "/api/v1/bootstrap") return route.fulfill({ json: {
@@ -58,8 +64,8 @@ async function openWorkspaceSession(page: Page, role: "operator" | "salon" = "op
 
 test("public pricing explains the product and access model", async ({ page }) => {
   await page.goto("/pricing");
-  await expect(page.getByRole("heading", { name: /simple managed plans/i })).toBeVisible();
-  await expect(page.getByText(/self-serve checkout is not yet available/i)).toBeVisible();
+  await expect(page.getByRole("heading", { name: /simple self-serve plans/i })).toBeVisible();
+  await expect(page.getByText(/3-day trial/i).first()).toBeVisible();
 });
 
 test("public Blades receptionist is branded and needs no login", async ({ page }) => {
@@ -141,4 +147,14 @@ test("salon owners see only their workspace experience", async ({ page }) => {
 
   await page.goto("/admin");
   await expect(page).toHaveURL(/\/app$/);
+});
+
+test("unpaid salon deep links are redirected to Sophie with an upgrade action", async ({ page }) => {
+  await openWorkspaceSession(page, "salon", "past_due");
+
+  await page.goto("/app/agents");
+
+  await expect(page).toHaveURL(/\/demo\/blades-hair$/);
+  await expect(page.getByRole("heading", { name: /Meet Sophie, the AI receptionist/i })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Choose a plan" })).toHaveAttribute("href", "/billing");
 });

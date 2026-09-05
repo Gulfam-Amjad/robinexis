@@ -19,6 +19,13 @@ The public API is `https://robinexisapi-production-3836.up.railway.app`.
 - `POST /api/v1/voice-tools/check-availability`
 - `POST /api/v1/voice-tools/create-booking`
 - `POST /webhooks/elevenlabs/post-call`
+- `POST /webhooks/stripe`
+
+Register the Stripe **test-mode** webhook at:
+
+`https://robinexisapi-production-3836.up.railway.app/webhooks/stripe`
+
+That URL is not pre-registered in Stripe. After deploy, a POST without a valid `Stripe-Signature` should return 400. Then add the endpoint in the Stripe Dashboard (test) for `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`, and `invoice.payment_failed`. Paste the signing secret into Railway `STRIPE_WEBHOOK_SECRET`. Create Starter (£99/mo) and Pro (£249/mo) Prices in the test product catalog and set `STRIPE_PRICE_IDS_JSON`.
 
 Both booking routes require `x-voice-tool-secret`. `VOICE_TOOL_SECRET` remains bound to Blades for compatibility. New tenants use one unique secret each in `VOICE_TOOL_SECRETS_JSON`, shaped as `{"client_id":"long-unique-secret"}`; the request body cannot choose its tenant. ElevenLabs post-call events require a valid `ElevenLabs-Signature` generated with `ELEVENLABS_WEBHOOK_SECRET`.
 

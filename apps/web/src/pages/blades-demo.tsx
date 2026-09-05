@@ -4,8 +4,20 @@ import { Link } from "react-router-dom";
 import { Logo } from "../components/layout";
 import { ReceptionistCall } from "../components/ReceptionistCall";
 import { BLADES_RECEPTIONIST_DEMO } from "../lib/receptionistDemo";
+import { canAccessProduct } from "../lib/routing";
+import { selectedPlan } from "../lib/supabase";
+import { useSession } from "../state";
 
 export default function BladesReceptionistDemoPage() {
+  const { actor } = useSession();
+  const plan = selectedPlan();
+  const accountAction = actor
+    ? {
+        to: canAccessProduct(actor) ? "/dashboard" : `/billing${plan ? `?plan=${plan}` : ""}`,
+        label: canAccessProduct(actor) ? "Open dashboard" : "Choose a plan",
+      }
+    : { to: "/login", label: "Log in" };
+
   useEffect(() => {
     const previousTitle = document.title;
     document.title = "Meet Sophie | Blades Hair AI Receptionist by Robinexis";
@@ -34,9 +46,12 @@ export default function BladesReceptionistDemoPage() {
           <span />
           <p>Interactive client demo</p>
         </div>
-        <a className="button button-secondary button-sm" href={`tel:${BLADES_RECEPTIONIST_DEMO.phone}`}>
-          <Phone size={14} /> Call the phone line
-        </a>
+        <div className="demo-header-actions">
+          <Link className="button button-primary button-sm" to={accountAction.to}>{accountAction.label}</Link>
+          <a className="button button-secondary button-sm" href={`tel:${BLADES_RECEPTIONIST_DEMO.phone}`}>
+            <Phone size={14} /> Call the phone line
+          </a>
+        </div>
       </header>
 
       <main id="receptionist-demo">

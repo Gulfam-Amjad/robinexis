@@ -17,6 +17,8 @@ export interface SessionActor {
   email: string;
   role: "operator" | "salon" | "pending";
   clientRoles: Record<string, WorkspaceRole | "operator">;
+  clientId?: string;
+  subscriptionStatus?: ServiceStatus;
   capabilities?: {
     administerPlatform?: boolean;
     createClients?: boolean;

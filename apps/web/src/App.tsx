@@ -1,16 +1,22 @@
 import { lazy, Suspense } from "react";
 import { Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import { AppShell } from "./components/layout";
-import { EmptyState, LinkButton } from "./components/ui";
+import { Button, EmptyState, LinkButton } from "./components/ui";
 import { AUTH_REQUIRED } from "./lib/auth";
 import { usePermissions } from "./lib/permissions";
+import {
+  canAccessProduct,
+  dashboardPath,
+  nonAdminPath,
+  SOPHIE_DEMO_PATH,
+} from "./lib/routing";
 import { useSession } from "./state";
 
 const LandingPage = lazy(() => import("./pages/public").then((m) => ({ default: m.LandingPage })));
 const LoginPage = lazy(() => import("./pages/public").then((m) => ({ default: m.LoginPage })));
 const SignupPage = lazy(() => import("./pages/public").then((m) => ({ default: m.SignupPage })));
 const AuthCallbackPage = lazy(() => import("./pages/public").then((m) => ({ default: m.AuthCallbackPage })));
-const PendingOnboardingPage = lazy(() => import("./pages/public").then((m) => ({ default: m.PendingOnboardingPage })));
+const SelfServeBillingPage = lazy(() => import("./pages/public").then((m) => ({ default: m.SelfServeBillingPage })));
 const PricingPage = lazy(() => import("./pages/public").then((m) => ({ default: m.PricingPage })));
 const BladesReceptionistDemoPage = lazy(() => import("./pages/blades-demo"));
 const appPages = () => import("./pages/app");
@@ -34,10 +40,21 @@ const SettingsPage = lazy(() => appPages().then((m) => ({ default: m.SettingsPag
 const AdminOverviewPage = lazy(() => appPages().then((m) => ({ default: m.AdminOverviewPage })));
 
 function RequireSession() {
-  const { apiKey, actor, actorLoading } = useSession();
+  const { apiKey, actor, actorError, actorLoading, logout } = useSession();
   const location = useLocation();
   if (AUTH_REQUIRED && actorLoading) {
     return <div className="not-found">Verifying workspace access…</div>;
+  }
+  if (AUTH_REQUIRED && apiKey && actorError) {
+    return (
+      <div className="not-found">
+        <EmptyState
+          title="We could not verify your session"
+          description="Your Google sign-in completed, but the workspace session could not be verified. Sign in again to refresh it."
+          action={<Button onClick={logout}>Sign in again</Button>}
+        />
+      </div>
+    );
   }
   if (AUTH_REQUIRED && (!apiKey || !actor)) {
     return <Navigate to="/login" replace state={{ from: `${location.pathname}${location.search}` }} />;
@@ -47,7 +64,7 @@ function RequireSession() {
 
 function RequireWorkspace() {
   const { actor } = useSession();
-  return actor?.role === "pending" ? <Navigate to="/dashboard" replace /> : <Outlet />;
+  return actor?.role === "pending" ? <Navigate to={SOPHIE_DEMO_PATH} replace /> : <Outlet />;
 }
 
 function RequireOperator() {
@@ -55,17 +72,19 @@ function RequireOperator() {
   const { actor } = useSession();
   const { canAdministerPlatform } = usePermissions();
   if (actorLoading) return <div className="not-found">Loading workspace…</div>;
-  return canAdministerPlatform ? <Outlet /> : <Navigate to={actor?.role === "pending" ? "/dashboard" : "/app"} replace />;
+  return canAdministerPlatform ? <Outlet /> : <Navigate to={nonAdminPath(actor)} replace />;
+}
+
+function RequireSubscription() {
+  const { actor, actorLoading } = useSession();
+  if (actorLoading) return <div className="not-found">Checking your plan…</div>;
+  return canAccessProduct(actor) ? <Outlet /> : <Navigate to={SOPHIE_DEMO_PATH} replace />;
 }
 
 function DashboardRoute() {
   const { actor, actorLoading } = useSession();
   if (actorLoading) return <div className="not-found">Loading your dashboard…</div>;
-  // TODO(stripe): require an active/trialing subscription here before routing
-  // a client actor into /app. Operators and pending onboarding remain exempt.
-  if (actor?.role === "operator") return <Navigate to="/admin" replace />;
-  if (actor?.role === "salon") return <Navigate to="/app" replace />;
-  return <PendingOnboardingPage />;
+  return <Navigate to={dashboardPath(actor)} replace />;
 }
 
 function NotFoundPage() {
@@ -88,7 +107,10 @@ export default function App() {
         <Route path="/demo/blades-hair" element={<BladesReceptionistDemoPage />} />
         <Route element={<RequireSession />}>
           <Route path="/dashboard" element={<DashboardRoute />} />
+          <Route path="/billing" element={<SelfServeBillingPage />} />
+          <Route path="/upgrade" element={<Navigate to="/billing" replace />} />
           <Route element={<RequireWorkspace />}>
+            <Route element={<RequireSubscription />}>
             <Route path="/app" element={<AppShell />}>
               <Route index element={<OverviewPage />} />
               <Route path="agents" element={<AgentsPage />} />
@@ -108,6 +130,7 @@ export default function App() {
                 <Route path="agents/new" element={<Navigate to="/admin/agents/new" replace />} />
                 <Route path="billing" element={<Navigate to="/admin/billing" replace />} />
               </Route>
+            </Route>
             </Route>
             <Route element={<RequireOperator />}>
               <Route path="/admin" element={<AppShell />}>

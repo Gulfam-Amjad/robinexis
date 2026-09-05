@@ -27,6 +27,7 @@ import {
   canManageClient,
   type AuthenticatedActor,
 } from "./auth.js";
+import { ensureSelfServeWorkspace, writableClientId } from "./billingService.js";
 import { provisionClientAgent } from "./provisioningService.js";
 
 export type ProductSend = (
@@ -253,10 +254,15 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
   const route = url.pathname.slice("/api/v1".length) || "/";
 
   if (route === "/session" && req.method === "GET") {
+    const clientId = writableClientId(actor) || Object.keys(actor.clientRoles)[0];
+    const client = clientId ? await store.getClient(clientId) : undefined;
+    const subscription = client ? await store.getCurrentSubscription(client.id) : undefined;
     send(res, 200, {
       email: actor.email,
       role: actor.role,
       clientRoles: actor.clientRoles,
+      clientId: client?.id,
+      subscriptionStatus: subscription?.status || client?.serviceStatus,
       capabilities: {
         administerPlatform: canAdministerPlatform(actor),
         createClients: canAdministerPlatform(actor),
@@ -777,9 +783,6 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
 
   if (route === "/billing/checkout" && req.method === "POST") {
     const body = await readJson<{ clientId?: string; plan?: unknown }>(ctx);
-    const id = String(body.clientId || "");
-    const client = await requireManageClient(ctx, id);
-    if (!client) return true;
     if (!isPlanTier(body.plan)) {
       send(res, 400, { error: "invalid_plan" });
       return true;
@@ -787,6 +790,22 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
     if (body.plan === "enterprise") {
       send(res, 400, { error: "enterprise_contact_sales" });
       return true;
+    }
+    let client;
+    const requestedId = String(body.clientId || "");
+    if (requestedId) {
+      client = await requireManageClient(ctx, requestedId);
+      if (!client) return true;
+    } else if (actor.role === "pending") {
+      client = await ensureSelfServeWorkspace(store, actor, body.plan);
+    } else {
+      const id = writableClientId(actor);
+      if (!id) {
+        send(res, 403, { error: "workspace_write_forbidden" });
+        return true;
+      }
+      client = await requireManageClient(ctx, id);
+      if (!client) return true;
     }
     const webOrigin = (process.env.WEB_ORIGIN || "http://localhost:5173")
       .split(",")[0]
@@ -797,14 +816,15 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       plan: body.plan,
       customerId: client.stripeCustomerId,
       customerEmail: client.email || actor.email,
-      successUrl: `${webOrigin}/app/billing?checkout=success`,
-      cancelUrl: `${webOrigin}/app/billing?checkout=cancelled`,
+      authUserId: actor.subject,
+      successUrl: `${webOrigin}/billing?checkout=success`,
+      cancelUrl: `${webOrigin}/billing?checkout=cancelled`,
     });
     if (!checkout.configured) {
       send(res, 503, { error: checkout.reason });
       return true;
     }
-    send(res, 201, { checkoutSessionId: checkout.id, url: checkout.url });
+    send(res, 201, { checkoutSessionId: checkout.id, url: checkout.url, clientId: client.id });
     return true;
   }
 

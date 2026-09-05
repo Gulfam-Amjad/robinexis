@@ -1024,7 +1024,7 @@ function BillingContent({ clientId }: { clientId: string }) {
   const client = useQuery({ queryKey: ["client", clientId], queryFn: () => api.client(clientId), retry: false });
   const minutes = (usage.data?.inboundMinutes || 0) + (usage.data?.outboundMinutes || 0);
   const checkout = useMutation({
-    mutationFn: (plan: "starter" | "pro") => api.createCheckout(clientId, plan),
+    mutationFn: (plan: "starter" | "pro") => api.createCheckout(plan, clientId),
     onSuccess: (result) => {
       if (result.url) window.location.assign(result.url);
       else push({ title: "Checkout unavailable", message: "Stripe did not return a checkout URL.", tone: "error" });

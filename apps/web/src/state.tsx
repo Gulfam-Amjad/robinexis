@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ClientSummary, SessionActor } from "@robinexis/api-contracts";
 import { AUTH_REQUIRED } from "./lib/auth";
 import { api, API_KEY_STORAGE, CLIENT_STORAGE } from "./lib/api";
@@ -9,30 +9,35 @@ type SessionValue = {
   apiKey: string | null;
   actor?: SessionActor;
   actorLoading: boolean;
-  login: (key: string) => void;
+  actorError: Error | null;
+  login: (key: string, actor?: SessionActor) => void;
   logout: () => void;
 };
 
 const SessionContext = createContext<SessionValue | null>(null);
 
 export function SessionProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
   const [apiKey, setApiKey] = useState(() => sessionStorage.getItem(API_KEY_STORAGE));
   const [authReady, setAuthReady] = useState(!AUTH_REQUIRED);
   const actorQuery = useQuery({
     queryKey: ["session-actor", apiKey],
-    queryFn: api.session,
+    queryFn: () => api.session(apiKey!),
     enabled: AUTH_REQUIRED ? Boolean(apiKey && authReady) : true,
     retry: false,
   });
-  const login = useCallback((key: string) => {
-    sessionStorage.setItem(API_KEY_STORAGE, key.trim());
-    setApiKey(key.trim());
-  }, []);
+  const login = useCallback((key: string, actor?: SessionActor) => {
+    const normalized = key.trim();
+    sessionStorage.setItem(API_KEY_STORAGE, normalized);
+    if (actor) queryClient.setQueryData(["session-actor", normalized], actor);
+    setApiKey(normalized);
+  }, [queryClient]);
   const clearSession = useCallback(() => {
     sessionStorage.removeItem(API_KEY_STORAGE);
     sessionStorage.removeItem(CLIENT_STORAGE);
+    queryClient.removeQueries({ queryKey: ["session-actor"] });
     setApiKey(null);
-  }, []);
+  }, [queryClient]);
   const logout = useCallback(() => {
     clearSession();
     void signOut();
@@ -68,6 +73,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         apiKey,
         actor: actorQuery.data,
         actorLoading: !authReady || actorQuery.isLoading,
+        actorError: actorQuery.error,
         login,
         logout,
       }}
@@ -103,12 +109,14 @@ function readStoredClientId(): string | undefined {
 }
 
 export function ClientProvider({ children }: { children: ReactNode }) {
-  const { apiKey } = useSession();
+  const { apiKey, actor } = useSession();
   const [activeClientId, setId] = useState<string | undefined>(readStoredClientId);
+  const subscribed = actor?.subscriptionStatus === "active" || actor?.subscriptionStatus === "trialing";
+  const canLoadClients = actor?.role === "operator" || (actor?.role === "salon" && subscribed);
   const clientsQuery = useQuery({
     queryKey: ["clients", apiKey],
     queryFn: api.clients,
-    enabled: AUTH_REQUIRED ? Boolean(apiKey) : true,
+    enabled: AUTH_REQUIRED ? Boolean(apiKey && canLoadClients) : true,
     retry: false,
   });
   const clients = clientsQuery.data || [];

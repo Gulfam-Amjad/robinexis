@@ -705,7 +705,7 @@ fieldset:disabled input, fieldset:disabled textarea, fieldset:disabled select { 
   max-width: 1280px;
   padding: 24px 30px;
 }
-.demo-header > .button { justify-self: end; }
+.demo-header-actions { align-items: center; display: flex; gap: 10px; justify-self: end; }
 .demo-header-label { align-items: center; color: var(--muted); display: flex; font-size: 11px; font-weight: 750; gap: 9px; letter-spacing: .08em; text-transform: uppercase; }
 .demo-header-label p { margin: 0; }
 .demo-header-label span { background: var(--accent); border-radius: 50%; box-shadow: 0 0 0 5px rgba(9,254,148,.18); height: 7px; width: 7px; }
@@ -865,8 +865,10 @@ fieldset:disabled input, fieldset:disabled textarea, fieldset:disabled select { 
 @media (max-width: 650px) {
   .demo-header { grid-template-columns: 1fr auto; padding: 18px; }
   .demo-header-label { display: none; }
-  .demo-header > .button { font-size: 0; padding: 10px; }
-  .demo-header > .button svg { height: 17px; margin: 0; width: 17px; }
+  .demo-header-actions { gap: 7px; }
+  .demo-header-actions .button { padding: 9px 11px; }
+  .demo-header-actions .button-secondary { font-size: 0; padding: 10px; }
+  .demo-header-actions .button-secondary svg { height: 17px; margin: 0; width: 17px; }
   .demo-hero-copy { margin: 28px auto 30px; padding: 0 18px; }
   .demo-hero-copy h1 { font-size: 42px; }
   .demo-hero-copy > div:first-child > p { font-size: 14px; }

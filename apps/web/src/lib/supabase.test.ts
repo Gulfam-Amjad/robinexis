@@ -5,6 +5,7 @@ import {
   readAuthIntent,
   safeReturnTo,
   saveAuthIntent,
+  sessionForCallback,
   selectedPlan,
   validPlan,
 } from "./supabase.js";
@@ -39,5 +40,34 @@ describe("Supabase auth intent", () => {
     expect(selectedPlan()).toBe("pro");
     expect(values.has(AUTH_INTENT_STORAGE)).toBe(true);
     expect(values.get(SELECTED_PLAN_STORAGE)).toBe("pro");
+  });
+
+  it("exchanges a fresh callback code instead of reusing a stale session", async () => {
+    const staleSession = { access_token: "stale-token" };
+    const freshSession = { access_token: "fresh-token" };
+    const auth = {
+      getSession: vi.fn().mockResolvedValue({ data: { session: staleSession }, error: null }),
+      exchangeCodeForSession: vi.fn().mockResolvedValue({ data: { session: freshSession }, error: null }),
+    } as unknown as Parameters<typeof sessionForCallback>[1];
+
+    const session = await sessionForCallback("fresh-code", auth);
+
+    expect(session?.access_token).toBe("fresh-token");
+    expect(auth.exchangeCodeForSession).toHaveBeenCalledWith("fresh-code");
+    expect(auth.getSession).not.toHaveBeenCalled();
+  });
+
+  it("uses the persisted session only when no callback code is present", async () => {
+    const persistedSession = { access_token: "persisted-token" };
+    const auth = {
+      getSession: vi.fn().mockResolvedValue({ data: { session: persistedSession }, error: null }),
+      exchangeCodeForSession: vi.fn(),
+    } as unknown as Parameters<typeof sessionForCallback>[1];
+
+    const session = await sessionForCallback(null, auth);
+
+    expect(session?.access_token).toBe("persisted-token");
+    expect(auth.getSession).toHaveBeenCalledOnce();
+    expect(auth.exchangeCodeForSession).not.toHaveBeenCalled();
   });
 });

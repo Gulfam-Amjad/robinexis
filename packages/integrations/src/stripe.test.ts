@@ -44,10 +44,14 @@ describe("createCheckoutSession", () => {
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
         client_reference_id: "client_two",
+        payment_method_collection: "if_required",
         metadata: { clientId: "client_two", plan: "pro" },
         line_items: [{ price: "price_pro", quantity: 1 }],
+        subscription_data: {
+          trial_period_days: 3,
+          metadata: { clientId: "client_two", plan: "pro" },
+        },
       }),
-      { idempotencyKey: "checkout:client_two:pro" },
     );
   });
 
@@ -102,6 +106,55 @@ describe("createCheckoutSession", () => {
     });
     await expect(store.getStripeEvent(BLADES_HAIR_ID, event.id)).resolves.toMatchObject({
       status: "processed",
+    });
+  });
+
+  it("forces past_due on invoice.payment_failed for the metadata tenant only", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    const other = (await store.listClients()).find((client) => client.id !== BLADES_HAIR_ID);
+    expect(other).toBeTruthy();
+    const bladesBefore = await store.getClient(BLADES_HAIR_ID);
+    const event = {
+      id: "evt_invoice_failed_1",
+      type: "invoice.payment_failed",
+      livemode: false,
+      created: 1_788_511_200,
+      data: {
+        object: {
+          object: "invoice",
+          subscription: "sub_failed",
+        },
+      },
+    } as unknown as Stripe.Event;
+    const stripe = {
+      webhooks: { constructEvent: vi.fn().mockReturnValue(event) },
+      subscriptions: {
+        retrieve: vi.fn().mockResolvedValue({
+          id: "sub_failed",
+          customer: "cus_failed",
+          status: "active",
+          created: 1_788_511_200,
+          trial_end: null,
+          cancel_at_period_end: false,
+          metadata: { clientId: other!.id, plan: "starter" },
+          items: { data: [{ price: { id: "price_starter" } }] },
+        }),
+      },
+    } as unknown as Stripe;
+
+    await expect(
+      handleStripeWebhook({
+        store,
+        rawBody: Buffer.from("{}"),
+        signature: "sig",
+        webhookSecret: "whsec_test",
+        stripe,
+      }),
+    ).resolves.toEqual({ ok: true, status: "past_due" });
+    await expect(store.getClient(other!.id)).resolves.toMatchObject({ serviceStatus: "past_due" });
+    await expect(store.getClient(BLADES_HAIR_ID)).resolves.toMatchObject({
+      serviceStatus: bladesBefore?.serviceStatus,
     });
   });
 });
