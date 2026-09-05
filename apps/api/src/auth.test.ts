@@ -1,5 +1,6 @@
 import type http from "node:http";
-import { SignJWT } from "jose";
+import { createServer } from "node:http";
+import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, describe, expect, it } from "vitest";
 import { MemoryStore } from "@robinexis/database";
 import {
@@ -89,6 +90,46 @@ describe("production authentication", () => {
     expect(requireAdmin(actor!)).toBe(false);
     expect(requireTenantAccess(actor!, "client-a")).toBe(false);
     expect(requireTenantWrite(actor!, "client-a")).toBe(false);
+  });
+
+  it("verifies current Supabase ES256 tokens through JWKS even when a legacy secret remains configured", async () => {
+    const { publicKey, privateKey } = await generateKeyPair("ES256");
+    const publicJwk = await exportJWK(publicKey);
+    Object.assign(publicJwk, { alg: "ES256", kid: "current-signing-key", use: "sig" });
+    const jwks = createServer((request, response) => {
+      if (request.url === "/auth/v1/.well-known/jwks.json") {
+        response.setHeader("Content-Type", "application/json");
+        response.end(JSON.stringify({ keys: [publicJwk] }));
+        return;
+      }
+      response.statusCode = 404;
+      response.end();
+    });
+    await new Promise<void>((resolve) => jwks.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = jwks.address();
+      if (!address || typeof address === "string") throw new Error("JWKS test server did not start");
+      process.env.NODE_ENV = "test";
+      process.env.SUPABASE_URL = `http://127.0.0.1:${address.port}`;
+      process.env.SUPABASE_JWT_SECRET = "legacy-secret-that-must-not-verify-es256";
+      delete process.env.SKIP_AUTH;
+      const token = await new SignJWT({ email: "google-user@example.test" })
+        .setProtectedHeader({ alg: "ES256", kid: "current-signing-key" })
+        .setSubject("google-auth-user")
+        .setIssuedAt()
+        .setExpirationTime("5m")
+        .sign(privateKey);
+      const request = {
+        headers: { authorization: `Bearer ${token}` },
+      } as http.IncomingMessage;
+
+      await expect(authenticateRequest(request, new MemoryStore())).resolves.toMatchObject({
+        role: "pending",
+        email: "google-user@example.test",
+      });
+    } finally {
+      await new Promise<void>((resolve, reject) => jwks.close((error) => error ? reject(error) : resolve()));
+    }
   });
 
   it("centralizes admin, tenant-read, and tenant-write decisions", () => {

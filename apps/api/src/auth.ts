@@ -1,4 +1,4 @@
-import { createRemoteJWKSet, jwtVerify } from "jose";
+import { createRemoteJWKSet, decodeProtectedHeader, jwtVerify } from "jose";
 import type http from "node:http";
 import {
   isProductionRuntime,
@@ -87,11 +87,12 @@ async function identityFromSupabaseToken(token: string): Promise<VerifiedIdentit
   const supabaseUrl = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
   if (!supabaseUrl) return undefined;
   const secret = process.env.SUPABASE_JWT_SECRET;
-  const payload = secret
-    ? (await jwtVerify(token, new TextEncoder().encode(secret))).payload
-    : (
-        await jwtVerify(token, createRemoteJWKSet(new URL(`${supabaseUrl}/auth/v1/.well-known/jwks.json`)))
-      ).payload;
+  const header = decodeProtectedHeader(token);
+  const usesLegacyHmac = (header.alg || "").startsWith("HS");
+  const verificationKey = usesLegacyHmac && secret
+    ? new TextEncoder().encode(secret)
+    : createRemoteJWKSet(new URL(`${supabaseUrl}/auth/v1/.well-known/jwks.json`));
+  const { payload } = await jwtVerify(token, verificationKey);
   const email = String(
     payload.email ||
       (typeof payload.user_metadata === "object" && payload.user_metadata
