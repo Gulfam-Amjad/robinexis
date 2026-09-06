@@ -7,6 +7,7 @@ import {
   saveAuthIntent,
   sessionForCallback,
   selectedPlan,
+  strayAuthCallback,
   validPlan,
 } from "./supabase.js";
 
@@ -69,5 +70,31 @@ describe("Supabase auth intent", () => {
     expect(session?.access_token).toBe("persisted-token");
     expect(auth.getSession).toHaveBeenCalledOnce();
     expect(auth.exchangeCodeForSession).not.toHaveBeenCalled();
+  });
+});
+
+describe("Stray Supabase callback recovery", () => {
+  it("forwards a code dropped on the Site URL to the callback", () => {
+    expect(strayAuthCallback("/", "?code=abc123", "")).toBe("/auth/callback?code=abc123");
+  });
+
+  it("lifts a fragment provider error into the callback query", () => {
+    expect(strayAuthCallback("/", "", "#error=access_denied&error_code=otp_expired")).toBe(
+      "/auth/callback?error=access_denied&error_code=otp_expired",
+    );
+  });
+
+  it("leaves the callback route itself alone so it is not a redirect loop", () => {
+    expect(strayAuthCallback("/auth/callback", "?code=abc123", "")).toBeUndefined();
+  });
+
+  it("ignores ordinary routes and unrelated query parameters", () => {
+    expect(strayAuthCallback("/signup", "?plan=pro", "")).toBeUndefined();
+    expect(strayAuthCallback("/billing", "?checkout=success", "")).toBeUndefined();
+    expect(strayAuthCallback("/demo/blades-hair", "", "")).toBeUndefined();
+  });
+
+  it("does not carry an implicit-flow access token into the query string", () => {
+    expect(strayAuthCallback("/", "", "#access_token=leaky&token_type=bearer")).toBeUndefined();
   });
 });

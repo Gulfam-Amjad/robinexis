@@ -13,7 +13,17 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api": "http://localhost:8081",
+      "/api": {
+        target: "http://127.0.0.1:8081",
+        configure: (proxy) => {
+          proxy.on("error", (_err, _req, res) => {
+            if ("writeHead" in res && !res.headersSent) {
+              res.writeHead(502, { "Content-Type": "application/json" });
+            }
+            if ("end" in res) res.end(JSON.stringify({ error: "api_unavailable" }));
+          });
+        },
+      },
     },
   },
   build: {

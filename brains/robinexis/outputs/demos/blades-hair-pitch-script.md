@@ -7,7 +7,7 @@ status: tested
 
 # Blades Hair demo pitch
 
-Open the [branded Robinexis voice demo](https://robinexis-pink.vercel.app/demo/blades-hair), use [[blades-hair-demo]] locally, or call `+447446868067`.
+Open the [branded Robinexis voice demo](https://app.robinexis.com/demo/blades-hair), use [[blades-hair-demo]] locally, or call `+447446868067`.
 
 > [!info] Browser demo
 > No login is required during testing. Select **Talk to Sophie**, allow microphone access, and use headphones where practical. The page uses the same live Sophie agent and existing Cal.com testing diary as the phone experience.

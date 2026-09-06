@@ -109,6 +109,27 @@ describe("createCheckoutSession", () => {
     });
   });
 
+  it("rejects missing or invalid webhook signatures without throwing", async () => {
+    const store = new MemoryStore();
+    const constructEvent = vi.fn(() => {
+      throw new Error("No stripe-signature header value was provided.");
+    });
+    const stripe = {
+      webhooks: { constructEvent },
+    } as unknown as Stripe;
+
+    await expect(
+      handleStripeWebhook({
+        store,
+        rawBody: "{}",
+        signature: "",
+        webhookSecret: "whsec_test",
+        stripe,
+      }),
+    ).resolves.toEqual({ ok: false, status: "invalid_signature" });
+    expect(constructEvent).toHaveBeenCalled();
+  });
+
   it("forces past_due on invoice.payment_failed for the metadata tenant only", async () => {
     const store = new MemoryStore();
     await seedStore(store);

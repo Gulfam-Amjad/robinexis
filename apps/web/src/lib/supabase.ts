@@ -14,6 +14,9 @@ type CallbackAuthClient = Pick<
 
 export const AUTH_INTENT_STORAGE = "robinexis_auth_intent";
 export const SELECTED_PLAN_STORAGE = "robinexis_selected_plan";
+export const AUTH_CALLBACK_PATH = "/auth/callback";
+
+const CALLBACK_ERROR_KEYS = ["error", "error_code", "error_description"] as const;
 
 export const supabase = url && anonKey
   ? createClient(url, anonKey, {
@@ -36,6 +39,24 @@ export function safeReturnTo(value: string | null | undefined): string {
     return "/dashboard";
   }
   return value;
+}
+
+/**
+ * Supabase drops the sign-in back on its project Site URL whenever the requested redirect is
+ * missing from the allowlist, so the code or provider error can arrive on any route, and the
+ * fragment form of the error never reaches the callback's query string. Forward both rather
+ * than rendering a signed-out page and discarding the sign-in.
+ */
+export function strayAuthCallback(pathname: string, search: string, hash = ""): string | undefined {
+  if (pathname === AUTH_CALLBACK_PATH) return undefined;
+  const params = new URLSearchParams(search);
+  const fragment = new URLSearchParams(hash.replace(/^#/, ""));
+  for (const key of CALLBACK_ERROR_KEYS) {
+    const value = params.get(key) || fragment.get(key);
+    if (value) params.set(key, value);
+  }
+  const carriesSignIn = params.get("code") || CALLBACK_ERROR_KEYS.some((key) => params.get(key));
+  return carriesSignIn ? `${AUTH_CALLBACK_PATH}?${params.toString()}` : undefined;
 }
 
 export function saveAuthIntent(intent: Partial<AuthIntent> = {}): AuthIntent {

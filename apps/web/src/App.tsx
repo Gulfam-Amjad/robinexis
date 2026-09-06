@@ -10,6 +10,7 @@ import {
   nonAdminPath,
   SOPHIE_DEMO_PATH,
 } from "./lib/routing";
+import { strayAuthCallback } from "./lib/supabase";
 import { useSession } from "./state";
 
 const LandingPage = lazy(() => import("./pages/public").then((m) => ({ default: m.LandingPage })));
@@ -96,6 +97,11 @@ function NotFoundPage() {
 }
 
 export default function App() {
+  const location = useLocation();
+  const strayCallback = AUTH_REQUIRED
+    ? strayAuthCallback(location.pathname, location.search, location.hash)
+    : undefined;
+  if (strayCallback) return <Navigate to={strayCallback} replace />;
   return (
     <Suspense fallback={<div className="not-found">Loading…</div>}>
       <Routes>

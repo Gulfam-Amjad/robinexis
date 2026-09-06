@@ -78,7 +78,15 @@ export async function handleStripeWebhook(opts: {
     structuredLog("stripe_webhook_skipped", { reason: "not_configured" });
     return { ok: false };
   }
-  const event = stripe.webhooks.constructEvent(opts.rawBody, opts.signature, opts.webhookSecret);
+  let event: Stripe.Event;
+  try {
+    event = stripe.webhooks.constructEvent(opts.rawBody, opts.signature, opts.webhookSecret);
+  } catch (error) {
+    structuredLog("stripe_webhook_rejected", {
+      reason: error instanceof Error ? error.message : "invalid_signature",
+    });
+    return { ok: false, status: "invalid_signature" };
+  }
   const handled = [
     "checkout.session.completed",
     "customer.subscription.created",

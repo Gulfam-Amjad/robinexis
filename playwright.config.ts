@@ -13,6 +13,11 @@ export default defineConfig({
     { name: "chromium", testMatch: "product-flow.spec.ts", use: { ...devices["Desktop Chrome"] } },
     { name: "mobile", testMatch: "product-flow.spec.ts", use: { ...devices["Pixel 7"] } },
     {
+      name: "tablet",
+      testMatch: "product-flow.spec.ts",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 768, height: 1024 }, hasTouch: true },
+    },
+    {
       name: "auth",
       testMatch: "auth-flow.spec.ts",
       use: { ...devices["Desktop Chrome"], baseURL: "http://127.0.0.1:5174" },

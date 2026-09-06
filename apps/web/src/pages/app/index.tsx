@@ -100,17 +100,17 @@ function CallTable({ calls, compact = false }: { calls: Call[]; compact?: boolea
   if (!calls.length) return <EmptyState icon={PhoneCall} title="No calls yet" description="Calls will appear here as soon as your agent starts speaking with customers." action={<LinkButton to="/app/playground" variant="secondary">Test the agent</LinkButton>} />;
   return (
     <div className="table-scroll">
-      <table>
+      <table className="mobile-card-table">
         <caption className="sr-only">Voice call activity</caption>
         <thead><tr><th scope="col">Caller</th><th scope="col">Direction</th><th scope="col">Outcome</th>{!compact && <th scope="col">Status</th>}<th scope="col">Started</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead>
         <tbody>{calls.map((call) => (
           <tr key={call.id}>
-            <td><div className="table-person"><span><Phone size={15} /></span><div><strong>{call.contactPhone || "Unknown caller"}</strong><small>{call.objective || "General enquiry"}</small></div></div></td>
-            <td><span className="capitalize">{call.direction}</span></td>
-            <td>{call.outcome ? <Badge tone="accent">{call.outcome.replaceAll("-", " ")}</Badge> : "—"}</td>
-            {!compact && <td><Badge tone={statusTone(call.status)}>{call.status}</Badge></td>}
-            <td>{formatDate(call.createdAt)}</td>
-            <td><Link className="row-link" to={`/app/calls/${call.id}`} aria-label="Open call"><ChevronRight size={17} /></Link></td>
+            <td data-label="Caller"><div className="table-person"><span><Phone size={15} /></span><div><strong>{call.contactPhone || "Unknown caller"}</strong><small>{call.objective || "General enquiry"}</small></div></div></td>
+            <td data-label="Direction"><span className="capitalize">{call.direction}</span></td>
+            <td data-label="Outcome">{call.outcome ? <Badge tone="accent">{call.outcome.replaceAll("-", " ")}</Badge> : "—"}</td>
+            {!compact && <td data-label="Status"><Badge tone={statusTone(call.status)}>{call.status}</Badge></td>}
+            <td data-label="Started">{formatDate(call.createdAt)}</td>
+            <td data-label="Details"><Link className="row-link" to={`/app/calls/${call.id}`} aria-label="Open call"><ChevronRight size={17} /></Link></td>
           </tr>
         ))}</tbody>
       </table>
@@ -838,7 +838,7 @@ function CampaignsContent({ clientId }: { clientId: string }) {
 }
 
 function JobTable({ jobs, onAction }: { jobs: Job[]; onAction: (id: string, type: "approve" | "cancel") => void }) {
-  return <div className="table-scroll"><table><caption className="sr-only">Outbound call jobs</caption><thead><tr><th scope="col">Contact</th><th scope="col">Campaign</th><th scope="col">Scheduled</th><th scope="col">Status</th><th scope="col">Attempts</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead><tbody>{jobs.map((job) => <tr key={job.id}><td><strong>{job.contactName || job.contactPhone}</strong><small className="block">{job.contactName ? job.contactPhone : job.purpose}</small></td><td className="capitalize">{job.campaign.replaceAll("-", " ")}</td><td>{formatDate(job.scheduledAt)}</td><td><Badge tone={statusTone(job.status)}>{job.status}</Badge></td><td>{job.attemptCount}/{job.maxAttempts}</td><td><div className="row-actions">{job.status === "pending" && <Button size="sm" onClick={() => onAction(job.id, "approve")}>Approve</Button>}{!["completed", "cancelled", "failed"].includes(job.status) && <button aria-label={`Cancel job for ${job.contactName || job.contactPhone}`} className="icon-button danger-icon" onClick={() => onAction(job.id, "cancel")}><XCircle size={17} /></button>}</div></td></tr>)}</tbody></table></div>;
+  return <div className="table-scroll"><table className="mobile-card-table"><caption className="sr-only">Outbound call jobs</caption><thead><tr><th scope="col">Contact</th><th scope="col">Campaign</th><th scope="col">Scheduled</th><th scope="col">Status</th><th scope="col">Attempts</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead><tbody>{jobs.map((job) => <tr key={job.id}><td data-label="Contact"><strong>{job.contactName || job.contactPhone}</strong><small className="block">{job.contactName ? job.contactPhone : job.purpose}</small></td><td data-label="Campaign" className="capitalize">{job.campaign.replaceAll("-", " ")}</td><td data-label="Scheduled">{formatDate(job.scheduledAt)}</td><td data-label="Status"><Badge tone={statusTone(job.status)}>{job.status}</Badge></td><td data-label="Attempts">{job.attemptCount}/{job.maxAttempts}</td><td data-label="Actions"><div className="row-actions">{job.status === "pending" && <Button size="sm" onClick={() => onAction(job.id, "approve")}>Approve</Button>}{!["completed", "cancelled", "failed"].includes(job.status) && <button aria-label={`Cancel job for ${job.contactName || job.contactPhone}`} className="icon-button danger-icon" onClick={() => onAction(job.id, "cancel")}><XCircle size={17} /></button>}</div></td></tr>)}</tbody></table></div>;
 }
 
 const documentSchema = z.object({ title: z.string().min(2, "Add a title"), source: z.string().optional(), content: z.string().optional() });

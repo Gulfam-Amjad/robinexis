@@ -3,6 +3,14 @@
   "buildCommand": "npm run build:web",
   "outputDirectory": "dist",
   "framework": null,
+  "redirects": [
+    {
+      "source": "/:path*",
+      "has": [{ "type": "host", "value": "robinexis-pink.vercel.app" }],
+      "destination": "https://app.robinexis.com/:path*",
+      "permanent": false
+    }
+  ],
   "rewrites": [
     { "source": "/((?!assets/).*)", "destination": "/index.html" }
   ]

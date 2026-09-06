@@ -3,6 +3,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import {
   ArrowRight,
   BarChart3,
+  Building2,
   CalendarCheck2,
   Check,
   Headphones,
@@ -389,6 +390,46 @@ export function PricingPage() {
         </div>
         <p className="pricing-footnote">Test-mode Stripe checkout in this environment. VAT and live billing are confirmed before production go-live.</p>
       </main>
+    </div>
+  );
+}
+
+export function EnterpriseContactPage() {
+  return (
+    <div className="public-page enterprise-contact-page">
+      <PublicHeader />
+      <main className="enterprise-main">
+        <section className="enterprise-hero">
+          <span className="pill"><Building2 size={14} /> Enterprise AI reception</span>
+          <h1>A receptionist built around every location.</h1>
+          <p>
+            Tell us about your teams, call flows, calendars, and integrations. We’ll shape a
+            tailored Robinexis demo around the way your business actually works.
+          </p>
+          <div className="hero-actions">
+            <a
+              className="button button-primary button-md"
+              href="mailto:hello@robinexis.com?subject=Enterprise%20Robinexis"
+            >
+              Contact sales <ArrowRight size={16} />
+            </a>
+            <Link className="button button-secondary button-md" to="/pricing">View plans</Link>
+          </div>
+        </section>
+        <Card className="enterprise-card">
+          <span className="eyebrow">Designed for complex operations</span>
+          <h2>Start with your requirements, not a generic demo.</h2>
+          <ul>
+            {[
+              "Multiple locations and teams",
+              "Custom booking and escalation workflows",
+              "CRM, calendar, and reporting integrations",
+              "Dedicated onboarding and optimisation",
+            ].map((feature) => <li key={feature}><Check size={17} />{feature}</li>)}
+          </ul>
+        </Card>
+      </main>
+      <footer className="public-footer"><LogoFooter /><span>AI receptionists that answer, help, and book · © 2026 Robinexis</span><div><Link to="/pricing">Pricing</Link><a href="mailto:hello@robinexis.com">Contact</a><a href="#">Privacy</a></div></footer>
     </div>
   );
 }

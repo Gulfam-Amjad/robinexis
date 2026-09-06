@@ -120,7 +120,11 @@ export function AppShell() {
     const close = (event: MouseEvent) => {
       if (profileRef.current && !profileRef.current.contains(event.target as Node)) setProfileOpen(false);
     };
-    const escape = (event: KeyboardEvent) => event.key === "Escape" && setProfileOpen(false);
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setProfileOpen(false);
+      setMobileOpen(false);
+    };
     document.addEventListener("mousedown", close);
     document.addEventListener("keydown", escape);
     return () => {
@@ -128,6 +132,15 @@ export function AppShell() {
       document.removeEventListener("keydown", escape);
     };
   }, []);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [mobileOpen]);
 
   const handleLogout = () => {
     logout();
@@ -198,16 +211,22 @@ export function AppShell() {
 
 export function PublicHeader() {
   const [open, setOpen] = useState(false);
+  const location = useLocation();
+
+  useEffect(() => {
+    setOpen(false);
+  }, [location.pathname, location.hash]);
+
   return (
     <header className="public-header">
       <Logo />
       <button aria-label={open ? "Close menu" : "Open menu"} aria-expanded={open} className="icon-button mobile-only" onClick={() => setOpen((value) => !value)}>{open ? <X /> : <Menu />}</button>
       <nav aria-label="Main navigation" className={open ? "public-nav public-nav-open" : "public-nav"}>
-        <a href="/#how-it-works">How it works</a>
-        <a href="/#features">Features</a>
-        <Link to="/pricing">Pricing</Link>
-        <Link to={AUTH_REQUIRED ? "/login" : "/app"}>{AUTH_REQUIRED ? "Log in" : "Open app"}</Link>
-        <Link className="button button-primary button-sm" to="/signup">Request demo</Link>
+        <a href="/#how-it-works" onClick={() => setOpen(false)}>How it works</a>
+        <a href="/#features" onClick={() => setOpen(false)}>Features</a>
+        <Link to="/pricing" onClick={() => setOpen(false)}>Pricing</Link>
+        <Link to={AUTH_REQUIRED ? "/login" : "/app"} onClick={() => setOpen(false)}>{AUTH_REQUIRED ? "Log in" : "Open app"}</Link>
+        <Link className="button button-primary button-sm" to="/signup" onClick={() => setOpen(false)}>Request demo</Link>
       </nav>
     </header>
   );

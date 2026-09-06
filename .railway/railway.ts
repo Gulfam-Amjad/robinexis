@@ -80,6 +80,7 @@ export default defineRailway(() => {
       RAILWAY_BUILD_TARGET: "worker",
       WORKER_POLL_MS: "15000",
       DATA_RETENTION_DAYS: "90",
+      STRIPE_SECRET_KEY: preserve(),
     },
   });
 

@@ -6,6 +6,7 @@ async function seedSupabaseSession(
   page: Page,
   role: "operator" | "salon" | "pending",
   subscriptionStatus?: "trialing" | "active" | "past_due" | "incomplete",
+  onCheckout?: (plan: string) => void,
 ) {
   const status = subscriptionStatus ?? (role === "salon" ? "trialing" : undefined);
   await page.addInitScript(({ key }) => {
@@ -55,6 +56,11 @@ async function seedSupabaseSession(
     if (path === "/api/v1/admin/summary") {
       return route.fulfill({ json: { mrrPence: 0, totalUsedMinutes: 0, totalFailedCalls: 0, clients: [] } });
     }
+    if (path === "/api/v1/billing/checkout") {
+      const body = route.request().postDataJSON() as { plan?: string };
+      onCheckout?.(body.plan || "");
+      return route.fulfill({ status: 201, json: { checkoutSessionId: "cs_test_pro", url: null } });
+    }
     if (path === "/api/v1/bootstrap") {
       return route.fulfill({ json: {
         clients: [{ id: "client_demo", slug: "demo", businessName: "Demo Salon", published: true, serviceStatus: "trialing" }],
@@ -76,8 +82,24 @@ test("logged-out users cannot open the dashboard directly", async ({ page }) => 
 test("signup validates and displays the Framer plan query", async ({ page }) => {
   await page.goto("/signup?plan=starter");
   await expect(page.getByText("Starter plan selected")).toBeVisible();
+  await page.goto("/signup?plan=pro");
+  await expect(page.getByText("Pro plan selected")).toBeVisible();
   await page.goto("/signup?plan=unknown");
   await expect(page.getByText("Choose a plan later")).toBeVisible();
+});
+
+test("a selected Pro plan is carried into Stripe checkout", async ({ page }) => {
+  let checkoutPlan = "";
+  await page.addInitScript(() => {
+    localStorage.setItem("robinexis_selected_plan", "pro");
+  });
+  await seedSupabaseSession(page, "pending", undefined, (plan) => {
+    checkoutPlan = plan;
+  });
+
+  await page.goto("/billing?plan=pro&startCheckout=1");
+
+  await expect.poll(() => checkoutPlan).toBe("pro");
 });
 
 test("dashboard routes admins to the operator shell", async ({ page }) => {

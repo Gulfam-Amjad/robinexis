@@ -23,11 +23,15 @@ async function tick() {
 
   if (Date.now() - lastReconcile > 24 * 60 * 60 * 1000) {
     lastReconcile = Date.now();
-    try {
-      const r = await reconcileStripe(store);
-      structuredLog("stripe_reconcile", r);
-    } catch (err) {
-      structuredLog("stripe_reconcile_error", { err: String(err) });
+    if (!process.env.STRIPE_SECRET_KEY) {
+      structuredLog("stripe_reconcile_skipped", { reason: "stripe_not_configured" });
+    } else {
+      try {
+        const r = await reconcileStripe(store);
+        structuredLog("stripe_reconcile", r);
+      } catch (err) {
+        structuredLog("stripe_reconcile_error", { err: String(err) });
+      }
     }
     const cutoff = new Date(Date.now() - RETENTION_DAYS * 86400000).toISOString();
     const n = await store.deleteCallsOlderThan(cutoff);
@@ -46,7 +50,14 @@ async function tick() {
 async function main() {
   const store = await getStore();
   if ((await store.listClients()).length === 0) await seedStore(store);
-  structuredLog("worker_start", { pollMs: POLL, retentionDays: RETENTION_DAYS });
+  structuredLog("worker_start", {
+    pollMs: POLL,
+    retentionDays: RETENTION_DAYS,
+    stripeConfigured: Boolean(process.env.STRIPE_SECRET_KEY),
+  });
+  if (!process.env.STRIPE_SECRET_KEY) {
+    structuredLog("worker_misconfigured", { missing: ["STRIPE_SECRET_KEY"] });
+  }
   await tick();
   setInterval(() => void tick().catch((err) => structuredLog("worker_tick_error", { err: String(err) })), POLL);
 }

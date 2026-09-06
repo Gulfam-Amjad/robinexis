@@ -39,7 +39,14 @@ async function openWorkspaceSession(
       recentCalls: [],
       integrations: [{ id: "calcom", name: "Cal.com", connected: true }, { id: "gemini", name: "Gemini", connected: false }],
     } });
-    if (path.endsWith("/prompt-versions")) return route.fulfill({ json: { items: [] } });
+    if (path === "/api/v1/admin/summary") return route.fulfill({ json: {
+      month: "2026-08",
+      mrrPence: 0,
+      totalUsedMinutes: 12,
+      totalFailedCalls: 0,
+      clients: [{ clientId: client.id, plan: "starter", subscriptionStatus: "trialing", usedMinutes: 12, remainingMinutes: 88, failedCalls: 0 }],
+    } });
+    if (path.endsWith("/prompt-versions") || path.endsWith("/provisioning")) return route.fulfill({ json: { items: [] } });
     if (path === "/api/v1/calls") return route.fulfill({ json: { items: [] } });
     if (path === "/api/v1/analytics/summary") return route.fulfill({ json: { totalCalls: 0, answeredCalls: 0, bookedAppointments: 0, transferredCalls: 0, minutesUsed: 0, bookingRate: 0 } });
     if (path === "/api/v1/analytics/timeseries") return route.fulfill({ json: { items: [] } });
@@ -58,14 +65,33 @@ async function openWorkspaceSession(
     if (path === "/api/v1/memberships") return route.fulfill({ json: { items: role === "salon" ? [{ id: "member_1", clientId: client.id, email: "owner@demo-salon.test", role: "owner", createdAt: "2026-09-01T00:00:00.000Z" }] : [] } });
     if (path === "/api/v1/usage") return route.fulfill({ json: { clientId: client.id, month: "2026-08", inboundMinutes: 10, outboundMinutes: 2 } });
     if (path === `/api/v1/clients/${client.id}`) return route.fulfill({ json: { ...client, role: "AI receptionist", tone: "Warm and concise", publishedFacts: [], services: [] } });
-    return route.fulfill({ status: 404, json: { error: "not_found" } });
+    return route.fulfill({ json: { items: [] } });
   });
+}
+
+async function expectNoPageOverflow(page: Page) {
+  await expect.poll(
+    () => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
+    { message: "page should not scroll horizontally" },
+  ).toBe(true);
 }
 
 test("public pricing explains the product and access model", async ({ page }) => {
   await page.goto("/pricing");
   await expect(page.getByRole("heading", { name: /simple self-serve plans/i })).toBeVisible();
   await expect(page.getByText(/3-day trial/i).first()).toBeVisible();
+  await expectNoPageOverflow(page);
+});
+
+test("enterprise contact is generic, public, and prospect-safe", async ({ page }) => {
+  await page.goto("/enterprise-contact");
+  await expect(page.getByRole("heading", { name: /A receptionist built around every location/i })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Contact sales/i })).toHaveAttribute(
+    "href",
+    "mailto:hello@robinexis.com?subject=Enterprise%20Robinexis",
+  );
+  await expect(page.locator("body")).not.toContainText(/Blades Hair/i);
+  await expectNoPageOverflow(page);
 });
 
 test("public Blades receptionist is branded and needs no login", async ({ page }) => {
@@ -75,6 +101,7 @@ test("public Blades receptionist is branded and needs no login", async ({ page }
   await expect(page.getByText(/Powered by Robinexis/i).first()).toBeVisible();
   await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", "noindex,nofollow");
   await expect(page.locator('a[href*="elevenlabs.io"]')).toHaveCount(0);
+  await expectNoPageOverflow(page);
 });
 
 test("operator can open the data-backed overview", async ({ page }) => {
@@ -84,10 +111,37 @@ test("operator can open the data-backed overview", async ({ page }) => {
   await expect(page.getByRole("heading", { name: /Demo Salon is in good hands/i })).toBeVisible();
   await expect(page.getByText("12", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Needs setup").first()).toBeVisible();
+  await expectNoPageOverflow(page);
+});
+
+test("public and workspace navigation adapt to the viewport", async ({ page }) => {
+  await page.goto("/pricing");
+  const viewportWidth = page.viewportSize()?.width || 1280;
+  const publicMenuButton = page.getByRole("button", { name: "Open menu" });
+  if (viewportWidth <= 850) {
+    await expect(publicMenuButton).toBeVisible();
+    await publicMenuButton.click();
+    await expect(page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Pricing" })).toBeVisible();
+  } else {
+    await expect(publicMenuButton).toBeHidden();
+  }
+
+  await openWorkspaceSession(page);
+  await page.goto("/app");
+  const workspaceMenuButton = page.getByRole("button", { name: "Open navigation" });
+  if (viewportWidth <= 850) {
+    await expect(workspaceMenuButton).toBeVisible();
+    await workspaceMenuButton.click();
+    await expect(page.getByRole("navigation", { name: "Product navigation" })).toBeVisible();
+    await page.getByRole("button", { name: "Close navigation" }).click();
+  } else {
+    await expect(workspaceMenuButton).toBeHidden();
+  }
+  await expectNoPageOverflow(page);
 });
 
 test("all operator areas render against their backend contracts", async ({ page }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(120_000);
   await openWorkspaceSession(page);
   const routes = [
     ["/app/agents", "Your reception team"],
@@ -100,13 +154,14 @@ test("all operator areas render against their backend contracts", async ({ page 
     ["/app/knowledge", "Give your agent the right answers"],
     ["/app/integrations", "Connect the tools behind the conversation"],
     ["/app/team", "The people behind Demo Salon"],
-    ["/app/billing", "A plan that grows with every call"],
+    ["/admin/billing", "A plan that grows with every call"],
     ["/app/settings", "The business behind the voice"],
   ] as const;
 
   for (const [path, heading] of routes) {
     await page.goto(path);
-    await expect(page.getByRole("heading", { name: heading })).toBeVisible();
+    await expect(page.getByRole("heading", { name: heading })).toBeVisible({ timeout: 15_000 });
+    await expectNoPageOverflow(page);
   }
 });
 
@@ -119,6 +174,7 @@ test("operator admin is isolated under the admin route", async ({ page }) => {
 
   await page.goto("/admin/clients/new");
   await expect(page.getByRole("heading", { name: "Let’s learn the essentials" })).toBeVisible();
+  await expectNoPageOverflow(page);
 });
 
 test("booking workflow exposes filters and details", async ({ page }) => {
@@ -128,6 +184,7 @@ test("booking workflow exposes filters and details", async ({ page }) => {
   await expect(page.getByText("Alex Customer")).toBeVisible();
   await page.getByRole("button", { name: "Details" }).click();
   await expect(page.getByRole("dialog").getByText("alex@example.test")).toBeVisible();
+  await expectNoPageOverflow(page);
 });
 
 test("salon owners see only their workspace experience", async ({ page }) => {

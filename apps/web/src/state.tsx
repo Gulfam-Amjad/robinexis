@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useLocation } from "react-router-dom";
 import type { ClientSummary, SessionActor } from "@robinexis/api-contracts";
 import { AUTH_REQUIRED } from "./lib/auth";
 import { api, API_KEY_STORAGE, CLIENT_STORAGE } from "./lib/api";
@@ -18,12 +19,14 @@ const SessionContext = createContext<SessionValue | null>(null);
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
+  const location = useLocation();
+  const inProduct = location.pathname.startsWith("/app") || location.pathname.startsWith("/admin") || location.pathname.startsWith("/dashboard") || location.pathname.startsWith("/billing");
   const [apiKey, setApiKey] = useState(() => sessionStorage.getItem(API_KEY_STORAGE));
   const [authReady, setAuthReady] = useState(!AUTH_REQUIRED);
   const actorQuery = useQuery({
     queryKey: ["session-actor", apiKey],
     queryFn: () => api.session(apiKey!),
-    enabled: AUTH_REQUIRED ? Boolean(apiKey && authReady) : true,
+    enabled: AUTH_REQUIRED ? Boolean(apiKey && authReady) : inProduct,
     retry: false,
   });
   const login = useCallback((key: string, actor?: SessionActor) => {
@@ -110,22 +113,25 @@ function readStoredClientId(): string | undefined {
 
 export function ClientProvider({ children }: { children: ReactNode }) {
   const { apiKey, actor } = useSession();
+  const location = useLocation();
+  const inProduct = location.pathname.startsWith("/app") || location.pathname.startsWith("/admin");
   const [activeClientId, setId] = useState<string | undefined>(readStoredClientId);
   const subscribed = actor?.subscriptionStatus === "active" || actor?.subscriptionStatus === "trialing";
   const canLoadClients = actor?.role === "operator" || (actor?.role === "salon" && subscribed);
   const clientsQuery = useQuery({
     queryKey: ["clients", apiKey],
     queryFn: api.clients,
-    enabled: AUTH_REQUIRED ? Boolean(apiKey && canLoadClients) : true,
+    enabled: inProduct && (AUTH_REQUIRED ? Boolean(apiKey && canLoadClients) : true),
     retry: false,
   });
-  const clients = clientsQuery.data || [];
+  const clients = useMemo(() => clientsQuery.data || [], [clientsQuery.data]);
 
   useEffect(() => {
     if (!clients.length) return;
     const saved = activeClientId ? clients.find((client) => client.id === activeClientId) : undefined;
     if (saved) return;
     const nextId = defaultClientId(clients);
+    if (nextId === activeClientId) return;
     setId(nextId);
     sessionStorage.setItem(CLIENT_STORAGE, nextId);
   }, [activeClientId, clients]);
