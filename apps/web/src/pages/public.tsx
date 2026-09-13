@@ -311,10 +311,16 @@ export function SelfServeBillingPage() {
   }, [actorLoading, paid, search, selected, checkout]);
 
   useEffect(() => {
-    if (checkoutStatus === "success") {
-      void queryClient.invalidateQueries({ queryKey: ["session-actor"] });
-    }
-  }, [checkoutStatus, queryClient]);
+    if (checkoutStatus !== "success" || paid) return;
+    const refresh = () => void queryClient.invalidateQueries({ queryKey: ["session-actor"] });
+    refresh();
+    const interval = window.setInterval(refresh, 1_500);
+    const timeout = window.setTimeout(() => window.clearInterval(interval), 30_000);
+    return () => {
+      window.clearInterval(interval);
+      window.clearTimeout(timeout);
+    };
+  }, [checkoutStatus, paid, queryClient]);
 
   if (actorLoading) return <div className="not-found">Loading billing…</div>;
   if (actor?.role === "operator") return <Navigate to="/admin/billing" replace />;
