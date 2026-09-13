@@ -17,6 +17,62 @@ const POLL = Number(process.env.WORKER_POLL_MS) || 15_000;
 const RETENTION_DAYS = Math.max(1, Number(process.env.DATA_RETENTION_DAYS) || 90);
 let lastReconcile = 0;
 
+async function retryProvisioningRuns(store: Awaited<ReturnType<typeof getStore>>) {
+  if (process.env.SAAS_PROVISIONING_ENABLED !== "true") return;
+  const apiBaseUrl = (process.env.API_PUBLIC_BASE_URL || "").replace(/\/$/, "");
+  const workerSecret = process.env.WORKER_API_SECRET || "";
+  if (!apiBaseUrl || !workerSecret) {
+    structuredLog("provisioning_retry_skipped", { reason: "api_base_or_worker_secret_missing" });
+    return;
+  }
+  for (const client of await store.listClients()) {
+    if (!["provisioning", "failed"].includes(client.onboardingStatus || "")) continue;
+    const run = (await store.listProvisioningRuns(client.id))[0];
+    if (!run || run.status === "succeeded" || run.status === "cancelled") continue;
+    const age = Date.now() - Date.parse(run.updatedAt);
+    if (run.status === "running" && age < 5 * 60_000) continue;
+    const attempts = Number(run.input.workerAttempts || 0);
+    if (attempts >= 5) continue;
+    if (run.status === "running") {
+      run.status = "failed";
+      run.error = "stale_provisioning_run_recovered";
+    }
+    run.input.workerAttempts = attempts + 1;
+    run.updatedAt = new Date().toISOString();
+    await store.saveProvisioningRun(run);
+    try {
+      const response = await fetch(
+        `${apiBaseUrl}/internal/provisioning/retry`,
+        {
+          method: "POST",
+          headers: {
+            "x-worker-secret": workerSecret,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            clientId: client.id,
+            operationKey: run.idempotencyKey,
+            phoneMode: client.phoneAcquisitionMode,
+            twilioNumber: client.requestedPhoneNumber,
+          }),
+        },
+      );
+      structuredLog("provisioning_retry", {
+        clientId: client.id,
+        runId: run.id,
+        attempt: attempts + 1,
+        status: response.status,
+      });
+    } catch (error) {
+      structuredLog("provisioning_retry_error", {
+        clientId: client.id,
+        runId: run.id,
+        error: String(error),
+      });
+    }
+  }
+}
+
 async function tick() {
   const store = await getStore();
   const now = new Date();
@@ -45,6 +101,7 @@ async function tick() {
     await store.saveJob(job);
     structuredLog("outbound_retired", { jobId: job.id, clientId: job.clientId });
   }
+  await retryProvisioningRuns(store);
 }
 
 async function main() {

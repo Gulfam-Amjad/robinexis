@@ -9,6 +9,7 @@ import type {
   AnalyticsTimeseriesPoint,
   BookingRecord,
   CalendarConnection,
+  CalendarEventType,
   CallListOptions,
   CallNote,
   CallSession,
@@ -29,6 +30,7 @@ import type {
   Subscription,
   Suppression,
   ToolActionRow,
+  TwilioConnection,
   UsageCounters,
   UserProfile,
   WorkspaceMembership,
@@ -311,17 +313,51 @@ export class PostgresStore implements PlatformStore {
     await this.pool.query(
       `INSERT INTO phone_endpoints
        (id, client_id, location_id, agent_instance_id, provider, e164, provider_endpoint_id,
-        direction, status, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        direction, status, metadata, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
        ON CONFLICT (id) DO UPDATE SET location_id = EXCLUDED.location_id,
          agent_instance_id = EXCLUDED.agent_instance_id, provider = EXCLUDED.provider,
          e164 = EXCLUDED.e164, provider_endpoint_id = EXCLUDED.provider_endpoint_id,
-         direction = EXCLUDED.direction, status = EXCLUDED.status, updated_at = EXCLUDED.updated_at
+         direction = EXCLUDED.direction, status = EXCLUDED.status, metadata = EXCLUDED.metadata,
+         updated_at = EXCLUDED.updated_at
        WHERE phone_endpoints.client_id = EXCLUDED.client_id`,
       [endpoint.id, endpoint.clientId, endpoint.locationId ?? null, endpoint.agentInstanceId ?? null,
         endpoint.provider, endpoint.e164, endpoint.providerEndpointId ?? null, endpoint.direction,
-        endpoint.status, endpoint.createdAt, endpoint.updatedAt],
+        endpoint.status, endpoint.metadata, endpoint.createdAt, endpoint.updatedAt],
     );
+  }
+  async getTwilioConnection(clientId: string) {
+    const r = await this.pool.query(
+      "SELECT * FROM twilio_connections WHERE client_id = $1",
+      [clientId],
+    );
+    return r.rows[0] ? twilioConnectionFromRow(r.rows[0]) : undefined;
+  }
+  async upsertTwilioConnection(connection: TwilioConnection) {
+    await this.pool.query(
+      `INSERT INTO twilio_connections
+       (id, client_id, mode, account_sid, encrypted_access_token, encrypted_refresh_token,
+        access_token_expires_at, api_key_sid, encrypted_api_key_secret,
+        status, metadata, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+       ON CONFLICT (client_id) DO UPDATE SET
+         mode = EXCLUDED.mode, account_sid = EXCLUDED.account_sid,
+         encrypted_access_token = EXCLUDED.encrypted_access_token,
+         encrypted_refresh_token = EXCLUDED.encrypted_refresh_token,
+         access_token_expires_at = EXCLUDED.access_token_expires_at,
+         api_key_sid = EXCLUDED.api_key_sid,
+         encrypted_api_key_secret = EXCLUDED.encrypted_api_key_secret,
+         status = EXCLUDED.status, metadata = EXCLUDED.metadata,
+         updated_at = EXCLUDED.updated_at`,
+      [connection.id, connection.clientId, connection.mode, connection.accountSid ?? null,
+        connection.encryptedAccessToken ?? null, connection.encryptedRefreshToken ?? null,
+        connection.accessTokenExpiresAt ?? null, connection.apiKeySid ?? null,
+        connection.encryptedApiKeySecret ?? null, connection.status, connection.metadata,
+        connection.createdAt, connection.updatedAt],
+    );
+  }
+  async deleteTwilioConnection(clientId: string) {
+    await this.pool.query("DELETE FROM twilio_connections WHERE client_id = $1", [clientId]);
   }
   async listCalendarConnections(clientId: string) {
     const r = await this.pool.query("SELECT * FROM calendar_connections WHERE client_id = $1 ORDER BY created_at, id", [clientId]);
@@ -341,6 +377,30 @@ export class PostgresStore implements PlatformStore {
       [connection.id, connection.clientId, connection.locationId ?? null, connection.provider,
         connection.externalAccountId ?? null, connection.credentialRef, connection.calendarId ?? null,
         connection.status, connection.metadata, connection.createdAt, connection.updatedAt],
+    );
+  }
+  async listCalendarEventTypes(clientId: string) {
+    const r = await this.pool.query(
+      "SELECT * FROM calendar_event_types WHERE client_id = $1 ORDER BY created_at, id",
+      [clientId],
+    );
+    return r.rows.map(calendarEventTypeFromRow);
+  }
+  async upsertCalendarEventType(eventType: CalendarEventType) {
+    await this.pool.query(
+      `INSERT INTO calendar_event_types
+       (id, client_id, calendar_connection_id, service_slug, provider_event_type_id,
+        provider_slug, title, duration_minutes, status, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       ON CONFLICT (client_id, service_slug) DO UPDATE SET
+         calendar_connection_id = EXCLUDED.calendar_connection_id,
+         provider_event_type_id = EXCLUDED.provider_event_type_id,
+         provider_slug = EXCLUDED.provider_slug, title = EXCLUDED.title,
+         duration_minutes = EXCLUDED.duration_minutes, status = EXCLUDED.status,
+         updated_at = EXCLUDED.updated_at`,
+      [eventType.id, eventType.clientId, eventType.calendarConnectionId, eventType.serviceSlug,
+        eventType.providerEventTypeId, eventType.providerSlug, eventType.title,
+        eventType.durationMinutes, eventType.status, eventType.createdAt, eventType.updatedAt],
     );
   }
   async getCurrentSubscription(clientId: string) {
@@ -1029,7 +1089,26 @@ function phoneEndpointFromRow(row: Record<string, any>): PhoneEndpoint {
     id: row.id, clientId: row.client_id, locationId: row.location_id ?? undefined,
     agentInstanceId: row.agent_instance_id ?? undefined, provider: row.provider, e164: row.e164,
     providerEndpointId: row.provider_endpoint_id ?? undefined, direction: row.direction, status: row.status,
+    metadata: row.metadata ?? {},
     createdAt: toIso(row.created_at), updatedAt: toIso(row.updated_at),
+  };
+}
+
+function twilioConnectionFromRow(row: Record<string, any>): TwilioConnection {
+  return {
+    id: row.id,
+    clientId: row.client_id,
+    mode: row.mode,
+    accountSid: row.account_sid ?? undefined,
+    encryptedAccessToken: row.encrypted_access_token ?? undefined,
+    encryptedRefreshToken: row.encrypted_refresh_token ?? undefined,
+    accessTokenExpiresAt: row.access_token_expires_at ? toIso(row.access_token_expires_at) : undefined,
+    apiKeySid: row.api_key_sid ?? undefined,
+    encryptedApiKeySecret: row.encrypted_api_key_secret ?? undefined,
+    status: row.status,
+    metadata: row.metadata ?? {},
+    createdAt: toIso(row.created_at),
+    updatedAt: toIso(row.updated_at),
   };
 }
 
@@ -1040,6 +1119,22 @@ function calendarConnectionFromRow(row: Record<string, any>): CalendarConnection
     credentialRef: row.credential_ref, calendarId: row.calendar_id ?? undefined,
     status: row.status, metadata: row.metadata ?? {},
     createdAt: toIso(row.created_at), updatedAt: toIso(row.updated_at),
+  };
+}
+
+function calendarEventTypeFromRow(row: Record<string, any>): CalendarEventType {
+  return {
+    id: row.id,
+    clientId: row.client_id,
+    calendarConnectionId: row.calendar_connection_id,
+    serviceSlug: row.service_slug,
+    providerEventTypeId: row.provider_event_type_id,
+    providerSlug: row.provider_slug,
+    title: row.title,
+    durationMinutes: Number(row.duration_minutes),
+    status: row.status,
+    createdAt: toIso(row.created_at),
+    updatedAt: toIso(row.updated_at),
   };
 }
 

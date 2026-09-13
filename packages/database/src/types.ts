@@ -16,6 +16,14 @@ export type CallDirection = "inbound" | "outbound";
 export type VoicePipeline = "elevenlabs-convai" | "groq-gateway";
 
 export type WorkspaceRole = "owner" | "manager" | "viewer";
+export type OnboardingStatus =
+  | "payment_required"
+  | "details_required"
+  | "ready_to_provision"
+  | "provisioning"
+  | "active"
+  | "failed";
+export type PhoneAcquisitionMode = "robinexis_account" | "customer_oauth";
 
 export interface WorkspaceMembership {
   id: string;
@@ -84,6 +92,9 @@ export interface ClientConfig {
   stripeCustomerId?: string;
   stripeSubscriptionId?: string;
   promptVersionId?: string;
+  onboardingStatus?: OnboardingStatus;
+  phoneAcquisitionMode?: PhoneAcquisitionMode;
+  requestedPhoneNumber?: string;
 }
 
 export interface PromptVersion {
@@ -345,6 +356,23 @@ export interface PhoneEndpoint {
   providerEndpointId?: string;
   direction: "inbound" | "outbound" | "both";
   status: LifecycleStatus;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TwilioConnection {
+  id: string;
+  clientId: string;
+  mode: PhoneAcquisitionMode;
+  accountSid?: string;
+  encryptedAccessToken?: string;
+  encryptedRefreshToken?: string;
+  accessTokenExpiresAt?: string;
+  apiKeySid?: string;
+  encryptedApiKeySecret?: string;
+  status: "pending" | "credentials_required" | "active" | "expired" | "revoked" | "failed";
+  metadata: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
 }
@@ -359,6 +387,20 @@ export interface CalendarConnection {
   calendarId?: string;
   status: LifecycleStatus;
   metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CalendarEventType {
+  id: string;
+  clientId: string;
+  calendarConnectionId: string;
+  serviceSlug: string;
+  providerEventTypeId: string;
+  providerSlug: string;
+  title: string;
+  durationMinutes: number;
+  status: LifecycleStatus;
   createdAt: string;
   updatedAt: string;
 }

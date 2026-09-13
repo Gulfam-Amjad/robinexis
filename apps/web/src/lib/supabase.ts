@@ -59,6 +59,23 @@ export function strayAuthCallback(pathname: string, search: string, hash = ""): 
   return carriesSignIn ? `${AUTH_CALLBACK_PATH}?${params.toString()}` : undefined;
 }
 
+/**
+ * Supabase reports the two email-delivery failures operators actually hit in wording aimed at
+ * developers. Rewrite those, and only those, so the sign-in screen tells a customer what to do next.
+ */
+export function authErrorMessage(error: unknown, fallback: string): string {
+  const raw = error instanceof Error ? error.message : "";
+  if (!raw) return fallback;
+  const text = raw.toLowerCase();
+  if (text.includes("not authorized")) {
+    return "This address cannot receive sign-in links yet. Use Continue with Google, or email hello@robinexis.com.";
+  }
+  if (text.includes("rate limit") || text.includes("for security purposes") || text.includes("too many")) {
+    return "Too many sign-in emails just now. Wait a few minutes or use Continue with Google.";
+  }
+  return raw;
+}
+
 export function saveAuthIntent(intent: Partial<AuthIntent> = {}): AuthIntent {
   const safe = { plan: validPlan(intent.plan), returnTo: safeReturnTo(intent.returnTo) };
   localStorage.setItem(AUTH_INTENT_STORAGE, JSON.stringify(safe));

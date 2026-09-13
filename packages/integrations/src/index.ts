@@ -4,6 +4,7 @@ export * as calcom from "./calcom.js";
 export { maskCalcomUsername } from "./calcom.js";
 export { appendVerifiedCalendarNote } from "./calendarNotes.js";
 export {
+  checkoutConfigurationError,
   createCheckoutSession,
   createStripe,
   handleStripeWebhook,
@@ -19,6 +20,21 @@ export {
 export type { PlanDefinition, PlanFeature, PlanTier } from "./plans.js";
 export { inCallingWindow, COMPLIANCE_NOTES } from "./compliance.js";
 export { placeOutboundCall, twilioClient, validateTwilioWebhook } from "./twilioOutbound.js";
+export {
+  findOwnedTwilioNumber,
+} from "./twilioProvisioning.js";
+export type { TwilioNumber } from "./twilioProvisioning.js";
+export {
+  createTwilioOAuthState,
+  decryptTwilioCredential,
+  discoverTwilioAccountSid,
+  encryptTwilioCredential,
+  exchangeTwilioOAuthCode,
+  refreshTwilioOAuthToken,
+  twilioOAuthAuthorizeUrl,
+  verifyTwilioOAuthState,
+} from "./twilioOAuth.js";
+export type { TwilioOAuthTokens } from "./twilioOAuth.js";
 export { publicDemoCallView } from "./callView.js";
 export {
   calcomTenantFromClient,

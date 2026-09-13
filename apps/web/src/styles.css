@@ -355,6 +355,7 @@ td strong { color: var(--ink); }
 .field small { color: var(--faint); font-size: 9px; }
 .field .field-error { color: #b02f00; }
 .form-alert, .compact-alert { background: var(--alert-soft); border: 1px solid #ffc2ab; border-radius: 10px; color: #b02f00; font-size: 11px; line-height: 1.45; padding: 11px 13px; }
+.form-success { background: var(--accent-soft); border: 1px solid #9fe3c4; border-radius: 10px; color: #06603a; font-size: 11px; line-height: 1.45; padding: 11px 13px; }
 .compact-alert { margin: 0 0 12px; }
 .form-grid { display: grid; gap: 17px; grid-template-columns: 1fr 1fr; }
 .form-card { margin-bottom: 18px; padding: 26px; }
@@ -597,7 +598,7 @@ fieldset:disabled input, fieldset:disabled textarea, fieldset:disabled select { 
 .not-found { align-items: center; background: #f0f0f0; display: flex; min-height: 100vh; justify-content: center; }
 .mobile-only { display: none; }
 .admin-client-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
-.admin-client-card { background: #fafafa; border: 1px solid var(--line); border-radius: 14px; padding: 17px; }
+.admin-client-card { background: #fafafa; border: 1px solid var(--line); border-radius: 14px; min-width: 0; overflow-x: clip; padding: 17px; }
 .admin-client-heading { align-items: center; display: flex; gap: 10px; }
 .admin-client-heading > div { flex: 1; min-width: 0; }
 .admin-client-heading strong, .admin-client-heading small { display: block; }
@@ -671,7 +672,7 @@ fieldset:disabled input, fieldset:disabled textarea, fieldset:disabled select { 
   .setup-steps { justify-content: flex-start; margin-left: -4px; max-width: 100%; overflow-x: auto; padding: 4px; scrollbar-width: thin; }
   .setup-steps i { flex: 0 0 30px; margin: 0 7px; }
   .admin-client-card .row-actions { justify-content: stretch; }
-  .admin-client-card .row-actions .button { flex: 1 1 145px; }
+  .admin-client-card .row-actions .button { flex: 1 1 min(100%, 160px); min-width: 0; }
   .security-strip { align-items: flex-start; }
   .availability-controls { grid-template-columns: 1fr; }
   .availability-controls .button { width: 100%; }
@@ -758,12 +759,14 @@ fieldset:disabled input, fieldset:disabled textarea, fieldset:disabled select { 
   .dialog { border-radius: 18px; max-height: calc(100dvh - 20px); overflow-y: auto; padding: 22px; }
   .dialog-actions { flex-direction: column-reverse; }
   .dialog-actions .button { width: 100%; }
+  .admin-client-grid { grid-template-columns: minmax(0, 1fr); }
+  .admin-client-card .row-actions { align-items: stretch; flex-direction: column; }
+  .admin-client-card .row-actions .button { flex: none; min-height: 44px; width: 100%; }
 }
 
 @media (max-width: 420px) {
   .metrics-compact { grid-template-columns: 1fr; }
   .public-footer > div { flex-wrap: wrap; justify-content: center; }
-  .admin-client-grid { grid-template-columns: minmax(0, 1fr); }
   .admin-client-heading { align-items: flex-start; flex-wrap: wrap; }
   .admin-client-heading > .badge { margin-left: 43px; }
   .health-list > span { align-items: flex-start; flex-wrap: wrap; }

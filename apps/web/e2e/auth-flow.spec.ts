@@ -100,6 +100,7 @@ test("a selected Pro plan is carried into Stripe checkout", async ({ page }) => 
   await page.goto("/billing?plan=pro&startCheckout=1");
 
   await expect.poll(() => checkoutPlan).toBe("pro");
+  await expect(page.getByRole("alert")).toContainText("Stripe Checkout did not return a redirect URL");
 });
 
 test("dashboard routes admins to the operator shell", async ({ page }) => {
@@ -116,23 +117,27 @@ test("dashboard routes assigned clients to their workspace shell", async ({ page
   await expect(page.getByText("Demo Salon", { exact: true }).first()).toBeVisible();
 });
 
-test("pending signup is sent to Sophie until a plan is active", async ({ page }) => {
+test("pending signup is sent to checkout until a plan is active", async ({ page }) => {
   await seedSupabaseSession(page, "pending");
   await page.goto("/dashboard");
-  await expect(page).toHaveURL(/\/demo\/blades-hair$/);
-  await expect(page.getByRole("heading", { name: /Meet Sophie, the AI receptionist/i })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Choose a plan" })).toHaveAttribute("href", "/billing");
+  await expect(page).toHaveURL(/\/billing$/);
+  await expect(page.getByRole("heading", { name: "Choose a plan to continue" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Starter/ })).toBeVisible();
   await page.reload();
-  await expect(page.getByRole("heading", { name: /Meet Sophie, the AI receptionist/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Choose a plan to continue" })).toBeVisible();
   await page.goto("/admin");
   await expect(page).toHaveURL(/\/demo\/blades-hair$/);
 });
 
-test("unpaid salon workspaces cannot open the dashboard", async ({ page }) => {
+test("unpaid salon workspaces are sent to checkout, not the dashboard", async ({ page }) => {
   await seedSupabaseSession(page, "salon", "past_due");
   await page.goto("/dashboard");
+  await expect(page).toHaveURL(/\/billing$/);
+  await expect(page.getByRole("heading", { name: "Choose a plan to continue" })).toBeVisible();
+  await page.goto("/app");
   await expect(page).toHaveURL(/\/demo\/blades-hair$/);
-  await expect(page.getByRole("link", { name: "Choose a plan" })).toBeVisible();
+  await page.goto("/onboarding");
+  await expect(page).toHaveURL(/\/billing$/);
 });
 
 test("callback errors return a recoverable login action", async ({ page }) => {

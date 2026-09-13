@@ -290,8 +290,6 @@ const clientSchema = z.object({
   location: z.string().optional(),
   phone: z.string().optional(),
   email: z.string().email("Enter a valid email").or(z.literal("")),
-  calendarProvider: z.enum(["calcom", "google", "outlook", "fresha"]),
-  calendarCredentialRef: z.string().regex(/^[A-Z][A-Z0-9_]*$/, "Use the Railway environment variable name"),
   transferNumber: z.string().regex(/^\+[1-9]\d{7,14}$/, "Use an international number such as +447700900123"),
   planTier: z.enum(["starter", "pro", "enterprise"]),
 });
@@ -304,8 +302,6 @@ export function OnboardingPage() {
   const { register, handleSubmit, formState: { errors } } = useForm<z.infer<typeof clientSchema>>({
     resolver: zodResolver(clientSchema),
     defaultValues: {
-      calendarProvider: "calcom",
-      calendarCredentialRef: "CALCOM_API_KEY",
       planTier: "starter",
     },
   });
@@ -319,8 +315,8 @@ export function OnboardingPage() {
       transferNumber: values.transferNumber,
       planTier: values.planTier,
       calendar: {
-        provider: values.calendarProvider,
-        credentialRef: values.calendarCredentialRef,
+        provider: "calcom",
+        credentialRef: "CALCOM_API_KEY",
       },
       role: "AI receptionist",
       tone: "Warm, professional and concise",
@@ -350,8 +346,7 @@ export function OnboardingPage() {
               <Field label="Location"><input placeholder="Leeds, UK" {...register("location")} /></Field>
               <Field label="Business phone"><input placeholder="+44 113 000 0000" {...register("phone")} /></Field>
               <Field label="Customer email" error={errors.email?.message}><input placeholder="hello@business.co.uk" {...register("email")} /></Field>
-              <Field label="Calendar provider"><select {...register("calendarProvider")}><option value="calcom">Cal.com</option><option value="google">Google Calendar</option><option value="outlook">Outlook</option><option value="fresha">Fresha</option></select></Field>
-              <Field label="Calendar credential reference" hint="The environment variable name, never the API key." error={errors.calendarCredentialRef?.message}><input placeholder="CALCOM_CLIENT_API_KEY" {...register("calendarCredentialRef")} /></Field>
+              <Field label="Calendar"><input readOnly value="Cal.com (Robinexis books on the platform calendar automatically)" /></Field>
               <Field label="Owner / front desk number" hint="Required for a warm conference transfer." error={errors.transferNumber?.message}><input placeholder="+447700900123" {...register("transferNumber")} /></Field>
               <Field label="Plan"><select {...register("planTier")}><option value="starter">Starter — £99/month</option><option value="pro">Pro — £249/month</option><option value="enterprise">Enterprise — contact sales</option></select></Field>
             </div>
@@ -476,6 +471,7 @@ function AgentForm({ client, isNew = false }: { client: Client; isNew?: boolean 
           {isOperator && <Field label="ElevenLabs agent ID" hint="Required for this workspace's browser playground."><input placeholder="agent_…" {...register("elevenlabsAgentId")} /></Field>}
           {isOperator && <Field label="ElevenLabs voice ID" hint="Leave empty to use the workspace default."><input placeholder="Optional voice ID" {...register("voiceId")} /></Field>}
           <Field label="Human transfer number"><input placeholder="+44…" {...register("transferNumber")} /></Field>
+          <Field label="Twilio inbound number" hint="Buy the number in Twilio, then paste one E.164 value per line. Robinexis assigns it to this workspace’s agent."><textarea rows={2} placeholder="+447700900000" {...register("inboundNumbers")} /></Field>
         </div>
         <Field label="Opening greeting" error={errors.greeting?.message}><textarea rows={3} {...register("greeting")} /></Field>
       </Card>
@@ -489,7 +485,6 @@ function AgentForm({ client, isNew = false }: { client: Client; isNew?: boolean 
         <Field label="Services" hint="One per line: Title | slug | duration minutes"><textarea rows={5} placeholder="Haircut & Style | haircut-style | 45" {...register("services")} /></Field>
         <div className="form-grid">
           <Field label="Team members" hint="One name per line"><textarea rows={4} {...register("staff")} /></Field>
-          {isOperator && <Field label="Inbound phone numbers" hint="One E.164 number per line"><textarea rows={4} placeholder="+447700900000" {...register("inboundNumbers")} /></Field>}
           <Field label="Opening hours"><textarea rows={4} {...register("hours")} /></Field>
           <Field label="Prices"><textarea rows={4} {...register("prices")} /></Field>
         </div>
@@ -546,7 +541,7 @@ export function AgentDetailPage() {
   return (
     <>
       <Link className="back-link" to="/app/agents"><ArrowLeft size={15} /> All agents</Link>
-      <PageHeader eyebrow={canEdit ? "Agent editor" : "Agent details"} title={client.data?.role || "Voice receptionist"} description={`${client.data?.businessName} · ${client.data?.tone || "Warm and professional"}`} actions={<><Link className="button button-secondary button-md" to="/app/playground"><Play size={15} /> Test</Link>{canEdit && <Button onClick={() => publish.mutate()} disabled={publish.isPending}>{publish.isPending ? "Approving…" : "Approve version"} <UploadCloud size={15} /></Button>}{isOperator && <Button variant="secondary" onClick={() => provision.mutate()} disabled={provision.isPending || !client.data?.published}>{provision.isPending ? "Provisioning…" : client.data?.elevenlabsAgentId ? "Sync provider" : "Provision agent"}</Button>}</>} />
+      <PageHeader eyebrow={canEdit ? "Agent editor" : "Agent details"} title={client.data?.role || "Voice receptionist"} description={`${client.data?.businessName} · ${client.data?.tone || "Warm and professional"}`} actions={<><Link className="button button-secondary button-md" to="/app/playground"><Play size={15} /> Test</Link>{canEdit && isOperator && <Button onClick={() => publish.mutate()} disabled={publish.isPending}>{publish.isPending ? "Approving…" : "Approve version"} <UploadCloud size={15} /></Button>}{isOperator && <Button variant="secondary" onClick={() => provision.mutate()} disabled={provision.isPending || !client.data?.published}>{provision.isPending ? "Provisioning…" : client.data?.elevenlabsAgentId ? "Sync provider" : "Provision agent"}</Button>}</>} />
       <div className="editor-layout">
         <div><AgentForm client={client.data!} /></div>
         <aside className="editor-aside">
@@ -886,8 +881,8 @@ export function IntegrationsPage() {
 function IntegrationsContent({ clientId }: { clientId: string }) {
   const status = useQuery({ queryKey: ["integrations", clientId], queryFn: () => api.integrations(clientId), retry: false });
   const known = [
-    { id: "twilio", name: "Twilio", description: "Phone numbers routed directly into the live voice agent", icon: PhoneCall },
-    { id: "calcom", name: "Cal.com", description: "Live availability and appointment booking", icon: CalendarDays },
+    { id: "twilio", name: "Twilio", description: "You buy the inbound number. Paste it in the agent editor; Robinexis routes it to ElevenLabs", icon: PhoneCall },
+    { id: "calcom", name: "Cal.com", description: "Bookings land on the Robinexis calendar automatically. Each customer gets isolated event types.", icon: CalendarDays },
     { id: "elevenlabs", name: "ElevenLabs", description: "Realtime conversation, interruption and voice", icon: Activity },
     { id: "gemini", name: "Gemini", description: "Knowledge embeddings and semantic retrieval", icon: BookOpen },
     { id: "database", name: "Postgres + pgvector", description: "Persistent clients, calls and indexed knowledge", icon: Database },

@@ -12,6 +12,20 @@ export type CallDirection = "inbound" | "outbound";
 export type CallStatus = "active" | "completed" | "transferred" | "failed";
 export type JobStatus = "pending" | "approved" | "dialing" | "completed" | "suppressed" | "failed" | "cancelled";
 export type WorkspaceRole = "owner" | "manager" | "viewer";
+export type OnboardingStatus =
+  | "payment_required"
+  | "details_required"
+  | "ready_to_provision"
+  | "provisioning"
+  | "active"
+  | "failed";
+export type PhoneAcquisitionMode = "robinexis_account" | "customer_oauth";
+
+export interface PublicTwilioConnection {
+  mode: PhoneAcquisitionMode;
+  status: "not_connected" | "pending" | "credentials_required" | "active" | "expired" | "revoked" | "failed";
+  accountSidMasked?: string;
+}
 
 export interface SessionActor {
   email: string;
@@ -23,6 +37,7 @@ export interface SessionActor {
     administerPlatform?: boolean;
     createClients?: boolean;
   };
+  onboardingStatus?: OnboardingStatus;
 }
 
 export interface WorkspaceMembership {
@@ -77,6 +92,16 @@ export interface Client extends ClientSummary {
   subscribedProduct?: string;
   monthlyMinuteLimit?: number;
   promptVersionId?: string;
+  onboardingStatus?: OnboardingStatus;
+  phoneAcquisitionMode?: PhoneAcquisitionMode;
+  requestedPhoneNumber?: string;
+}
+
+export interface ProvisioningStatus {
+  status: "not_started" | "pending" | "running" | "succeeded" | "failed";
+  step?: string;
+  error?: string;
+  updatedAt?: string;
 }
 
 export interface TranscriptTurn {

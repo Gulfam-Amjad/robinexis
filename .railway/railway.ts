@@ -29,10 +29,18 @@ export default defineRailway(() => {
     CALCOM_USERNAME: preserve(),
     VOICE_TOOL_SECRET: preserve(),
     VOICE_TOOL_SECRETS_JSON: preserve(),
+    ELEVENLABS_API_KEY: preserve(),
+    ELEVENLABS_VOICE_ID: preserve(),
     ELEVENLABS_WEBHOOK_SECRET: preserve(),
     STRIPE_PUBLISHABLE_KEY: preserve(),
     STRIPE_WEBHOOK_SECRET: preserve(),
     STRIPE_PRICE_IDS_JSON: preserve(),
+    TWILIO_OAUTH_CLIENT_ID: preserve(),
+    TWILIO_OAUTH_CLIENT_SECRET: preserve(),
+    TWILIO_OAUTH_REDIRECT_URI: preserve(),
+    TWILIO_OAUTH_STATE_SECRET: preserve(),
+    TWILIO_OAUTH_ENCRYPTION_KEY: preserve(),
+    WORKER_API_SECRET: preserve(),
   };
 
   const data = {
@@ -81,6 +89,9 @@ export default defineRailway(() => {
       WORKER_POLL_MS: "15000",
       DATA_RETENTION_DAYS: "90",
       STRIPE_SECRET_KEY: preserve(),
+      WORKER_API_SECRET: preserve(),
+      API_PUBLIC_BASE_URL: "https://api.robinexis.com",
+      SAAS_PROVISIONING_ENABLED: "false",
     },
   });
 

@@ -7,6 +7,7 @@ import type {
   AnalyticsTimeseriesPoint,
   BookingRecord,
   CalendarConnection,
+  CalendarEventType,
   CallListOptions,
   CallNote,
   CallSession,
@@ -28,6 +29,7 @@ import type {
   Subscription,
   Suppression,
   ToolActionRow,
+  TwilioConnection,
   UsageCounters,
   UserProfile,
   WorkspaceMembership,
@@ -64,8 +66,13 @@ export interface PlatformStore {
   upsertAgentInstance(agent: AgentInstance): Promise<void>;
   listPhoneEndpoints(clientId: string): Promise<PhoneEndpoint[]>;
   upsertPhoneEndpoint(endpoint: PhoneEndpoint): Promise<void>;
+  getTwilioConnection(clientId: string): Promise<TwilioConnection | undefined>;
+  upsertTwilioConnection(connection: TwilioConnection): Promise<void>;
+  deleteTwilioConnection(clientId: string): Promise<void>;
   listCalendarConnections(clientId: string): Promise<CalendarConnection[]>;
   upsertCalendarConnection(connection: CalendarConnection): Promise<void>;
+  listCalendarEventTypes(clientId: string): Promise<CalendarEventType[]>;
+  upsertCalendarEventType(eventType: CalendarEventType): Promise<void>;
 
   getCurrentSubscription(clientId: string): Promise<Subscription | undefined>;
   upsertSubscription(subscription: Subscription): Promise<void>;
@@ -150,7 +157,9 @@ export class MemoryStore implements PlatformStore {
   locations = new Map<string, Location>();
   agentInstances = new Map<string, AgentInstance>();
   phoneEndpoints = new Map<string, PhoneEndpoint>();
+  twilioConnections = new Map<string, TwilioConnection>();
   calendarConnections = new Map<string, CalendarConnection>();
+  calendarEventTypes = new Map<string, CalendarEventType>();
   subscriptions = new Map<string, Subscription>();
   stripeEvents = new Map<string, StripeEvent>();
   bookingRecords = new Map<string, BookingRecord>();
@@ -280,6 +289,16 @@ export class MemoryStore implements PlatformStore {
     }
     this.phoneEndpoints.set(`${endpoint.clientId}:${endpoint.id}`, { ...endpoint });
   }
+  async getTwilioConnection(clientId: string) {
+    return this.twilioConnections.get(clientId);
+  }
+  async upsertTwilioConnection(connection: TwilioConnection) {
+    if (!this.clients.has(connection.clientId)) throw new Error("client_not_found");
+    this.twilioConnections.set(connection.clientId, { ...connection });
+  }
+  async deleteTwilioConnection(clientId: string) {
+    this.twilioConnections.delete(clientId);
+  }
   async listCalendarConnections(clientId: string) {
     return [...this.calendarConnections.values()].filter((connection) => connection.clientId === clientId);
   }
@@ -288,6 +307,14 @@ export class MemoryStore implements PlatformStore {
       throw new Error("location_not_found");
     }
     this.calendarConnections.set(`${connection.clientId}:${connection.id}`, { ...connection });
+  }
+  async listCalendarEventTypes(clientId: string) {
+    return [...this.calendarEventTypes.values()].filter((eventType) => eventType.clientId === clientId);
+  }
+  async upsertCalendarEventType(eventType: CalendarEventType) {
+    const connection = this.calendarConnections.get(`${eventType.clientId}:${eventType.calendarConnectionId}`);
+    if (!connection) throw new Error("calendar_connection_not_found");
+    this.calendarEventTypes.set(`${eventType.clientId}:${eventType.id}`, { ...eventType });
   }
   async getCurrentSubscription(clientId: string) {
     return [...this.subscriptions.values()]

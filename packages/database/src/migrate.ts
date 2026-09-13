@@ -20,7 +20,15 @@ export async function migrate(databaseUrl: string) {
         applied_at TIMESTAMPTZ DEFAULT now()
       )
     `);
-    const dir = path.join(__dirname, "migrations");
+    const bundledDir = path.join(__dirname, "migrations");
+    const workspaceRoot = path.resolve(process.cwd(), "../..");
+    const workspaceDistDir = path.join(workspaceRoot, "packages/database/dist/migrations");
+    const sourceDir = path.join(workspaceRoot, "packages/database/src/migrations");
+    const dir = fs.existsSync(bundledDir)
+      ? bundledDir
+      : fs.existsSync(workspaceDistDir)
+        ? workspaceDistDir
+        : sourceDir;
     const files = fs
       .readdirSync(dir)
       .filter((name) => name.endsWith(".sql"))

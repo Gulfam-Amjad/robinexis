@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   ArrowRight,
@@ -22,6 +22,7 @@ import { Button, Card, Field } from "../components/ui";
 import { AUTH_REQUIRED } from "../lib/auth";
 import { api } from "../lib/api";
 import {
+  authErrorMessage,
   completeAuthCallback,
   selectedPlan,
   signInWithEmail,
@@ -127,9 +128,12 @@ const loginSchema = z.object({ email: z.string().email("Enter the allowlisted wo
 type LoginFields = z.infer<typeof loginSchema>;
 
 function authIntent(search: URLSearchParams, from?: string): AuthIntent {
+  const plan = validPlan(search.get("plan"));
+  // A prospect who arrived on a plan CTA has already chosen; send them straight
+  // into Stripe rather than to a dashboard they cannot open until they pay.
   return {
-    plan: validPlan(search.get("plan")),
-    returnTo: from || "/dashboard",
+    plan,
+    returnTo: from || (plan ? `/billing?plan=${plan}&startCheckout=1` : "/dashboard"),
   };
 }
 
@@ -158,18 +162,19 @@ export function LoginPage() {
     try {
       await signInWithGoogle(intent);
     } catch (error) {
-      setServerError(error instanceof Error ? error.message : "Google sign-in could not be started.");
+      setServerError(authErrorMessage(error, "Google sign-in could not be started."));
       setChecking(false);
     }
   };
   const submit = async ({ email }: LoginFields) => {
     setChecking(true);
     setServerError("");
+    setSent(false);
     try {
       await signInWithEmail(email.trim(), intent);
       setSent(true);
     } catch (error) {
-      setServerError(error instanceof Error ? error.message : "The workspace could not be reached.");
+      setServerError(authErrorMessage(error, "The workspace could not be reached."));
     } finally {
       setChecking(false);
     }
@@ -183,7 +188,7 @@ export function LoginPage() {
           <input type="email" autoComplete="email" placeholder="you@company.com" {...register("email")} />
         </Field>
         {serverError && <div className="form-alert" role="alert">{serverError}</div>}
-        {sent && <div className="form-alert" role="status">Check your inbox for the sign-in link.</div>}
+        {sent && <div className="form-success" role="status">Check your inbox for the sign-in link. Open it in this same browser — the link only works where you asked for it.</div>}
         <Button type="submit" disabled={checking}>{checking ? "Sending link…" : "Email me a sign-in link"} <ArrowRight size={16} /></Button>
       </form>
       <div className="auth-note"><ShieldCheck size={17} /><p>The API verifies the signed-in user and enforces their workspace role. The browser never decides which client data they can access.</p></div>
@@ -207,18 +212,19 @@ export function SignupPage() {
     try {
       await signInWithGoogle(intent);
     } catch (error) {
-      setServerError(error instanceof Error ? error.message : "Google sign-up could not be started.");
+      setServerError(authErrorMessage(error, "Google sign-up could not be started."));
       setChecking(false);
     }
   };
   const submit = async ({ email }: LoginFields) => {
     setChecking(true);
     setServerError("");
+    setSent(false);
     try {
       await signInWithEmail(email.trim(), intent);
       setSent(true);
     } catch (error) {
-      setServerError(error instanceof Error ? error.message : "Account creation could not be started.");
+      setServerError(authErrorMessage(error, "Account creation could not be started."));
     } finally {
       setChecking(false);
     }
@@ -234,7 +240,7 @@ export function SignupPage() {
           <input type="email" autoComplete="email" placeholder="you@company.com" {...register("email")} />
         </Field>
         {serverError && <div className="form-alert" role="alert">{serverError}</div>}
-        {sent && <div className="form-alert" role="status">Check your inbox to finish creating your account.</div>}
+        {sent && <div className="form-success" role="status">Check your inbox to finish creating your account. Open the link in this same browser — it only works where you asked for it.</div>}
         <Button type="submit" disabled={checking}>{checking ? "Sending link…" : "Continue with email"} <ArrowRight size={16} /></Button>
         <small className="form-disclaimer">Starter and Pro include a 3-day trial. Stripe hosts checkout after you sign in.</small>
       </form>
@@ -287,10 +293,14 @@ export function SelfServeBillingPage() {
   const selected = validPlan(search.get("plan")) || selectedPlan();
   const paid = actor?.subscriptionStatus === "active" || actor?.subscriptionStatus === "trialing";
   const checkout = useMutation({
-    mutationFn: (plan: AuthPlan) => api.createCheckout(plan, actor?.clientId),
-    onSuccess: (result) => {
-      if (result.url) window.location.assign(result.url);
+    mutationFn: async (plan: AuthPlan) => {
+      const result = await api.createCheckout(plan, actor?.clientId);
+      if (!result.url) {
+        throw new Error("Stripe Checkout did not return a redirect URL. Please retry.");
+      }
+      return result.url;
     },
+    onSuccess: (url) => window.location.assign(url),
   });
 
   useEffect(() => {
@@ -348,9 +358,162 @@ export function SelfServeBillingPage() {
                 : "Pro · £249/month"}
           </Button>
         ))}
-        {paid && <Link className="button button-ghost button-md" to="/dashboard">Open dashboard</Link>}
+        {paid && <Link className="button button-ghost button-md" to={actor?.onboardingStatus === "active" ? "/dashboard" : "/onboarding"}>{actor?.onboardingStatus === "active" ? "Open dashboard" : "Set up my receptionist"}</Link>}
         <Button type="button" variant="ghost" onClick={logout}>Sign out</Button>
       </div>
+    </AuthShell>
+  );
+}
+
+const selfServeOnboardingSchema = z.object({
+  businessName: z.string().min(2, "Business name is required"),
+  location: z.string().optional(),
+  transferNumber: z.string().regex(/^\+[1-9]\d{7,14}$/, "Use an international number such as +447700900123"),
+  greeting: z.string().min(8, "Add a short greeting"),
+  hours: z.string().min(2, "Add opening hours"),
+  prices: z.string().optional(),
+  services: z.string().min(3, "Add at least one service"),
+  phoneMode: z.enum(["robinexis_account", "customer_oauth"]),
+  twilioNumber: z.string().regex(/^\+[1-9]\d{7,14}$/, "Paste the purchased number in international format."),
+  twilioApiKeySid: z.string().optional(),
+  twilioApiKeySecret: z.string().optional(),
+}).superRefine((value, context) => {
+  if (value.phoneMode === "customer_oauth") {
+    if (!/^SK[0-9a-f]{32}$/i.test(value.twilioApiKeySid || "")) {
+      context.addIssue({ code: "custom", path: ["twilioApiKeySid"], message: "Enter the API Key SID beginning SK." });
+    }
+    if (!value.twilioApiKeySecret) {
+      context.addIssue({ code: "custom", path: ["twilioApiKeySecret"], message: "Enter the API Key secret." });
+    }
+  }
+});
+
+export function SelfServeOnboardingPage() {
+  const { actor } = useSession();
+  const navigate = useNavigate();
+  const [search] = useSearchParams();
+  const queryClient = useQueryClient();
+  const form = useForm<z.infer<typeof selfServeOnboardingSchema>>({
+    resolver: zodResolver(selfServeOnboardingSchema),
+    defaultValues: {
+      greeting: "Hello, thanks for calling. How can I help today?",
+      phoneMode: "robinexis_account",
+    },
+  });
+  const mode = form.watch("phoneMode");
+  const twilioConnection = useQuery({
+    queryKey: ["twilio-connection", actor?.clientId],
+    queryFn: () => api.twilioConnection(actor!.clientId!),
+    enabled: Boolean(actor?.clientId),
+  });
+  const onboarding = useQuery({
+    queryKey: ["self-serve-onboarding", actor?.clientId],
+    queryFn: () => api.onboarding(actor!.clientId!),
+    enabled: Boolean(actor?.clientId),
+    refetchInterval: (query) =>
+      ["pending", "running"].includes(query.state.data?.provisioning?.status || "") ? 3_000 : false,
+  });
+  const startTwilio = useMutation({
+    mutationFn: () => api.startTwilioConnection(actor!.clientId!),
+    onSuccess: ({ url }) => window.location.assign(url),
+  });
+  const finalize = useMutation({
+    mutationFn: async (values: z.infer<typeof selfServeOnboardingSchema>) => {
+      const services = values.services.split("\n").map((line) => {
+        const [title, duration] = line.split("|").map((item) => item.trim());
+        return {
+          title,
+          slug: title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""),
+          durationMinutes: Number(duration || 30),
+        };
+      }).filter((service) => service.title && service.slug && service.durationMinutes > 0);
+      if (values.phoneMode === "customer_oauth") {
+        if (!["credentials_required", "active"].includes(twilioConnection.data?.status || "")) {
+          throw new Error("Connect your Twilio account before launching.");
+        }
+        await api.saveTwilioCredentials(actor!.clientId!, {
+          apiKeySid: values.twilioApiKeySid!,
+          apiKeySecret: values.twilioApiKeySecret!,
+          twilioNumber: values.twilioNumber,
+        });
+      }
+      return api.finalizeOnboarding(actor!.clientId!, {
+        businessName: values.businessName,
+        location: values.location,
+        transferNumber: values.transferNumber,
+        greeting: values.greeting,
+        hours: values.hours,
+        prices: values.prices,
+        services,
+        phoneMode: values.phoneMode,
+        twilioNumber: values.twilioNumber,
+        publishedFacts: [
+          `Opening hours: ${values.hours}`,
+          ...(values.prices ? [`Pricing information: ${values.prices}`] : []),
+        ],
+      });
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["session-actor"] }),
+        queryClient.invalidateQueries({ queryKey: ["clients"] }),
+      ]);
+      navigate("/app", { replace: true });
+    },
+  });
+
+  if (!actor?.clientId) return <Navigate to="/billing" replace />;
+  if (actor.subscriptionStatus !== "active" && actor.subscriptionStatus !== "trialing") {
+    return <Navigate to="/billing" replace />;
+  }
+  if (actor.onboardingStatus === "active") return <Navigate to="/app" replace />;
+  return (
+    <AuthShell
+      title="Set up your receptionist"
+      copy="Enter your business details once. Robinexis creates the calendar services, ElevenLabs agent, tools, and phone routing automatically."
+    >
+      <form className="auth-form" onSubmit={form.handleSubmit((values) => finalize.mutate(values))}>
+        <Field label="Business name" error={form.formState.errors.businessName?.message}><input {...form.register("businessName")} /></Field>
+        <Field label="Location"><input placeholder="Leeds, UK" {...form.register("location")} /></Field>
+        <Field label="Front-desk transfer number" error={form.formState.errors.transferNumber?.message}><input placeholder="+447700900123" {...form.register("transferNumber")} /></Field>
+        <Field label="Opening greeting" error={form.formState.errors.greeting?.message}><textarea rows={2} {...form.register("greeting")} /></Field>
+        <Field label="Opening hours" error={form.formState.errors.hours?.message}><textarea rows={3} placeholder="Monday–Friday 9am–6pm" {...form.register("hours")} /></Field>
+        <Field label="Services" hint="One per line: Service name | duration minutes" error={form.formState.errors.services?.message}><textarea rows={4} placeholder={"Haircut | 45\nColour consultation | 30"} {...form.register("services")} /></Field>
+        <Field label="Prices"><textarea rows={3} placeholder="Haircut from £40" {...form.register("prices")} /></Field>
+        <Field label="Phone setup">
+          <select {...form.register("phoneMode")}>
+            <option value="robinexis_account">Use a purchased number in Robinexis Twilio</option>
+            <option value="customer_oauth">Use a purchased number in my own Twilio account</option>
+          </select>
+        </Field>
+        {mode === "customer_oauth" && (
+          <>
+            <div className="auth-note">
+              <p>Twilio connection: <strong>{twilioConnection.data?.status || "not connected"}</strong></p>
+            </div>
+            {!["credentials_required", "active"].includes(twilioConnection.data?.status || "") && (
+              <Button type="button" variant="secondary" disabled={startTwilio.isPending} onClick={() => startTwilio.mutate()}>
+                {startTwilio.isPending ? "Opening Twilio…" : "Connect Twilio securely"}
+              </Button>
+            )}
+            <Field label="Twilio API Key SID" hint="Create a Standard API Key in Twilio. This is only used server-side." error={form.formState.errors.twilioApiKeySid?.message}><input autoComplete="off" placeholder="SK…" {...form.register("twilioApiKeySid")} /></Field>
+            <Field label="Twilio API Key secret" error={form.formState.errors.twilioApiKeySecret?.message}><input type="password" autoComplete="new-password" {...form.register("twilioApiKeySecret")} /></Field>
+          </>
+        )}
+        <Field label="Purchased Twilio number" hint={mode === "customer_oauth" ? "The number must exist in the connected account." : "The number must exist in the Robinexis Twilio account."} error={form.formState.errors.twilioNumber?.message}><input placeholder="+44…" {...form.register("twilioNumber")} /></Field>
+        {search.get("twilio") === "failed" && <div className="form-alert" role="alert">Twilio authorization did not complete. Retry the secure connection.</div>}
+        {onboarding.data?.provisioning && (
+          <div className="auth-note" role="status">
+            <p>
+              Provisioning: <strong>{onboarding.data.provisioning.status}</strong>
+              {onboarding.data.provisioning.step ? ` · ${onboarding.data.provisioning.step}` : ""}
+              {onboarding.data.provisioning.error ? `. ${onboarding.data.provisioning.error}. You can safely retry.` : ""}
+            </p>
+          </div>
+        )}
+        {finalize.error && <div className="form-alert" role="alert">{finalize.error.message}</div>}
+        <Button disabled={finalize.isPending}>{finalize.isPending ? "Creating your receptionist…" : "Create and activate receptionist"}</Button>
+      </form>
     </AuthShell>
   );
 }

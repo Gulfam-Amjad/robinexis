@@ -1,22 +1,25 @@
 import http from "node:http";
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { config as loadEnv } from "dotenv";
 import {
   getStore,
+  migrate,
   seedStore,
   structuredLog,
 } from "@robinexis/database";
 import {
   applyOutboundStatus,
+  ElevenLabsManagementClient,
   handleStripeWebhook,
   validateTwilioWebhook,
 } from "@robinexis/integrations";
 import { applyCors, authenticateRequest, describeAuthMode } from "./auth.js";
 import { ingestElevenLabsWebhook } from "./elevenLabsWebhook.js";
-import { handleProductRoute } from "./productRoutes.js";
+import { completeTwilioOAuthCallback, handleProductRoute } from "./productRoutes.js";
 import { checkRateLimit, limitForPath, requestIp } from "./rateLimit.js";
+import { provisionClientAgent } from "./provisioningService.js";
 import { runVoiceTool, voiceToolClientIdForRequest } from "./voiceToolRoutes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -25,6 +28,13 @@ loadEnv({ path: path.join(process.cwd(), ".env") });
 
 const PORT = Number(process.env.API_PORT || process.env.PORT) || 8081;
 const BUILD_VERSION = process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 12) || process.env.BUILD_VERSION || "local";
+
+function workerAuthorized(value: string): boolean {
+  const secret = process.env.WORKER_API_SECRET || "";
+  const left = Buffer.from(value);
+  const right = Buffer.from(secret);
+  return Boolean(secret && left.length === right.length && timingSafeEqual(left, right));
+}
 
 function send(res: http.ServerResponse, status: number, body: unknown, type = "application/json") {
   const data = type === "application/json" ? JSON.stringify(body) : String(body);
@@ -97,6 +107,43 @@ const server = http.createServer(async (req, res) => {
       });
       return;
     }
+    if (url.pathname === "/internal/provisioning/retry" && req.method === "POST") {
+      if (!workerAuthorized(String(req.headers["x-worker-secret"] || ""))) {
+        send(res, 401, { error: "unauthorized" });
+        return;
+      }
+      const body = JSON.parse((await readRaw(req)).toString("utf8") || "{}") as {
+        clientId?: string;
+        operationKey?: string;
+        phoneMode?: "robinexis_account" | "customer_oauth";
+        twilioNumber?: string;
+      };
+      if (!body.clientId || !body.operationKey) {
+        send(res, 400, { error: "client_and_operation_key_required" });
+        return;
+      }
+      try {
+        const client = await store.getClient(body.clientId);
+        if (!client) throw new Error("client_not_found");
+        const result = await provisionClientAgent({
+          clientId: client.id,
+          operationKey: body.operationKey,
+          apiBaseUrl: process.env.API_PUBLIC_BASE_URL || `https://${req.headers.host}`,
+          transferNumber: client.transferNumber,
+          twilioNumber: body.twilioNumber || client.requestedPhoneNumber,
+          phoneMode: body.phoneMode || client.phoneAcquisitionMode,
+        }, {
+          store,
+          elevenLabs: new ElevenLabsManagementClient({
+            apiKey: process.env.ELEVENLABS_API_KEY || "",
+          }),
+        });
+        send(res, 200, result);
+      } catch (error) {
+        send(res, 502, { error: error instanceof Error ? error.message : "provisioning_retry_failed" });
+      }
+      return;
+    }
     if (url.pathname === "/webhooks/twilio/status" && req.method === "POST") {
       const raw = await readRaw(req);
       const form = new URLSearchParams(raw.toString());
@@ -134,6 +181,26 @@ const server = http.createServer(async (req, res) => {
       const signature = String(req.headers["elevenlabs-signature"] || "");
       const result = await ingestElevenLabsWebhook(store, raw, signature);
       send(res, result.status, result.body);
+      return;
+    }
+    if (url.pathname === "/oauth/twilio/callback" && req.method === "GET") {
+      try {
+        const destination = await completeTwilioOAuthCallback(store, {
+          code: url.searchParams.get("code") || "",
+          state: url.searchParams.get("state") || "",
+        });
+        res.writeHead(302, { Location: destination, "Cache-Control": "no-store" });
+        res.end();
+      } catch (error) {
+        structuredLog("twilio_oauth_callback_failed", { error: String(error) });
+        const fallback = new URL(
+          "/onboarding",
+          (process.env.WEB_ORIGIN || "https://app.robinexis.com").split(",")[0].trim(),
+        );
+        fallback.searchParams.set("twilio", "failed");
+        res.writeHead(302, { Location: fallback.toString(), "Cache-Control": "no-store" });
+        res.end();
+      }
       return;
     }
     const voiceToolMatch = url.pathname.match(
@@ -180,6 +247,9 @@ const server = http.createServer(async (req, res) => {
 });
 
 async function start() {
+  if (process.env.DATABASE_URL && process.env.RUN_MIGRATIONS_ON_START !== "false") {
+    await migrate(process.env.DATABASE_URL);
+  }
   const store = await getStore();
   const clients = await store.listClients();
   if (clients.length === 0) await seedStore(store);

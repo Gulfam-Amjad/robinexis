@@ -11,14 +11,22 @@ import {
 import {
   calcom,
   calcomTenantFromClient,
+  checkoutConfigurationError,
+  createTwilioOAuthState,
   createCheckoutSession,
+  discoverTwilioAccountSid,
+  encryptTwilioCredential,
   ElevenLabsManagementClient,
+  exchangeTwilioOAuthCode,
   featureOperationallyAvailable,
+  findOwnedTwilioNumber,
   isPlanTier,
   planCatalog,
   planDefinition,
   probeCalcomForClient,
   publicClientView,
+  twilioOAuthAuthorizeUrl,
+  verifyTwilioOAuthState,
 } from "@robinexis/integrations";
 import { GeminiEmbeddingProvider, KnowledgeService } from "@robinexis/knowledge";
 import {
@@ -37,6 +45,10 @@ export type ProductSend = (
   type?: string,
 ) => void;
 
+function primaryWebOrigin(): string {
+  return (process.env.WEB_ORIGIN || "https://app.robinexis.com").split(",")[0].trim();
+}
+
 type ExtendedStore = PlatformStore & {
   listPromptVersions?: (clientId: string) => Promise<unknown[]>;
 };
@@ -51,6 +63,37 @@ function knowledgeService(store: PlatformStore): KnowledgeService | undefined {
       model: process.env.GEMINI_EMBEDDING_MODEL || "gemini-embedding-001",
     }),
   );
+}
+
+export async function completeTwilioOAuthCallback(
+  store: PlatformStore,
+  input: { code: string; state: string },
+): Promise<string> {
+  const verified = verifyTwilioOAuthState(input.state);
+  const client = await store.getClient(verified.clientId);
+  if (!client) throw new Error("client_not_found");
+  const tokens = await exchangeTwilioOAuthCode(input.code);
+  const accountSid = await discoverTwilioAccountSid(tokens.accessToken);
+  const existing = await store.getTwilioConnection(client.id);
+  const now = new Date();
+  await store.upsertTwilioConnection({
+    id: existing?.id || newId("twilio_connection_"),
+    clientId: client.id,
+    mode: "customer_oauth",
+    accountSid,
+    encryptedAccessToken: encryptTwilioCredential(tokens.accessToken),
+    encryptedRefreshToken: encryptTwilioCredential(tokens.refreshToken),
+    accessTokenExpiresAt: new Date(now.getTime() + tokens.expiresIn * 1000).toISOString(),
+    status: "credentials_required",
+    metadata: { oauthConnectedAt: now.toISOString() },
+    createdAt: existing?.createdAt || now.toISOString(),
+    updatedAt: now.toISOString(),
+  });
+  const returnTo = new URL(verified.returnTo);
+  const allowedOrigin = new URL(primaryWebOrigin()).origin;
+  if (returnTo.origin !== allowedOrigin) throw new Error("invalid_twilio_oauth_return_url");
+  returnTo.searchParams.set("twilio", "connected");
+  return returnTo.toString();
 }
 
 function publicKnowledgeDocument(document: Awaited<ReturnType<PlatformStore["getKnowledgeDocument"]>>) {
@@ -263,6 +306,7 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       clientRoles: actor.clientRoles,
       clientId: client?.id,
       subscriptionStatus: subscription?.status || client?.serviceStatus,
+      onboardingStatus: client?.onboardingStatus,
       capabilities: {
         administerPlatform: canAdministerPlatform(actor),
         createClients: canAdministerPlatform(actor),
@@ -523,6 +567,7 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       "phone",
       "email",
       "transferNumber",
+      "inboundNumbers",
       "services",
       "staff",
       "hours",
@@ -556,6 +601,248 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       ...safeEditableClient(client),
       hasUnpublishedChanges: true,
     });
+    return true;
+  }
+
+  const onboardingMatch = route.match(/^\/clients\/([^/]+)\/onboarding$/);
+  if (onboardingMatch && req.method === "GET") {
+    const client = await requireManageClient(ctx, onboardingMatch[1]);
+    if (!client) return true;
+    const draft = await store.getDraftClient(client.id);
+    const runs = await store.listProvisioningRuns(client.id);
+    send(res, 200, {
+      client: safeEditableClient(draft?.config || client),
+      provisioning: runs[0] || null,
+    });
+    return true;
+  }
+  if (onboardingMatch && req.method === "PATCH") {
+    const client = await requireManageClient(ctx, onboardingMatch[1]);
+    if (!client) return true;
+    const existingDraft = await store.getDraftClient(client.id);
+    const draft = structuredClone(existingDraft?.config || client);
+    const body = await readJson<Partial<Pick<ClientConfig,
+      "businessName" | "greeting" | "tone" | "location" | "phone" |
+      "transferNumber" | "hours" | "prices" | "policies" | "publishedFacts" |
+      "services" | "phoneAcquisitionMode" | "requestedPhoneNumber"
+    >>>(ctx);
+    const allowed = new Set([
+      "businessName", "greeting", "tone", "location", "phone", "transferNumber",
+      "hours", "prices", "policies", "publishedFacts", "services",
+      "phoneAcquisitionMode", "requestedPhoneNumber",
+    ]);
+    for (const [key, value] of Object.entries(body)) {
+      if (allowed.has(key) && value !== undefined) {
+        (draft as unknown as Record<string, unknown>)[key] = value;
+      }
+    }
+    draft.onboardingStatus = "details_required";
+    const now = new Date().toISOString();
+    await store.saveDraftClient({
+      id: existingDraft?.id || newId("client_revision_"),
+      clientId: client.id,
+      status: "draft",
+      config: draft,
+      createdBy: actor.subject,
+      createdAt: existingDraft?.createdAt || now,
+      updatedAt: now,
+    });
+    send(res, 200, { client: safeEditableClient(draft) });
+    return true;
+  }
+
+  const twilioConnectionMatch = route.match(/^\/clients\/([^/]+)\/twilio-connection$/);
+  if (twilioConnectionMatch && req.method === "GET") {
+    const client = await requireManageClient(ctx, twilioConnectionMatch[1]);
+    if (!client) return true;
+    const connection = await store.getTwilioConnection(client.id);
+    send(res, 200, {
+      mode: connection?.mode || client.phoneAcquisitionMode || "robinexis_account",
+      status: connection?.status || "not_connected",
+      accountSidMasked: connection?.accountSid
+        ? `${connection.accountSid.slice(0, 4)}…${connection.accountSid.slice(-4)}`
+        : undefined,
+    });
+    return true;
+  }
+  const twilioStartMatch = route.match(/^\/clients\/([^/]+)\/twilio-connection\/start$/);
+  if (twilioStartMatch && req.method === "POST") {
+    const client = await requireManageClient(ctx, twilioStartMatch[1]);
+    if (!client) return true;
+    const returnTo = new URL("/onboarding", primaryWebOrigin()).toString();
+    try {
+      const state = createTwilioOAuthState({ clientId: client.id, returnTo });
+      const now = new Date().toISOString();
+      const existing = await store.getTwilioConnection(client.id);
+      await store.upsertTwilioConnection({
+        id: existing?.id || newId("twilio_connection_"),
+        clientId: client.id,
+        mode: "customer_oauth",
+        status: "pending",
+        metadata: {},
+        createdAt: existing?.createdAt || now,
+        updatedAt: now,
+      });
+      send(res, 200, { url: twilioOAuthAuthorizeUrl(state) });
+    } catch (error) {
+      send(res, 503, { error: error instanceof Error ? error.message : "twilio_oauth_not_configured" });
+    }
+    return true;
+  }
+  const twilioCredentialsMatch = route.match(/^\/clients\/([^/]+)\/twilio-connection\/credentials$/);
+  if (twilioCredentialsMatch && req.method === "POST") {
+    const client = await requireManageClient(ctx, twilioCredentialsMatch[1]);
+    if (!client) return true;
+    const connection = await store.getTwilioConnection(client.id);
+    const body = await readJson<{ apiKeySid?: string; apiKeySecret?: string; twilioNumber?: string }>(ctx);
+    if (
+      !connection?.accountSid ||
+      connection.mode !== "customer_oauth" ||
+      !body.apiKeySid?.match(/^SK[0-9a-f]{32}$/i) ||
+      !body.apiKeySecret ||
+      !body.twilioNumber?.match(/^\+[1-9]\d{7,14}$/)
+    ) {
+      send(res, 400, { error: "connected_account_api_key_and_number_required" });
+      return true;
+    }
+    try {
+      const owned = await findOwnedTwilioNumber(body.twilioNumber, {
+        accountSid: connection.accountSid,
+        apiKeySid: body.apiKeySid,
+        apiKeySecret: body.apiKeySecret,
+      });
+      if (!owned) {
+        send(res, 409, { error: "twilio_number_transfer_or_connect_required" });
+        return true;
+      }
+      connection.apiKeySid = body.apiKeySid;
+      connection.encryptedApiKeySecret = encryptTwilioCredential(body.apiKeySecret);
+      connection.status = "active";
+      connection.metadata = { ...connection.metadata, verifiedPhoneSid: owned.sid };
+      connection.updatedAt = new Date().toISOString();
+      await store.upsertTwilioConnection(connection);
+      send(res, 200, {
+        mode: connection.mode,
+        status: connection.status,
+        accountSidMasked: `${connection.accountSid.slice(0, 4)}…${connection.accountSid.slice(-4)}`,
+      });
+    } catch (error) {
+      send(res, 400, { error: error instanceof Error ? error.message : "twilio_credentials_invalid" });
+    }
+    return true;
+  }
+  if (twilioConnectionMatch && req.method === "DELETE") {
+    const client = await requireManageClient(ctx, twilioConnectionMatch[1]);
+    if (!client) return true;
+    await store.deleteTwilioConnection(client.id);
+    send(res, 200, { ok: true });
+    return true;
+  }
+
+  const finalizeOnboardingMatch = route.match(/^\/clients\/([^/]+)\/onboarding\/finalize$/);
+  if (finalizeOnboardingMatch && req.method === "POST") {
+    const liveClient = await requireManageClient(ctx, finalizeOnboardingMatch[1]);
+    if (!liveClient) return true;
+    if (process.env.SAAS_PROVISIONING_ENABLED !== "true") {
+      send(res, 503, { error: "saas_provisioning_disabled" });
+      return true;
+    }
+    const subscription = await store.getCurrentSubscription(liveClient.id);
+    if (!subscription || !["active", "trialing"].includes(subscription.status)) {
+      send(res, 402, { error: "active_subscription_required" });
+      return true;
+    }
+    const body = await readJson<{
+      businessName?: string;
+      greeting?: string;
+      tone?: string;
+      location?: string;
+      phone?: string;
+      transferNumber?: string;
+      hours?: string;
+      prices?: string;
+      policies?: string[];
+      publishedFacts?: string[];
+      services?: ClientConfig["services"];
+      phoneMode?: "robinexis_account" | "customer_oauth";
+      twilioNumber?: string;
+    }>(ctx);
+    if (
+      !body.businessName?.trim() ||
+      !body.transferNumber?.match(/^\+[1-9]\d{7,14}$/) ||
+      !body.services?.length ||
+      !body.services.every((service) =>
+        service.title?.trim() &&
+        /^[a-z0-9-]{2,80}$/.test(service.slug) &&
+        Number.isFinite(service.durationMinutes) &&
+        service.durationMinutes > 0
+      ) ||
+      !["robinexis_account", "customer_oauth"].includes(body.phoneMode || "") ||
+      !body.twilioNumber?.match(/^\+[1-9]\d{7,14}$/)
+    ) {
+      send(res, 400, { error: "complete_business_services_phone_details_required" });
+      return true;
+    }
+    const existingDraft = await store.getDraftClient(liveClient.id);
+    const client = structuredClone(existingDraft?.config || liveClient);
+    Object.assign(client, {
+      businessName: body.businessName.trim(),
+      greeting: body.greeting?.trim() || `Hello, you've reached ${body.businessName.trim()}. How can I help?`,
+      tone: body.tone?.trim() || client.tone,
+      location: body.location?.trim() || "",
+      phone: body.phone?.trim() || "",
+      transferNumber: body.transferNumber,
+      hours: body.hours?.trim() || "",
+      prices: body.prices?.trim() || "",
+      policies: body.policies || [],
+      publishedFacts: body.publishedFacts || [],
+      services: body.services,
+      phoneAcquisitionMode: body.phoneMode,
+      requestedPhoneNumber: body.twilioNumber,
+      onboardingStatus: "ready_to_provision",
+    });
+    const now = new Date().toISOString();
+    const latest = await store.latestPrompt(client.id);
+    const prompt = {
+      id: newId("pv_"),
+      clientId: client.id,
+      version: (latest?.version ?? 0) + 1,
+      compiled: compilePrompt({
+        client,
+        direction: "inbound",
+        objective: "Answer, retrieve knowledge, book, reschedule, cancel, capture a callback, or transfer safely.",
+      }),
+      createdAt: now,
+    };
+    client.promptVersionId = prompt.id;
+    client.published = true;
+    await store.publishClientDraft({
+      id: existingDraft?.id || newId("client_revision_"),
+      clientId: client.id,
+      status: "draft",
+      config: client,
+      createdBy: actor.subject,
+      createdAt: existingDraft?.createdAt || now,
+      updatedAt: now,
+    }, prompt);
+    try {
+      const result = await provisionClientAgent({
+        clientId: client.id,
+        operationKey: `self-serve-${client.id}-${prompt.id}`,
+        apiBaseUrl: process.env.API_PUBLIC_BASE_URL || `https://${ctx.req.headers.host}`,
+        transferNumber: client.transferNumber,
+        twilioNumber: body.twilioNumber,
+        phoneMode: body.phoneMode,
+        twilioAccountSid: process.env.TWILIO_ACCOUNT_SID,
+        twilioAuthToken: process.env.TWILIO_AUTH_TOKEN,
+      }, {
+        store,
+        elevenLabs: new ElevenLabsManagementClient({ apiKey: process.env.ELEVENLABS_API_KEY || "" }),
+      });
+      send(res, 200, { client: safeEditableClient(await store.getClient(client.id) || client), provisioning: result });
+    } catch (error) {
+      send(res, 502, { error: error instanceof Error ? error.message : "provisioning_failed" });
+    }
     return true;
   }
 
@@ -627,6 +914,7 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       operationKey?: string;
       transferNumber?: string;
       twilioNumber?: string;
+      phoneMode?: "robinexis_account" | "customer_oauth";
     }>(ctx);
     if (!body.operationKey) {
       send(res, 400, { error: "operation_key_required" });
@@ -639,7 +927,11 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
           operationKey: body.operationKey,
           apiBaseUrl: process.env.API_PUBLIC_BASE_URL || `https://${ctx.req.headers.host}`,
           transferNumber: body.transferNumber,
-          twilioNumber: body.twilioNumber,
+          twilioNumber:
+            body.twilioNumber ||
+            client.requestedPhoneNumber ||
+            client.inboundNumbers[0],
+          phoneMode: body.phoneMode || client.phoneAcquisitionMode,
           twilioAccountSid: process.env.TWILIO_ACCOUNT_SID,
           twilioAuthToken: process.env.TWILIO_AUTH_TOKEN,
         },
@@ -791,6 +1083,11 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       send(res, 400, { error: "enterprise_contact_sales" });
       return true;
     }
+    const configurationError = checkoutConfigurationError(body.plan);
+    if (configurationError) {
+      send(res, 503, { error: configurationError });
+      return true;
+    }
     let client;
     const requestedId = String(body.clientId || "");
     if (requestedId) {
@@ -817,6 +1114,7 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       customerId: client.stripeCustomerId,
       customerEmail: client.email || actor.email,
       authUserId: actor.subject,
+      idempotencyKey: `checkout:${client.id}:${body.plan}:${Math.floor(Date.now() / 600_000)}`,
       successUrl: `${webOrigin}/billing?checkout=success`,
       cancelUrl: `${webOrigin}/billing?checkout=cancelled`,
     });

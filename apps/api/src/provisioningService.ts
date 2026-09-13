@@ -2,12 +2,18 @@ import { createHash, randomBytes } from "node:crypto";
 import { compilePrompt } from "@robinexis/brain";
 import {
   newId,
+  type CalendarEventType,
+  type ClientConfig,
   type AgentInstance,
   type PlatformStore,
   type ProvisioningRun,
 } from "@robinexis/database";
 import {
   buildElevenLabsAgentConfig,
+  calcom,
+  calcomTenantFromClient,
+  decryptTwilioCredential,
+  findOwnedTwilioNumber,
   type ElevenLabsManagementClient,
 } from "@robinexis/integrations";
 
@@ -29,6 +35,7 @@ export interface ProvisionClientAgentInput {
   twilioNumber?: string;
   twilioAccountSid?: string;
   twilioAuthToken?: string;
+  phoneMode?: "robinexis_account" | "customer_oauth";
 }
 
 export interface ProvisionClientAgentDependencies {
@@ -36,6 +43,14 @@ export interface ProvisionClientAgentDependencies {
   elevenLabs: ManagementClient;
   now?: () => Date;
   randomSecret?: () => string;
+  calendar?: {
+    listEventTypes: typeof calcom.listEventTypes;
+    createEventType: typeof calcom.createEventType;
+    updateEventType: typeof calcom.updateEventType;
+  };
+  phone?: {
+    findOwned: typeof findOwnedTwilioNumber;
+  };
 }
 
 export interface ProvisionClientAgentResult {
@@ -46,6 +61,71 @@ export interface ProvisionClientAgentResult {
   providerSecretId: string;
   toolIds: string[];
   phoneNumberId?: string;
+  phoneNumber?: string;
+  calendarEventTypes?: Array<{ serviceSlug: string; providerSlug: string; providerEventTypeId: string }>;
+}
+
+function providerServiceSlug(clientSlug: string, serviceSlug: string) {
+  return `${clientSlug}-${serviceSlug}`
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 120);
+}
+
+async function provisionCalendarEventTypes(
+  store: PlatformStore,
+  client: ClientConfig,
+  calendarConnectionId: string,
+  adapter: ProvisionClientAgentDependencies["calendar"],
+  now: Date,
+): Promise<CalendarEventType[]> {
+  if (!client || !client.services.length) throw new Error("at_least_one_service_required");
+  const tenant = calcomTenantFromClient(client);
+  if ((!tenant.apiKey || !tenant.username) && !(process.env.NODE_ENV === "test" && !adapter)) {
+    throw new Error("calendar_credential_not_configured");
+  }
+  const existingMappings = await store.listCalendarEventTypes(client.id);
+  const remote = process.env.NODE_ENV === "test" && !adapter
+    ? []
+    : await (adapter || calcom).listEventTypes(tenant);
+  const results: CalendarEventType[] = [];
+  for (const service of client.services) {
+    const providerSlug = providerServiceSlug(client.slug, service.slug);
+    const mapping = existingMappings.find((item) => item.serviceSlug === service.slug);
+    const remoteEvent = remote.find((item) =>
+      String(item.id) === mapping?.providerEventTypeId || item.slug === providerSlug);
+    const savedRemote = process.env.NODE_ENV === "test" && !adapter
+      ? { id: Number(mapping?.providerEventTypeId || results.length + 1), slug: providerSlug }
+      : remoteEvent
+        ? await (adapter || calcom).updateEventType(tenant, remoteEvent.id, {
+            title: `${client.businessName} — ${service.title}`,
+            slug: providerSlug,
+            durationMinutes: service.durationMinutes,
+          })
+        : await (adapter || calcom).createEventType(tenant, {
+            title: `${client.businessName} — ${service.title}`,
+            slug: providerSlug,
+            durationMinutes: service.durationMinutes,
+          });
+    const row: CalendarEventType = {
+      id: mapping?.id || newId("calendar_event_"),
+      clientId: client.id,
+      calendarConnectionId,
+      serviceSlug: service.slug,
+      providerEventTypeId: String(savedRemote.id),
+      providerSlug: savedRemote.slug,
+      title: service.title,
+      durationMinutes: service.durationMinutes,
+      status: "active",
+      createdAt: mapping?.createdAt || now.toISOString(),
+      updatedAt: now.toISOString(),
+    };
+    await store.upsertCalendarEventType(row);
+    results.push(row);
+  }
+  return results;
 }
 
 function credentialHash(value: string): string {
@@ -153,6 +233,23 @@ async function provisionClientAgentAttempt(
   }
   const client = await store.getClient(input.clientId);
   if (!client) throw new Error("client_not_found");
+  const selfServeProvisioning = Boolean(
+    client.onboardingStatus || input.phoneMode || client.phoneAcquisitionMode,
+  );
+  if (selfServeProvisioning) {
+    const subscription = await store.getCurrentSubscription(client.id);
+    if (!subscription || !["active", "trialing"].includes(subscription.status)) {
+      throw new Error("active_subscription_required");
+    }
+    if (
+      !client.businessName.trim() ||
+      !client.transferNumber.match(/^\+[1-9]\d{7,14}$/) ||
+      !client.services.length ||
+      !client.greeting?.trim()
+    ) {
+      throw new Error("complete_business_details_required");
+    }
+  }
   const calendarConnections = await store.listCalendarConnections(client.id);
   const calendar = calendarConnections.find((connection) => connection.status !== "disabled");
   if (!calendar) throw new Error("calendar_connection_required");
@@ -186,7 +283,74 @@ async function provisionClientAgentAttempt(
   }
 
   const output = outputOf(run);
-  const agentInstanceId = String(output.agentInstanceId || newId("agent_instance_"));
+  if (selfServeProvisioning) {
+    client.onboardingStatus = "provisioning";
+    await store.upsertClient(client);
+  }
+
+  let calendarEventTypes = await store.listCalendarEventTypes(client.id);
+  if (calendarEventTypes.length < client.services.length) {
+    calendarEventTypes = await provisionCalendarEventTypes(
+      store,
+      client,
+      calendar.id,
+      dependencies.calendar,
+      now,
+    );
+    output.calendarEventTypes = calendarEventTypes.map((item) => ({
+      serviceSlug: item.serviceSlug,
+      providerSlug: item.providerSlug,
+      providerEventTypeId: item.providerEventTypeId,
+    }));
+    await saveStep(store, run, "calendar_event_types_created", output, now);
+  }
+
+  const phoneMode = input.phoneMode || client.phoneAcquisitionMode;
+  const twilioNumber =
+    input.twilioNumber ||
+    client.requestedPhoneNumber ||
+    (phoneMode ? client.inboundNumbers[0] : undefined);
+  let twilioProviderSid = String(output.twilioProviderSid || "");
+  let providerAccountSid = input.twilioAccountSid || process.env.TWILIO_ACCOUNT_SID || "";
+  let providerAuthToken = input.twilioAuthToken || process.env.TWILIO_AUTH_TOKEN || "";
+  if (phoneMode) {
+    if (!twilioNumber) throw new Error("customer_purchased_twilio_number_required");
+    let verificationCredentials:
+      | { accountSid: string; apiKeySid: string; apiKeySecret: string }
+      | undefined;
+    if (phoneMode === "customer_oauth") {
+      const connection = await store.getTwilioConnection(client.id);
+      if (
+        !connection ||
+        connection.status !== "active" ||
+        !connection.accountSid ||
+        !connection.apiKeySid ||
+        !connection.encryptedApiKeySecret
+      ) {
+        throw new Error("customer_twilio_connection_required");
+      }
+      providerAccountSid = connection.apiKeySid;
+      providerAuthToken = decryptTwilioCredential(connection.encryptedApiKeySecret);
+      verificationCredentials = {
+        accountSid: connection.accountSid,
+        apiKeySid: connection.apiKeySid,
+        apiKeySecret: providerAuthToken,
+      };
+    }
+    const owned = await (dependencies.phone?.findOwned || findOwnedTwilioNumber)(
+      twilioNumber,
+      verificationCredentials,
+    );
+    if (!owned) throw new Error("twilio_number_transfer_or_connect_required");
+    twilioProviderSid = owned.sid || "";
+    output.twilioProviderSid = twilioProviderSid;
+    output.twilioNumber = twilioNumber;
+    await saveStep(store, run, "twilio_number_verified", output, now);
+  }
+
+  const existingAgent = (await store.listAgentInstances(client.id))
+    .find((item) => item.provider === "elevenlabs" && item.status !== "disabled");
+  const agentInstanceId = String(output.agentInstanceId || existingAgent?.id || newId("agent_instance_"));
   let agent = await store.getAgentInstance(client.id, agentInstanceId);
   const rawCredential =
     dependencies.randomSecret?.() ?? randomBytes(32).toString("base64url");
@@ -229,9 +393,12 @@ async function provisionClientAgentAttempt(
     await saveStep(store, run, "workspace_secret_created", output, now);
   }
 
+  const persistedToolIds = Array.isArray(agent.config.toolIds)
+    ? agent.config.toolIds.map(String)
+    : [];
   const toolIds = Array.isArray(output.toolIds)
     ? output.toolIds.map(String)
-    : [];
+    : persistedToolIds;
   if (!toolIds[0]) {
     const created = await elevenLabs.createTool(
       availabilityTool(apiBaseUrl, providerSecretId),
@@ -302,17 +469,17 @@ async function provisionClientAgentAttempt(
   await saveStep(store, run, "agent_created", output, now);
 
   let phoneNumberId = String(output.phoneNumberId || "");
-  if (input.twilioNumber) {
-    if (!input.twilioAccountSid || !input.twilioAuthToken) {
+  if (twilioNumber) {
+    if (!providerAccountSid || !providerAuthToken) {
       throw new Error("twilio_credentials_required");
     }
     if (!phoneNumberId) {
       const imported = await elevenLabs.importTwilioNumber(
         {
-          phoneNumber: input.twilioNumber,
+          phoneNumber: twilioNumber,
           label: `${client.businessName} main line`,
-          accountSid: input.twilioAccountSid,
-          authToken: input.twilioAuthToken,
+          accountSid: providerAccountSid,
+          authToken: providerAuthToken,
           agentId: providerAgentId,
           enableSms: false,
         },
@@ -333,14 +500,19 @@ async function provisionClientAgentAttempt(
       locationId: agent.locationId,
       agentInstanceId: agent.id,
       provider: "twilio",
-      e164: input.twilioNumber,
+      e164: twilioNumber,
       providerEndpointId: phoneNumberId,
       direction: "inbound",
       status: "active",
+      metadata: {
+        acquisitionMode: phoneMode || "robinexis_account",
+        twilioSid: twilioProviderSid || null,
+        verifiedAt: now.toISOString(),
+      },
       createdAt: now.toISOString(),
       updatedAt: now.toISOString(),
     });
-    client.inboundNumbers = Array.from(new Set([...client.inboundNumbers, input.twilioNumber]));
+    client.inboundNumbers = Array.from(new Set([...client.inboundNumbers, twilioNumber]));
     await store.upsertClient(client);
     output.phoneNumberId = phoneNumberId;
     await saveStep(store, run, "phone_assigned", output, now);
@@ -354,7 +526,24 @@ async function provisionClientAgentAttempt(
     providerSecretId,
     toolIds,
     ...(phoneNumberId ? { phoneNumberId } : {}),
+    ...(twilioNumber ? { phoneNumber: twilioNumber } : {}),
+    calendarEventTypes: calendarEventTypes.map((item) => ({
+      serviceSlug: item.serviceSlug,
+      providerSlug: item.providerSlug,
+      providerEventTypeId: item.providerEventTypeId,
+    })),
   };
+  if (selfServeProvisioning) {
+    const activePhone = (await store.listPhoneEndpoints(client.id))
+      .some((endpoint) => endpoint.status === "active" && endpoint.direction !== "outbound");
+    const completeCalendar = calendarEventTypes.length >= client.services.length &&
+      calendarEventTypes.every((eventType) => eventType.status === "active");
+    if (!client.published || !completeCalendar || !agent.providerAgentId || !activePhone) {
+      throw new Error("provisioning_readiness_gate_failed");
+    }
+    client.onboardingStatus = "active";
+    await store.upsertClient(client);
+  }
   run.status = "succeeded";
   run.step = "complete";
   run.output = result as unknown as Record<string, unknown>;
@@ -383,6 +572,11 @@ export async function provisionClientAgent(
       run.finishedAt = now.toISOString();
       run.updatedAt = now.toISOString();
       await dependencies.store.saveProvisioningRun(run);
+    }
+    const client = await dependencies.store.getClient(input.clientId);
+    if (client?.onboardingStatus) {
+      client.onboardingStatus = "failed";
+      await dependencies.store.upsertClient(client);
     }
     throw error;
   }

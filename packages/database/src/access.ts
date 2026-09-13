@@ -13,7 +13,7 @@ export function isGroqGatewayPipeline(client: Pick<ClientConfig, "voicePipeline"
 
 const GRACE_DAYS = Number(process.env.STRIPE_GRACE_DAYS || 3);
 
-export function isAiServiceEnabled(client: Pick<ClientConfig, "serviceStatus" | "pastDueAt" | "published">): {
+export function isAiServiceEnabled(client: Pick<ClientConfig, "serviceStatus" | "pastDueAt" | "published" | "onboardingStatus">): {
   enabled: boolean;
   inbound: boolean;
   outbound: boolean;
@@ -21,6 +21,9 @@ export function isAiServiceEnabled(client: Pick<ClientConfig, "serviceStatus" | 
 } {
   if (!client.published) {
     return { enabled: false, inbound: false, outbound: false, reason: "config_not_published" };
+  }
+  if (client.onboardingStatus && client.onboardingStatus !== "active") {
+    return { enabled: false, inbound: false, outbound: false, reason: `onboarding_${client.onboardingStatus}` };
   }
   const s = client.serviceStatus;
   if (s === "trialing" || s === "active") {

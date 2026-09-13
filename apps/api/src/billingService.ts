@@ -31,6 +31,11 @@ export async function ensureSelfServeWorkspace(
 
   const now = new Date().toISOString();
   const client = await uniqueSkeletonClient(store, actor.email, plan);
+  client.calendar = {
+    provider: "calcom",
+    username: process.env.CALCOM_USERNAME || undefined,
+    credentialRef: "CALCOM_API_KEY",
+  };
   await store.upsertClient(client);
   await store.upsertLocation({
     id: `loc_${client.id}_primary`,
@@ -40,6 +45,18 @@ export async function ensureSelfServeWorkspace(
     timezone: client.callingWindow.tz,
     address: {},
     isPrimary: true,
+    createdAt: now,
+    updatedAt: now,
+  });
+  await store.upsertCalendarConnection({
+    id: `calendar_${client.id}_primary`,
+    clientId: client.id,
+    locationId: `loc_${client.id}_primary`,
+    provider: "calcom",
+    externalAccountId: process.env.CALCOM_USERNAME,
+    credentialRef: "CALCOM_API_KEY",
+    status: "pending",
+    metadata: { isolation: "shared-platform-account" },
     createdAt: now,
     updatedAt: now,
   });
@@ -101,7 +118,11 @@ async function uniqueSkeletonClient(
     policies: [],
     publishedFacts: [],
     unknownTopics: [],
-    calendar: { provider: "calcom" },
+    calendar: {
+      provider: "calcom",
+      username: process.env.CALCOM_USERNAME || undefined,
+      credentialRef: "CALCOM_API_KEY",
+    },
     calendarNoteMode: "summary",
     enabledFeatures: [...definition.features],
     inboundNumbers: [],
@@ -113,5 +134,6 @@ async function uniqueSkeletonClient(
     serviceStatus: "incomplete",
     subscribedProduct: plan,
     monthlyMinuteLimit: definition.includedMinutes,
+    onboardingStatus: "payment_required",
   };
 }

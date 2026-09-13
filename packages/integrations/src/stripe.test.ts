@@ -34,6 +34,7 @@ describe("createCheckoutSession", () => {
         successUrl: "https://app.example/success",
         cancelUrl: "https://app.example/cancel",
         customerEmail: "owner@example.test",
+        idempotencyKey: "checkout:client_two:pro:1",
         stripe,
       }),
     ).resolves.toEqual({
@@ -52,6 +53,7 @@ describe("createCheckoutSession", () => {
           metadata: { clientId: "client_two", plan: "pro" },
         },
       }),
+      { idempotencyKey: "checkout:client_two:pro:1" },
     );
   });
 
@@ -177,5 +179,139 @@ describe("createCheckoutSession", () => {
     await expect(store.getClient(BLADES_HAIR_ID)).resolves.toMatchObject({
       serviceStatus: bladesBefore?.serviceStatus,
     });
+  });
+
+  it("processes invoice.payment_succeeded using the current invoice parent shape", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    const client = (await store.listClients()).find((item) => item.id !== BLADES_HAIR_ID)!;
+    const event = {
+      id: "evt_invoice_succeeded_1",
+      type: "invoice.payment_succeeded",
+      livemode: true,
+      created: 1_788_511_200,
+      data: {
+        object: {
+          object: "invoice",
+          parent: { subscription_details: { subscription: "sub_succeeded" } },
+        },
+      },
+    } as unknown as Stripe.Event;
+    const stripe = {
+      webhooks: { constructEvent: vi.fn().mockReturnValue(event) },
+      subscriptions: {
+        retrieve: vi.fn().mockResolvedValue({
+          id: "sub_succeeded",
+          customer: "cus_succeeded",
+          status: "active",
+          created: 1_788_511_200,
+          trial_end: null,
+          cancel_at_period_end: false,
+          metadata: { clientId: client.id, plan: "pro" },
+          items: { data: [{ price: { id: "price_pro" } }] },
+        }),
+      },
+    } as unknown as Stripe;
+
+    await expect(
+      handleStripeWebhook({
+        store,
+        rawBody: Buffer.from("{}"),
+        signature: "sig",
+        webhookSecret: "whsec_test",
+        stripe,
+      }),
+    ).resolves.toEqual({ ok: true, status: "active" });
+    await expect(store.getClient(client.id)).resolves.toMatchObject({
+      serviceStatus: "active",
+      subscribedProduct: "pro",
+    });
+  });
+
+  it.each([
+    ["customer.subscription.created", "trialing"],
+    ["customer.subscription.deleted", "canceled"],
+  ] as const)("processes %s as %s", async (eventType, expectedStatus) => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    const client = (await store.listClients()).find((item) => item.id !== BLADES_HAIR_ID)!;
+    const event = {
+      id: `evt_${eventType}`,
+      type: eventType,
+      livemode: true,
+      created: 1_788_511_200,
+      data: {
+        object: {
+          id: "sub_lifecycle",
+          customer: "cus_lifecycle",
+          status: "trialing",
+          created: 1_788_511_200,
+          trial_end: 1_788_770_400,
+          cancel_at_period_end: false,
+          metadata: { clientId: client.id, plan: "starter" },
+          items: { data: [{ price: { id: "price_starter" } }] },
+        },
+      },
+    } as unknown as Stripe.Event;
+    const stripe = {
+      webhooks: { constructEvent: vi.fn().mockReturnValue(event) },
+      subscriptions: { retrieve: vi.fn() },
+    } as unknown as Stripe;
+
+    await expect(
+      handleStripeWebhook({
+        store,
+        rawBody: Buffer.from("{}"),
+        signature: "sig",
+        webhookSecret: "whsec_test",
+        stripe,
+      }),
+    ).resolves.toEqual({ ok: true, status: expectedStatus });
+  });
+
+  it("processes checkout.session.completed by retrieving its tenant-bound subscription", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    const client = (await store.listClients()).find((item) => item.id !== BLADES_HAIR_ID)!;
+    const event = {
+      id: "evt_checkout_completed_1",
+      type: "checkout.session.completed",
+      livemode: true,
+      created: 1_788_511_200,
+      data: {
+        object: {
+          id: "cs_completed",
+          subscription: "sub_checkout",
+          customer: "cus_checkout",
+          client_reference_id: client.id,
+          metadata: { clientId: client.id, plan: "starter" },
+        },
+      },
+    } as unknown as Stripe.Event;
+    const stripe = {
+      webhooks: { constructEvent: vi.fn().mockReturnValue(event) },
+      subscriptions: {
+        retrieve: vi.fn().mockResolvedValue({
+          id: "sub_checkout",
+          customer: "cus_checkout",
+          status: "trialing",
+          created: 1_788_511_200,
+          trial_end: 1_788_770_400,
+          cancel_at_period_end: false,
+          metadata: { clientId: client.id, plan: "starter" },
+          items: { data: [{ price: { id: "price_starter" } }] },
+        }),
+      },
+    } as unknown as Stripe;
+
+    await expect(
+      handleStripeWebhook({
+        store,
+        rawBody: Buffer.from("{}"),
+        signature: "sig",
+        webhookSecret: "whsec_test",
+        stripe,
+      }),
+    ).resolves.toEqual({ ok: true, status: "trialing" });
   });
 });

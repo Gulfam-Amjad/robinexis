@@ -4,7 +4,7 @@ Use this after the code/test gates in this repo are green. Do **not** paste secr
 
 ## What Cursor already shipped in code
 
-- Migration `007_lock_schema_migrations.sql` revokes `anon` / `authenticated` on `schema_migrations`.
+- Migration `008_automatic_saas_provisioning.sql` adds tenant calendar-event mappings and phone acquisition metadata while revoking browser access to the new table.
 - Unsigned Stripe webhooks return `{ ok: false }` (API status **400**), not 500.
 - Worker logs `worker_misconfigured` / `stripe_reconcile_skipped` when `STRIPE_SECRET_KEY` is missing; retention still runs.
 - Blades repair is a **dry-run** script until you set `CONFIRM_REPAIR_BLADES_TENANT=true`.
@@ -33,7 +33,7 @@ Then confirm the anon key can no longer read migrations (expect 401/403):
 Variable name: `STRIPE_PRICE_IDS_JSON`
 
 3. Register webhook: `POST https://robinexisapi-production-3836.up.railway.app/webhooks/stripe`  
-   Events: `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.paid`, `invoice.payment_failed`.
+   Events: `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_succeeded`, `invoice.payment_failed`.
 4. Paste signing secret into Railway API `STRIPE_WEBHOOK_SECRET`.
 5. Paste the **same** `STRIPE_SECRET_KEY` onto Railway **worker** (IaC already lists the name; the live worker was empty).
 
@@ -63,12 +63,22 @@ Create a **second** Supabase project, Railway environment (or project), Vercel P
 
 ### 5. First paying client (operator path)
 
-Keep `SAAS_PROVISIONING_ENABLED=false` until staging checkout works.
+Keep `SAAS_PROVISIONING_ENABLED=false` until staging checkout and mocked provider provisioning work.
+
+Customers purchase their own Twilio number. For customer-owned Twilio accounts, create a Twilio Authorization Code OAuth app and configure on the API:
+
+- `TWILIO_OAUTH_CLIENT_ID`
+- `TWILIO_OAUTH_CLIENT_SECRET`
+- `TWILIO_OAUTH_REDIRECT_URI=https://robinexisapi-production-3836.up.railway.app/oauth/twilio/callback`
+- `TWILIO_OAUTH_STATE_SECRET`
+- `TWILIO_OAUTH_ENCRYPTION_KEY`
+- `API_PUBLIC_BASE_URL`
+- `WORKER_API_SECRET` (same long random value on API and worker)
 
 1. Sign in as an `ADMIN_EMAILS` operator.
 2. `/admin/clients/new` — create the salon tenant.
 3. Publish prompt, connect Cal.com credential **ref** (env name, not raw key).
-4. When you are ready for auto ElevenLabs/Twilio: set `SAAS_PROVISIONING_ENABLED=true` on the API, then provision from admin.
+4. After a supervised test provision, set `SAAS_PROVISIONING_ENABLED=true` on both API and worker. Paid customers are then routed to `/onboarding`; they paste a purchased number, while Cal.com event types, the ElevenLabs agent/tools, and Twilio routing are created automatically.
 
 ### 6. Optional ops
 

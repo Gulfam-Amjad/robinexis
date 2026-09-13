@@ -12,6 +12,7 @@ import type {
   KnowledgeDocument,
   ListResponse,
   PromptVersion,
+  PublicTwilioConnection,
   SessionActor,
   TimeseriesPoint,
   Usage,
@@ -137,6 +138,56 @@ export const api = {
       error?: string;
       updatedAt: string;
     }> }>(`/api/v1/clients/${encodeURIComponent(id)}/provisioning`),
+  twilioConnection: (id: string) =>
+    request<PublicTwilioConnection>(`/api/v1/clients/${encodeURIComponent(id)}/twilio-connection`),
+  startTwilioConnection: (id: string) =>
+    request<{ url: string }>(`/api/v1/clients/${encodeURIComponent(id)}/twilio-connection/start`, {
+      method: "POST",
+    }),
+  saveTwilioCredentials: (id: string, input: {
+    apiKeySid: string;
+    apiKeySecret: string;
+    twilioNumber: string;
+  }) =>
+    request<PublicTwilioConnection>(`/api/v1/clients/${encodeURIComponent(id)}/twilio-connection/credentials`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  disconnectTwilio: (id: string) =>
+    request<{ ok: boolean }>(`/api/v1/clients/${encodeURIComponent(id)}/twilio-connection`, {
+      method: "DELETE",
+    }),
+  onboarding: (id: string) =>
+    request<{ client: Client; provisioning: {
+      status: string;
+      step?: string;
+      error?: string;
+      updatedAt: string;
+    } | null }>(`/api/v1/clients/${encodeURIComponent(id)}/onboarding`),
+  saveOnboarding: (id: string, input: Partial<Client>) =>
+    request<{ client: Client }>(`/api/v1/clients/${encodeURIComponent(id)}/onboarding`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
+  finalizeOnboarding: (id: string, input: {
+    businessName: string;
+    greeting?: string;
+    tone?: string;
+    location?: string;
+    phone?: string;
+    transferNumber: string;
+    hours?: string;
+    prices?: string;
+    policies?: string[];
+    publishedFacts?: string[];
+    services: Array<{ title: string; slug: string; durationMinutes: number }>;
+    phoneMode: "robinexis_account" | "customer_oauth";
+    twilioNumber?: string;
+  }) =>
+    request<{ client: Client; provisioning: { runId: string; phoneNumber?: string } }>(
+      `/api/v1/clients/${encodeURIComponent(id)}/onboarding/finalize`,
+      { method: "POST", body: JSON.stringify(input) },
+    ),
   setServiceStatus: (id: string, action: "suspend" | "reactivate") =>
     request<{ clientId: string; serviceStatus: string }>(
       `/api/v1/clients/${encodeURIComponent(id)}/service-status`,

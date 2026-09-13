@@ -14,6 +14,7 @@ async function openWorkspaceSession(
   page: Page,
   role: "operator" | "salon" = "operator",
   subscriptionStatus: "trialing" | "active" | "past_due" = "trialing",
+  onboardingStatus?: "details_required" | "provisioning" | "active",
 ) {
   await page.addInitScript(() => {
     sessionStorage.setItem("robinexis_admin_api_key", "test-admin-key");
@@ -30,6 +31,7 @@ async function openWorkspaceSession(
       capabilities: { administerPlatform: role === "operator", createClients: role === "operator" },
       clientId: role === "salon" ? client.id : undefined,
       subscriptionStatus: role === "salon" ? subscriptionStatus : undefined,
+      onboardingStatus: role === "salon" ? onboardingStatus : undefined,
     } });
     if (path === "/api/v1/clients") return route.fulfill({ json: { items: [client] } });
     if (path === "/api/v1/bootstrap") return route.fulfill({ json: {
@@ -214,4 +216,13 @@ test("unpaid salon deep links are redirected to Sophie with an upgrade action", 
   await expect(page).toHaveURL(/\/demo\/blades-hair$/);
   await expect(page.getByRole("heading", { name: /Meet Sophie, the AI receptionist/i })).toBeVisible();
   await expect(page.getByRole("link", { name: "Choose a plan" })).toHaveAttribute("href", "/billing");
+});
+
+test("paid incomplete salon is routed into automatic onboarding", async ({ page }) => {
+  await openWorkspaceSession(page, "salon", "active", "details_required");
+  await page.goto("/app");
+  await expect(page).toHaveURL(/\/onboarding$/);
+  await expect(page.getByRole("heading", { name: "Set up your receptionist" })).toBeVisible();
+  await expect(page.getByLabel("Phone setup")).toHaveValue("robinexis_account");
+  await expect(page.getByText(/creates the calendar services, ElevenLabs agent, tools, and phone routing automatically/i)).toBeVisible();
 });

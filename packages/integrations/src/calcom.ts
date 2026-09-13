@@ -5,6 +5,13 @@ export interface CalcomTenant {
   username: string;
 }
 
+export interface CalcomEventType {
+  id: number;
+  slug: string;
+  title: string;
+  lengthInMinutes: number;
+}
+
 /** Public display only — never reverse this to recover the full handle. */
 export function maskCalcomUsername(username: string): string {
   const value = username.trim();
@@ -62,6 +69,68 @@ async function calcomFetch(tenant: CalcomTenant, path: string, calApiVersion: st
 export async function fetchAccountEmail(tenant: CalcomTenant): Promise<string | undefined> {
   const json = (await calcomFetch(tenant, "/me", "2024-06-11")) as { data?: { email?: string } };
   return json.data?.email;
+}
+
+export async function listEventTypes(tenant: CalcomTenant): Promise<CalcomEventType[]> {
+  const json = (await calcomFetch(tenant, "/event-types", "2024-06-14")) as {
+    data?: Array<Record<string, unknown>>;
+  };
+  return (json.data || []).map((item) => ({
+    id: Number(item.id),
+    slug: String(item.slug || ""),
+    title: String(item.title || ""),
+    lengthInMinutes: Number(item.lengthInMinutes || item.length || 30),
+  }));
+}
+
+export async function createEventType(
+  tenant: CalcomTenant,
+  input: { title: string; slug: string; durationMinutes: number },
+): Promise<CalcomEventType> {
+  const json = (await calcomFetch(tenant, "/event-types", "2024-06-14", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      title: input.title,
+      slug: input.slug,
+      lengthInMinutes: input.durationMinutes,
+      length: input.durationMinutes,
+      hidden: true,
+      locations: [{ type: "phone" }],
+    }),
+  })) as { data?: Record<string, unknown> };
+  const item = json.data || {};
+  return {
+    id: Number(item.id),
+    slug: String(item.slug || input.slug),
+    title: String(item.title || input.title),
+    lengthInMinutes: Number(item.lengthInMinutes || item.length || input.durationMinutes),
+  };
+}
+
+export async function updateEventType(
+  tenant: CalcomTenant,
+  eventTypeId: string | number,
+  input: { title: string; slug: string; durationMinutes: number },
+): Promise<CalcomEventType> {
+  const json = (await calcomFetch(tenant, `/event-types/${encodeURIComponent(String(eventTypeId))}`, "2024-06-14", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      title: input.title,
+      slug: input.slug,
+      lengthInMinutes: input.durationMinutes,
+      length: input.durationMinutes,
+      hidden: true,
+    }),
+  })) as { data?: Record<string, unknown> };
+  const item = json.data || {};
+  return {
+    id: Number(item.id || eventTypeId),
+    slug: String(item.slug || input.slug),
+    title: String(item.title || input.title),
+    lengthInMinutes: Number(item.lengthInMinutes || item.length || input.durationMinutes),
+  };
 }
 
 export async function checkAvailability(

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SessionActor } from "@robinexis/api-contracts";
 import {
+  BILLING_PATH,
   canAccessProduct,
   dashboardPath,
   nonAdminPath,
@@ -33,18 +34,28 @@ describe("post-login routing policy", () => {
     expect(canAccessProduct(salon)).toBe(true);
   });
 
+  it("sends paid but incomplete salons to onboarding", () => {
+    const salon = { ...actor("salon", "active"), onboardingStatus: "details_required" as const };
+    expect(dashboardPath(salon)).toBe("/onboarding");
+    expect(canAccessProduct(salon)).toBe(true);
+  });
+
   it.each(["past_due", "canceled", "unpaid", "incomplete", "incomplete_expired", "paused"] as const)(
-    "sends %s salon accounts to Sophie",
+    "sends %s salon accounts to billing, and keeps Sophie as the product fallback",
     (status) => {
       const salon = actor("salon", status);
-      expect(dashboardPath(salon)).toBe(SOPHIE_DEMO_PATH);
+      expect(dashboardPath(salon)).toBe(BILLING_PATH);
       expect(nonAdminPath(salon)).toBe(SOPHIE_DEMO_PATH);
       expect(canAccessProduct(salon)).toBe(false);
     },
   );
 
-  it("sends pending and unassigned accounts to Sophie", () => {
-    expect(dashboardPath(actor("pending"))).toBe(SOPHIE_DEMO_PATH);
+  it("sends a self-serve signup with no plan yet to billing", () => {
+    expect(dashboardPath(actor("pending"))).toBe(BILLING_PATH);
+    expect(dashboardPath(actor("salon"))).toBe(BILLING_PATH);
+  });
+
+  it("sends an unidentified visitor to Sophie", () => {
     expect(dashboardPath(undefined)).toBe(SOPHIE_DEMO_PATH);
   });
 });

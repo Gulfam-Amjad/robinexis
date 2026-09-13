@@ -72,7 +72,7 @@ describe("product route tenant authorization", () => {
     expect(admin).toMatchObject({ status: 403, body: { error: "platform_admin_required" } });
   });
 
-  it("provisions a tenant-scoped workspace when a pending user starts checkout", async () => {
+  it("does not create an orphan workspace when Stripe checkout is not configured", async () => {
     const store = new MemoryStore();
     await seedStore(store);
     const existing = (await store.listClients()).map((client) => client.id);
@@ -87,25 +87,8 @@ describe("product route tenant authorization", () => {
 
     expect(checkout).toMatchObject({ status: 503, body: { error: "stripe_not_configured" } });
     const created = (await store.listClients()).find((client) => !existing.includes(client.id));
-    expect(created).toMatchObject({
-      email: pendingActor.email,
-      serviceStatus: "incomplete",
-      published: false,
-      subscribedProduct: "starter",
-    });
-    await expect(store.getUserProfileByAuthUserId(pendingActor.subject)).resolves.toMatchObject({
-      clientId: created?.id,
-      workspaceRole: "owner",
-    });
-    const session = await request(store, {
-      ...pendingActor,
-      role: "salon",
-      clientRoles: { [created!.id]: "owner" },
-    }, "/api/v1/session");
-    expect(session.body).toMatchObject({
-      clientId: created!.id,
-      subscriptionStatus: "incomplete",
-    });
+    expect(created).toBeUndefined();
+    await expect(store.getUserProfileByAuthUserId(pendingActor.subject)).resolves.toBeUndefined();
   });
 
   it("limits salon users to assigned workspaces while operators see every tenant", async () => {
@@ -119,6 +102,34 @@ describe("product route tenant authorization", () => {
     const operator = await request(store, operatorActor, "/api/v1/clients");
     expect(operator.status).toBe(200);
     expect(operator.body.items.length).toBeGreaterThan(1);
+  });
+
+  it("authorizes self-serve finalize only for the owning salon", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    const previous = process.env.SAAS_PROVISIONING_ENABLED;
+    process.env.SAAS_PROVISIONING_ENABLED = "false";
+    try {
+      const own = await request(
+        store,
+        salonActor,
+        `/api/v1/clients/${BLADES_HAIR_ID}/onboarding/finalize`,
+        "POST",
+        {},
+      );
+      expect(own).toMatchObject({ status: 503, body: { error: "saas_provisioning_disabled" } });
+      const other = await request(
+        store,
+        salonActor,
+        `/api/v1/clients/${DEMO_CLIENT_ID}/onboarding/finalize`,
+        "POST",
+        {},
+      );
+      expect(other).toMatchObject({ status: 404, body: { error: "client_not_found" } });
+    } finally {
+      if (previous === undefined) delete process.env.SAAS_PROVISIONING_ENABLED;
+      else process.env.SAAS_PROVISIONING_ENABLED = previous;
+    }
   });
 
   it("returns not found instead of exposing another tenant or its calls", async () => {

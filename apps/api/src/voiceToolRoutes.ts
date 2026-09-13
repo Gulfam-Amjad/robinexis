@@ -115,9 +115,13 @@ export async function runVoiceTool(
   }
 
   const eventTypeSlug = String(input.eventTypeSlug || "");
-  if (!client.services.some((service) => service.slug === eventTypeSlug)) {
+  const service = client.services.find((item) => item.slug === eventTypeSlug);
+  if (!service) {
     return { status: 400, body: { ok: false, error: "unsupported_service" } };
   }
+  const eventTypeMapping = (await store.listCalendarEventTypes(client.id))
+    .find((item) => item.serviceSlug === eventTypeSlug && item.status === "active");
+  const providerEventTypeSlug = eventTypeMapping?.providerSlug || eventTypeSlug;
 
   const exec = createToolExecutor({ ...options, store });
       const conversationId = String(input.conversationId || "").trim();
@@ -134,7 +138,7 @@ export async function runVoiceTool(
     }
     const result = await exec({
       name: "check_availability",
-      input: { eventTypeSlug, start, end },
+      input: { eventTypeSlug: providerEventTypeSlug, start, end },
       call,
       client,
     });
@@ -154,11 +158,11 @@ export async function runVoiceTool(
     return { status: 409, body: { ok: false, error: "caller_confirmation_required" } };
   }
 
-  const duration = client.services.find((service) => service.slug === eventTypeSlug)?.durationMinutes || 30;
+  const duration = service.durationMinutes || 30;
   const availability = await exec({
     name: "check_availability",
     input: {
-      eventTypeSlug,
+      eventTypeSlug: providerEventTypeSlug,
       start,
       end: new Date(Date.parse(start) + duration * 60_000).toISOString(),
     },
@@ -179,7 +183,7 @@ export async function runVoiceTool(
   const result = await exec({
     name: "create_booking",
     input: {
-      eventTypeSlug,
+      eventTypeSlug: providerEventTypeSlug,
       start,
       attendeeName,
       attendeePhone,

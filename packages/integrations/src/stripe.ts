@@ -20,6 +20,14 @@ function stripePriceId(tier: PlanTier): string | undefined {
   }
 }
 
+export function checkoutConfigurationError(
+  tier: PlanTier,
+): "stripe_not_configured" | "plan_price_not_configured" | undefined {
+  if (!createStripe()) return "stripe_not_configured";
+  if (!stripePriceId(tier)) return "plan_price_not_configured";
+  return undefined;
+}
+
 function tenantMetadata(opts: { clientId: string; plan: PlanTier; authUserId?: string }) {
   return {
     clientId: opts.clientId,
@@ -36,6 +44,7 @@ export async function createCheckoutSession(opts: {
   customerId?: string;
   customerEmail?: string;
   authUserId?: string;
+  idempotencyKey?: string;
   stripe?: Stripe | null;
 }): Promise<
   | { configured: false; reason: "stripe_not_configured" | "plan_price_not_configured" }
@@ -47,22 +56,25 @@ export async function createCheckoutSession(opts: {
   if (!price) return { configured: false, reason: "plan_price_not_configured" };
 
   const metadata = tenantMetadata(opts);
-  const session = await stripe.checkout.sessions.create({
-    mode: "subscription",
-    line_items: [{ price, quantity: 1 }],
-    success_url: opts.successUrl,
-    cancel_url: opts.cancelUrl,
-    allow_promotion_codes: true,
-    payment_method_collection: "if_required",
-    client_reference_id: opts.clientId,
-    customer: opts.customerId,
-    customer_email: opts.customerId ? undefined : opts.customerEmail,
-    metadata,
-    subscription_data: {
-      trial_period_days: planDefinition(opts.plan).trialDays,
+  const session = await stripe.checkout.sessions.create(
+    {
+      mode: "subscription",
+      line_items: [{ price, quantity: 1 }],
+      success_url: opts.successUrl,
+      cancel_url: opts.cancelUrl,
+      allow_promotion_codes: true,
+      payment_method_collection: "if_required",
+      client_reference_id: opts.clientId,
+      customer: opts.customerId,
+      customer_email: opts.customerId ? undefined : opts.customerEmail,
       metadata,
+      subscription_data: {
+        trial_period_days: planDefinition(opts.plan).trialDays,
+        metadata,
+      },
     },
-  });
+    opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : undefined,
+  );
   return { configured: true, id: session.id, url: session.url };
 }
 
@@ -93,6 +105,7 @@ export async function handleStripeWebhook(opts: {
     "customer.subscription.updated",
     "customer.subscription.deleted",
     "invoice.paid",
+    "invoice.payment_succeeded",
     "invoice.payment_failed",
   ];
   if (!handled.includes(event.type)) return { ok: true, status: "ignored" };
@@ -110,10 +123,8 @@ export async function handleStripeWebhook(opts: {
     if (subscriptionId) sub = await stripe.subscriptions.retrieve(subscriptionId);
   }
   if (!sub && event.type.startsWith("invoice.")) {
-    const invoice = event.data.object as Stripe.Invoice & { subscription?: string };
-    if (typeof invoice.subscription === "string") {
-      sub = await stripe.subscriptions.retrieve(invoice.subscription);
-    }
+    const subscriptionId = invoiceSubscriptionId(event.data.object as Stripe.Invoice);
+    if (subscriptionId) sub = await stripe.subscriptions.retrieve(subscriptionId);
   }
   if (!sub) return { ok: true, status: "no_subscription" };
 
@@ -157,6 +168,12 @@ export async function handleStripeWebhook(opts: {
   try {
     const local = localStatusForEvent(event.type, sub.status);
     client.serviceStatus = local;
+    if (
+      (local === "active" || local === "trialing") &&
+      (!client.onboardingStatus || client.onboardingStatus === "payment_required")
+    ) {
+      client.onboardingStatus = "details_required";
+    }
     client.stripeSubscriptionId = sub.id;
     if (customerId) client.stripeCustomerId = customerId;
     if (local === "past_due") client.pastDueAt = new Date().toISOString();
@@ -250,11 +267,31 @@ async function resolveStripeClient(
 function subscriptionFrom(event: Stripe.Event): Stripe.Subscription | undefined {
   if (event.type.startsWith("customer.subscription")) return event.data.object as Stripe.Subscription;
   if (event.type.startsWith("invoice.")) {
-    const inv = event.data.object as Stripe.Invoice & { subscription?: string | Stripe.Subscription };
-    const sub = inv.subscription;
+    const inv = event.data.object as Stripe.Invoice & {
+      subscription?: string | Stripe.Subscription;
+      parent?: {
+        subscription_details?: {
+          subscription?: string | Stripe.Subscription | null;
+        } | null;
+      } | null;
+    };
+    const sub = inv.subscription || inv.parent?.subscription_details?.subscription;
     if (sub && typeof sub !== "string") return sub;
   }
   return undefined;
+}
+
+function invoiceSubscriptionId(invoice: Stripe.Invoice): string | undefined {
+  const value = invoice as Stripe.Invoice & {
+    subscription?: string | Stripe.Subscription;
+    parent?: {
+      subscription_details?: {
+        subscription?: string | Stripe.Subscription | null;
+      } | null;
+    } | null;
+  };
+  const subscription = value.subscription || value.parent?.subscription_details?.subscription;
+  return typeof subscription === "string" ? subscription : subscription?.id;
 }
 
 export async function reconcileStripe(store: PlatformStore, stripe = createStripe()) {

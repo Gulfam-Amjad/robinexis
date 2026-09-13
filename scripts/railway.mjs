@@ -146,5 +146,12 @@ if (action === "start") {
 
 ensureInstall();
 run(builds[service]);
-if (service === "api") run(["run", "build:migrate"]);
+if (service === "api") {
+  run(["run", "build:migrate"]);
+  cpSync(
+    path.join(root, "packages/database/dist/migrations"),
+    path.join(root, "apps/api/dist/migrations"),
+    { recursive: true },
+  );
+}
 stashBuilt();

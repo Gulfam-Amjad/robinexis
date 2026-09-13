@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AUTH_INTENT_STORAGE,
   SELECTED_PLAN_STORAGE,
+  authErrorMessage,
   readAuthIntent,
   safeReturnTo,
   saveAuthIntent,
@@ -96,5 +97,35 @@ describe("Stray Supabase callback recovery", () => {
 
   it("does not carry an implicit-flow access token into the query string", () => {
     expect(strayAuthCallback("/", "", "#access_token=leaky&token_type=bearer")).toBeUndefined();
+  });
+});
+
+describe("Auth error messages", () => {
+  it("explains an address the built-in mailer refuses to deliver to", () => {
+    expect(authErrorMessage(new Error("Email address not authorized"), "fallback")).toContain(
+      "Continue with Google",
+    );
+  });
+
+  it("explains the project-wide email rate limit", () => {
+    expect(authErrorMessage(new Error("email rate limit exceeded"), "fallback")).toContain(
+      "Wait a few minutes",
+    );
+    expect(
+      authErrorMessage(new Error("For security purposes, you can only request this after 51 seconds"), "fallback"),
+    ).toContain("Wait a few minutes");
+  });
+
+  it("passes other Supabase messages through untouched", () => {
+    expect(authErrorMessage(new Error("Signups not allowed for otp"), "fallback")).toBe(
+      "Signups not allowed for otp",
+    );
+  });
+
+  it("falls back when the failure carries no message", () => {
+    expect(authErrorMessage(undefined, "The workspace could not be reached.")).toBe(
+      "The workspace could not be reached.",
+    );
+    expect(authErrorMessage(new Error(""), "fallback")).toBe("fallback");
   });
 });

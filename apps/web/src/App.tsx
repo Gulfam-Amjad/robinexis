@@ -18,7 +18,9 @@ const LoginPage = lazy(() => import("./pages/public").then((m) => ({ default: m.
 const SignupPage = lazy(() => import("./pages/public").then((m) => ({ default: m.SignupPage })));
 const AuthCallbackPage = lazy(() => import("./pages/public").then((m) => ({ default: m.AuthCallbackPage })));
 const SelfServeBillingPage = lazy(() => import("./pages/public").then((m) => ({ default: m.SelfServeBillingPage })));
+const SelfServeOnboardingPage = lazy(() => import("./pages/public").then((m) => ({ default: m.SelfServeOnboardingPage })));
 const PricingPage = lazy(() => import("./pages/public").then((m) => ({ default: m.PricingPage })));
+const EnterpriseContactPage = lazy(() => import("./pages/public").then((m) => ({ default: m.EnterpriseContactPage })));
 const BladesReceptionistDemoPage = lazy(() => import("./pages/blades-demo"));
 const appPages = () => import("./pages/app");
 
@@ -79,7 +81,15 @@ function RequireOperator() {
 function RequireSubscription() {
   const { actor, actorLoading } = useSession();
   if (actorLoading) return <div className="not-found">Checking your plan…</div>;
-  return canAccessProduct(actor) ? <Outlet /> : <Navigate to={SOPHIE_DEMO_PATH} replace />;
+  if (!canAccessProduct(actor)) return <Navigate to={SOPHIE_DEMO_PATH} replace />;
+  if (
+    actor?.role === "salon" &&
+    actor.onboardingStatus &&
+    actor.onboardingStatus !== "active"
+  ) {
+    return <Navigate to="/onboarding" replace />;
+  }
+  return <Outlet />;
 }
 
 function DashboardRoute() {
@@ -110,10 +120,12 @@ export default function App() {
         <Route path="/signup" element={AUTH_REQUIRED ? <SignupPage /> : <Navigate to="/app" replace />} />
         <Route path="/auth/callback" element={AUTH_REQUIRED ? <AuthCallbackPage /> : <Navigate to="/app" replace />} />
         <Route path="/pricing" element={<PricingPage />} />
+        <Route path="/enterprise-contact" element={<EnterpriseContactPage />} />
         <Route path="/demo/blades-hair" element={<BladesReceptionistDemoPage />} />
         <Route element={<RequireSession />}>
           <Route path="/dashboard" element={<DashboardRoute />} />
           <Route path="/billing" element={<SelfServeBillingPage />} />
+          <Route path="/onboarding" element={<SelfServeOnboardingPage />} />
           <Route path="/upgrade" element={<Navigate to="/billing" replace />} />
           <Route element={<RequireWorkspace />}>
             <Route element={<RequireSubscription />}>
