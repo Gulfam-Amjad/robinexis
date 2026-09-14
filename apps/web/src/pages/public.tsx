@@ -203,13 +203,19 @@ export function SignupPage() {
   const [serverError, setServerError] = useState("");
   const [checking, setChecking] = useState(false);
   const [sent, setSent] = useState(false);
+  const [legalAccepted, setLegalAccepted] = useState(false);
   const intent = authIntent(search);
   if (!AUTH_REQUIRED) return <Navigate to="/app" replace />;
   if (actor) return <Navigate to="/dashboard" replace />;
   const google = async () => {
+    if (!legalAccepted) {
+      setServerError("Accept the Terms and Privacy Policy to create an account.");
+      return;
+    }
     setChecking(true);
     setServerError("");
     try {
+      localStorage.setItem("robinexis-legal-consent-v1", "accepted");
       await signInWithGoogle(intent);
     } catch (error) {
       setServerError(authErrorMessage(error, "Google sign-up could not be started."));
@@ -217,10 +223,15 @@ export function SignupPage() {
     }
   };
   const submit = async ({ email }: LoginFields) => {
+    if (!legalAccepted) {
+      setServerError("Accept the Terms and Privacy Policy to create an account.");
+      return;
+    }
     setChecking(true);
     setServerError("");
     setSent(false);
     try {
+      localStorage.setItem("robinexis-legal-consent-v1", "accepted");
       await signInWithEmail(email.trim(), intent);
       setSent(true);
     } catch (error) {
@@ -239,6 +250,10 @@ export function SignupPage() {
         <Field label="Work email" hint="Use the email your Robinexis workspace will be assigned to." error={errors.email?.message}>
           <input type="email" autoComplete="email" placeholder="you@company.com" {...register("email")} />
         </Field>
+        <label className="checkbox-row">
+          <input type="checkbox" checked={legalAccepted} onChange={(event) => setLegalAccepted(event.target.checked)} />
+          <span>I agree to the <Link to="/terms">Terms</Link> and acknowledge the <Link to="/privacy">Privacy Policy</Link>.</span>
+        </label>
         {serverError && <div className="form-alert" role="alert">{serverError}</div>}
         {sent && <div className="form-success" role="status">Check your inbox to finish creating your account. Open the link in this same browser — it only works where you asked for it.</div>}
         <Button type="submit" disabled={checking}>{checking ? "Sending link…" : "Continue with email"} <ArrowRight size={16} /></Button>
@@ -257,7 +272,19 @@ export function AuthCallbackPage() {
     let active = true;
     void completeAuthCallback()
       .then(async (result) => {
-        const actor = await api.session(result.accessToken);
+        let actor = await api.session(result.accessToken);
+        if (localStorage.getItem("robinexis-legal-consent-v1") === "accepted") {
+          await api.acceptLegal(result.accessToken);
+          localStorage.removeItem("robinexis-legal-consent-v1");
+        }
+        if (actor.role === "pending") {
+          try {
+            await api.acceptInvitations(result.accessToken);
+            actor = await api.session(result.accessToken);
+          } catch {
+            // A normal self-serve signup has no invitation and remains pending for checkout.
+          }
+        }
         return { result, actor };
       })
       .then(({ result, actor }) => {
@@ -487,6 +514,16 @@ export function SelfServeOnboardingPage() {
             </div>
           ))}
         </div>
+        {(onboarding.data?.client?.onboardingNotes || onboarding.data?.client?.onboardingEta) && (
+          <div className="auth-note">
+            <p>
+              {onboarding.data?.client?.onboardingNotes || "Your setup is progressing."}
+              {onboarding.data?.client?.onboardingEta
+                ? ` Target completion: ${new Date(onboarding.data.client.onboardingEta).toLocaleString("en-GB")}.`
+                : ""}
+            </p>
+          </div>
+        )}
         <Link className="button button-secondary button-md full-button" to="/billing">Manage billing</Link>
         <a className="button button-ghost button-md full-button" href="mailto:hello@robinexis.com">Contact setup support</a>
       </AuthShell>
@@ -541,11 +578,41 @@ function AuthShell({ title, copy, children }: { title: string; copy: string; chi
 }
 
 export function PricingPage() {
-  const plans = [
+  const catalog = useQuery({ queryKey: ["public-plans"], queryFn: api.plans, staleTime: 300_000 });
+  const fallbackPlans = [
     { name: "Starter", price: "£99", plan: "starter" as const, copy: "For independent businesses ready to stop missing calls.", features: ["One AI receptionist", "300 included minutes", "Booking & call summaries", "3-day trial"] },
-    { name: "Pro", price: "£249", plan: "pro" as const, copy: "For busy teams turning more calls into appointments.", features: ["Everything in Starter", "1,500 included minutes", "Smart rebooking & waitlist", "Revenue recovery dashboard"], featured: true },
+    { name: "Pro", price: "£249", plan: "pro" as const, copy: "For busy teams turning more calls into appointments.", features: ["Everything in Starter", "1,500 included minutes", "Revenue recovery dashboard", "3-day trial"], featured: true },
     { name: "Enterprise", price: "Let’s talk", copy: "For multi-location teams with more complex workflows.", features: ["Multiple locations", "Custom integrations", "Priority onboarding", "Dedicated optimisation"] },
   ];
+  const featureLabels: Record<string, string> = {
+    "automated-call-answering": "Automated call answering",
+    "cancellation-follow-up": "Cancellation follow-up",
+    "rescheduling-dashboard": "Rescheduling dashboard",
+    "smart-rebooking": "Smart rebooking",
+    "automatic-waitlist-filling": "Automatic waitlist filling",
+    "revenue-recovery-dashboard": "Revenue recovery dashboard",
+    "multi-location-calendars": "Multi-location calendars",
+    "custom-workflows": "Custom workflows",
+    "advanced-reporting": "Advanced reporting",
+    "dedicated-onboarding": "Dedicated onboarding",
+    "premium-support": "Premium support",
+  };
+  const plans = catalog.data?.items.map((plan) => ({
+    name: plan.name,
+    price: plan.monthlyPricePence === null ? "Let’s talk" : `£${plan.monthlyPricePence / 100}`,
+    plan: plan.tier === "enterprise" ? undefined : plan.tier,
+    copy: plan.tier === "starter"
+      ? "For independent businesses ready to stop missing calls."
+      : plan.tier === "pro"
+        ? "For busy teams turning more calls into appointments."
+        : "For multi-location teams with more complex workflows.",
+    features: [
+      `${plan.includedMinutes.toLocaleString("en-GB")} included minutes`,
+      ...plan.features.filter((feature) => feature.operational).map((feature) => featureLabels[feature.id] || feature.id),
+      `${plan.trialDays}-day trial`,
+    ],
+    featured: plan.tier === "pro",
+  })) || fallbackPlans;
   return (
     <div className="public-page pricing-page">
       <PublicHeader />

@@ -33,8 +33,6 @@ export async function ensureSelfServeWorkspace(
   const client = await uniqueSkeletonClient(actor.email, plan);
   client.calendar = {
     provider: "calcom",
-    username: process.env.CALCOM_USERNAME || undefined,
-    credentialRef: "CALCOM_API_KEY",
   };
   await store.upsertClient(client);
   await store.upsertLocation({
@@ -53,10 +51,9 @@ export async function ensureSelfServeWorkspace(
     clientId: client.id,
     locationId: `loc_${client.id}_primary`,
     provider: "calcom",
-    externalAccountId: process.env.CALCOM_USERNAME,
-    credentialRef: "CALCOM_API_KEY",
+    credentialRef: "CONNECTION_REQUIRED",
     status: "pending",
-    metadata: { isolation: "shared-platform-account" },
+    metadata: { isolation: "connection_required" },
     createdAt: now,
     updatedAt: now,
   });
@@ -116,8 +113,6 @@ async function uniqueSkeletonClient(
     unknownTopics: [],
     calendar: {
       provider: "calcom",
-      username: process.env.CALCOM_USERNAME || undefined,
-      credentialRef: "CALCOM_API_KEY",
     },
     calendarNoteMode: "summary",
     enabledFeatures: [...definition.features],

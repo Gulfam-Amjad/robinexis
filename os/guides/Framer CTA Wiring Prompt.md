@@ -1,6 +1,7 @@
 ---
 title: SaaS-Level Framer CTA Wiring Prompt
 created: 2026-09-06
+updated: 2026-09-09
 type: guide
 tags:
   - framer
@@ -11,9 +12,28 @@ status: active
 
 # SaaS-Level Framer CTA Wiring Prompt
 
-The prompt below wires every call-to-action on the Framer marketing site (`www.robinexis.com`) to the real routes of the product app (`app.robinexis.com`), upgrades the Log in / Sign Up buttons, and directs Framer to run a complete responsive design and functionality pass.
+The prompt below wires the remaining broken calls-to-action on the Framer marketing site (`www.robinexis.com`) to the real routes of the product app (`app.robinexis.com`).
 
 Paste the fenced block into the Framer AI agent on the robinexis.com project. Everything else on this page is context for us, not for Framer.
+
+The first version of this prompt (6 Sep 2026) asked for a full design, responsive and link pass. The design work landed; the link work only partly landed. This version is a narrow fix list for what is still wrong, so the Framer agent cannot wander back into redesigning the site.
+
+## Live audit — 9 Sep 2026
+
+Read from the published HTML of `www.robinexis.com`. Framer inlines every breakpoint variant, so the counts below are per duplicated component.
+
+| CTA | Current href | Should be | Variants |
+| --- | --- | --- | --- |
+| Nav "Sign Up" | `./contact` | `https://app.robinexis.com/signup` | 3 |
+| Pro card "Start free trial" | `./contact` | `https://app.robinexis.com/signup?plan=pro` | 4 |
+| Bottom CTA "Start free trial" | `./contact` | `https://app.robinexis.com/signup?plan=starter` | 3 |
+| Nav "Book a call" | `./contact` | `https://app.robinexis.com/demo/blades-hair` | 3 |
+| Blog "More articles" | `./contact` | Framer `/blog` page | 1 |
+| "Calculate my recovery" | no link | `https://app.robinexis.com/demo/blades-hair` | 1 |
+
+Already correct, leave alone: nav "Log in" to `/login` (3 variants), Starter card "Start free trial" to `/signup?plan=starter` (4 variants), Enterprise "Book a demo" to `/demo/blades-hair` (4 variants).
+
+Twenty links on the home page currently resolve to `./contact`, which is why clicking Sign Up lands a prospect on the contact page instead of the app.
 
 ## Why these URLs and no others
 
@@ -30,165 +50,56 @@ Taken from the route table in `apps/web/src/App.tsx` and the plan validation in 
 
 `validPlan()` accepts `starter` and `pro` only. `?plan=enterprise` is silently dropped, which is why the Enterprise card must not carry a plan parameter.
 
-Verified 6 Sep 2026: `app.robinexis.com` resolves to Vercel, `www.robinexis.com` resolves to Framer, and all public routes return 200.
+Verified 9 Sep 2026: `/signup?plan=starter`, `/login`, `/demo/blades-hair` and `/enterprise-contact` all return 200 on `app.robinexis.com`.
 
 ## The prompt
 
 ```
-You are editing the Robinexis marketing site (www.robinexis.com). Make it feel like a polished, conversion-focused SaaS website without changing its brand identity or rebuilding its content.
+You are editing the Robinexis marketing site (www.robinexis.com). This is a link-wiring fix only. Do not redesign anything, do not change layout, spacing, styling or breakpoints, and do not rewrite any copy or button label.
 
-Complete four jobs:
-1. Point every navigation item and call-to-action at the correct destination.
-2. Improve the styling and visual hierarchy of the Log in, Sign Up, and demo buttons.
-3. Normalize spacing, alignment, and responsive behavior across the entire website.
-4. Test every link, interaction, variant, and breakpoint before reporting completion.
+Our product app is a separate React app at https://app.robinexis.com. Use absolute HTTPS URLs for it, always in the same tab. Keep links to Framer pages and in-page sections as native Framer page links or section anchors.
 
-Our product app is a separate React app hosted at https://app.robinexis.com. The Framer site is the public marketing site. Use absolute HTTPS URLs for anything on app.robinexis.com. Keep links to Framer pages and page sections as native Framer page links or section anchors.
+I have read the published HTML of the site, so the list below is exact. Framer duplicates the navigation, the pricing block and the bottom CTA section once per breakpoint, and the number in brackets is how many copies currently carry the wrong link. Fix every copy - desktop, tablet and phone - not only the desktop canvas.
 
-=== JOB 1: LINK DESTINATIONS ===
+FIX 1 - Navigation "Sign Up" button [3 copies]. Currently links to ./contact.
+  Change to: https://app.robinexis.com/signup
 
-NAVIGATION BAR (desktop nav, tablet nav, and mobile hamburger menu - apply to all three, they are separate layers in this project):
-- "Log in"        -> https://app.robinexis.com/login          (same tab)
-- "Sign Up"       -> https://app.robinexis.com/signup         (same tab)
-- "Book a call"   -> https://app.robinexis.com/demo/blades-hair (same tab)
-- "Benefits"      -> in-page anchor to the Benefits section (unchanged)
-- "Pricing"       -> in-page anchor to the Pricing section (unchanged, do NOT send this to the app)
-- "Blog"          -> the Framer /blog page (unchanged)
-- "Contact"       -> the Framer /contact page (unchanged)
+FIX 2 - Pricing section, Pro card, "Start free trial" button [4 copies]. Currently links to ./contact.
+  Change to: https://app.robinexis.com/signup?plan=pro
 
-HERO SECTION:
-- Any primary "Start free trial" / "Get started" button -> https://app.robinexis.com/signup?plan=starter
-- Any "Book a call", "Book a demo", "Try demo", or equivalent demo CTA
-  -> https://app.robinexis.com/demo/blades-hair
-- If the hero does not currently have a demo CTA, do not add a new one unless it fits the existing layout naturally.
+FIX 3 - Bottom CTA section "Stop losing bookings to missed calls. Start today.", the "Start free trial" button [3 copies]. Currently links to ./contact.
+  Change to: https://app.robinexis.com/signup?plan=starter
 
-PRICING SECTION (three cards: Starter, Pro, Enterprise):
-- Starter card, both "Get Started" and "Start free trial" buttons
-  -> https://app.robinexis.com/signup?plan=starter
-- Pro card, currently labelled "Talk to us"
-  -> https://app.robinexis.com/signup?plan=pro
-  ALSO change the Pro button label from "Talk to us" to "Start free trial". Pro is a self-serve plan with instant checkout, not a sales conversation. Keep the "Most Popular" badge as is.
-- Enterprise card, "Find Out More" and "Talk to us" buttons
-  -> https://app.robinexis.com/enterprise-contact
-  Change the Enterprise primary CTA label to "Book a demo" if that is clearer in context.
-  Do NOT add any ?plan= parameter to the Enterprise buttons. Our app only accepts plan=starter and plan=pro and will ignore anything else.
+FIX 4 - Navigation "Book a call" button [3 copies]. Currently links to ./contact.
+  Change to: https://app.robinexis.com/demo/blades-hair
 
-IMPORTANT: this pricing block is duplicated three or four times in the project for different breakpoints/variants. Find and update every copy so desktop, tablet and mobile all behave identically. Same for the nav and the footer.
+FIX 5 - Blog section "More articles" link [1 copy]. Currently links to ./contact.
+  Change to: the Framer /blog page, as a native Framer page link.
 
-BOTTOM CTA SECTION ("Stop losing bookings to missed calls. Start today."):
-- "Start free trial" -> https://app.robinexis.com/signup?plan=starter
+FIX 6 - Testimonials section "Calculate my recovery" element. It appears to have no link attached at all.
+  Give it: https://app.robinexis.com/demo/blades-hair
 
-TESTIMONIALS SECTION:
-- "Calculate my recovery" -> https://app.robinexis.com/demo/blades-hair
-
-FOOTER:
-- Sitemap "Home" / "Contact" / "Blog" -> keep as internal Framer page links
-- All Legal links (Privacy Policy, Terms & Conditions, GDPR & Data Protection, Cookie Policy, Data Processing Agreement) -> keep as internal Framer pages
-- Add a "Log in" text link to the Sitemap column -> https://app.robinexis.com/login
+ALREADY CORRECT - do not touch these:
+- Navigation "Log in" -> https://app.robinexis.com/login
+- Pricing Starter card "Start free trial" -> https://app.robinexis.com/signup?plan=starter
+- Pricing Enterprise card "Book a demo" -> https://app.robinexis.com/demo/blades-hair
+- Navigation "Contact", "Benefits", "Pricing", "Blog", and all footer sitemap and legal links -> internal Framer pages and anchors
 
 HARD RULES - do not break these:
 1. Never link to https://app.robinexis.com/dashboard, /app, /admin, /billing or /auth/callback. Those routes require a signed-in session and will bounce a visitor to a login screen. Sign-up and log-in are the only two entry points.
-2. The only query parameter our app understands is plan, and its only valid values are starter and pro. Do not invent parameters like ?ref=, ?utm_plan=, ?trial=true or ?plan=enterprise on the app URLs. UTM tags for analytics are fine to append but the plan parameter must stay exactly as written above.
-3. Do not open app.robinexis.com links in a new tab. Sign-up should feel like a continuation of the same journey, not a popup.
-4. Do not change section copy other than CTA labels required to make their action clear.
-5. Do not add a link to app.robinexis.com root (/). It renders a second landing page that would duplicate this site.
-6. Preserve query strings exactly. Starter must remain ?plan=starter and Pro must remain ?plan=pro.
-7. Use one destination per CTA purpose across every breakpoint and duplicate component variant.
-8. Do not replace real links with scroll interactions, overlays, or prototype-only actions.
+2. The only query parameter our app understands is plan, and its only valid values are starter and pro. Do not invent parameters like ?ref=, ?trial=true or ?plan=enterprise. Starter must stay exactly ?plan=starter and Pro exactly ?plan=pro.
+3. Do not open app.robinexis.com links in a new tab. Sign-up should feel like a continuation of the same journey.
+4. Do not add a link to the app root https://app.robinexis.com/ - it renders a second landing page that would duplicate this site.
+5. Use one destination per CTA purpose across every breakpoint and duplicate component variant.
+6. Do not replace real links with scroll interactions, overlays, or prototype-only actions.
+7. Change nothing else. No styling, no spacing, no labels, no copy, no new sections.
 
-=== JOB 2: RESTYLE LOGIN, SIGN-UP, AND DEMO ACTIONS ===
+VERIFY BEFORE YOU REPORT DONE:
+1. In preview, click Sign Up, Book a call, both pricing "Start free trial" buttons, the Enterprise CTA, the bottom CTA, "Calculate my recovery" and "More articles". Confirm each lands exactly where listed above.
+2. Repeat at 1440px, 768px and 390px, because each breakpoint uses its own copy of the nav, pricing block and CTA section.
+3. Confirm that nothing on the home page still points at ./contact except the "Contact" navigation item and the footer Contact link.
 
-The Log in and Sign Up buttons in the nav currently do not read as a clear pair. Fix the hierarchy so Sign Up is obviously the primary action and Log in is clearly secondary but still easy to find.
-
-"Log in" - secondary / ghost style:
-- Transparent background, no border fill
-- Text in the site's primary text colour at 100% opacity, same font family and weight as the nav items but one step heavier (medium/500)
-- Same font size as "Sign Up" so the pair reads as one unit
-- Hover: background fills with the primary text colour at 6-8% opacity, transition 150ms ease-out
-- Same height, vertical padding and corner radius as the Sign Up button so the two align perfectly on the same baseline
-
-"Sign Up" - primary / solid style:
-- Solid fill in the site's brand accent colour, label in the contrasting on-brand colour (white or near-white)
-- Font weight semibold/600
-- Hover: darken the fill by roughly 8% and lift the button 1px upward, transition 150ms ease-out
-- Active/pressed: return to 0px lift, darken by 12%
-
-Shared between both buttons:
-- Identical height (target 40px desktop, 44px on touch breakpoints so they meet tap-target guidance)
-- Identical corner radius, matching the radius language already used elsewhere on the site - do not introduce a new radius value
-- Horizontal padding: 16px on Log in, 20px on Sign Up
-- 8px gap between the two buttons, both vertically centred against the nav items and the "Book a call" button
-- Visible keyboard focus ring on both (2px outline in the brand accent, 2px offset) - do not remove focus outlines
-- Keep labels on one line and use content-sized width on desktop.
-
-"Book a call" / demo button:
-- Treat this as a strong secondary conversion action, visually distinct from both plain navigation links and the primary Sign Up button.
-- Reuse an existing brand-compatible outlined or tonal button style.
-- Match the height, radius, typography, and interaction quality of Sign Up.
-- Do not let it visually compete with Sign Up; Sign Up remains the primary navigation CTA.
-- If the current header becomes crowded, place the demo action inside the mobile menu instead of shrinking or clipping it.
-
-=== JOB 3: FULL RESPONSIVE AND SPACING PASS ===
-
-Audit the complete page, not only the navigation. Work from the existing components and visual system. Do not redesign the brand.
-
-Spacing and layout:
-- Normalize section padding, container widths, card gaps, vertical rhythm, and text-to-button spacing.
-- Use a consistent centered content container. Keep comfortable gutters and prevent content from touching viewport edges.
-- Remove accidental oversized gaps, cramped groups, uneven card padding, misaligned columns, and inconsistent button spacing.
-- Keep related elements visually grouped. Do not solve layout issues with arbitrary one-off margins.
-- Ensure repeated cards have equal internal padding and aligned headings, prices, feature lists, and CTA positions.
-- Keep line lengths readable and avoid excessively wide paragraphs.
-
-Desktop and laptop:
-- Check wide desktop at 1440px and 1280px, and laptop at 1024px.
-- Keep the navigation vertically centered, evenly spaced, and free from collisions.
-- Preserve intended multi-column layouts while ensuring cards remain equal-height where appropriate.
-- Avoid excessive empty space on wide displays by applying sensible maximum widths.
-
-Tablet:
-- Check both 768px portrait and approximately 900px landscape.
-- Reduce gaps and padding proportionally rather than simply shrinking everything.
-- Allow multi-column sections to become two columns or one column when content becomes cramped.
-- Keep Sign Up visible in the header if practical. Move Log in and the demo action into the menu before allowing overlap.
-
-Mobile:
-- Check 390px and 375px widths, plus a narrow 320px stress test.
-- Use a clear hamburger menu with an obvious open/close state and no background scrolling while open.
-- Stack menu actions full-width in this order: Sign Up, Try live demo, Log in. Maintain the same primary/secondary hierarchy.
-- Use at least 44px interactive heights and adequate touch spacing.
-- Stack pricing cards and content sections cleanly. Never use horizontal scrolling for primary page content.
-- Scale headings responsively without clipping, orphaned words, or overflow.
-- Keep page-side gutters consistent and ensure cards, images, charts, and decorative layers stay within the viewport.
-- Remove empty fixed-height areas that create large mobile gaps.
-
-Across all breakpoints:
-- Never let buttons, labels, headings, cards, charts, images, or navigation overflow or get clipped.
-- Ensure decorative elements do not cover interactive content.
-- Preserve logical reading order when columns stack.
-- Respect prefers-reduced-motion for nonessential motion.
-- Keep visible keyboard focus states and useful hover, pressed, and menu states.
-
-=== JOB 4: FUNCTIONAL AND VISUAL QA ===
-
-Before finishing:
-1. Inspect the component tree for duplicate desktop, tablet, and mobile variants of the header, pricing cards, CTA sections, and footer. Apply the correct URLs to every variant.
-2. Preview the home page at 1440px, 1280px, 1024px, 900px, 768px, 390px, 375px, and 320px.
-3. Click every navigation link and CTA in preview mode. Confirm external app links open in the same tab and section links scroll to the correct section.
-4. Verify that Starter retains ?plan=starter and Pro retains ?plan=pro.
-5. Verify that every demo-led CTA opens https://app.robinexis.com/demo/blades-hair.
-6. Test the mobile menu open, close, navigation, focus, and scroll behavior.
-7. Check default, hover, pressed, focus, and disabled states where present.
-8. Fix all clipping, horizontal overflow, broken anchors, inconsistent padding, and breakpoint-specific layout problems you find.
-9. Do not claim completion based only on the desktop canvas.
-
-When you are done, report:
-- Every component and variant changed.
-- Every URL or section anchor assigned.
-- CTA labels changed and why.
-- Breakpoints tested.
-- Responsive or spacing problems fixed.
-- Any item you could not complete or verify.
+Report back: every component and variant you changed, the URL you assigned to each, any element you could not locate, and anything still pointing at ./contact.
 ```
 
 ## Checklist after Framer publishes
@@ -199,6 +110,7 @@ When you are done, report:
 4. All demo-led CTAs open the Blades live demo.
 5. No button anywhere lands on a redirect-to-login dead end.
 6. Repeat on mobile - the nav and pricing blocks are duplicated per breakpoint in Framer.
+7. Run `node scripts/verify-framer-links.mjs`. It reads the published HTML, checks every duplicated copy of each CTA against its expected destination, prints how many links still resolve to `./contact`, and exits non-zero while anything is wrong. On 9 Sep 2026 it reported 20 `./contact` links and 15 problems; a clean run should list only the Contact nav item and the footer Contact link.
 
 ## Demo destination decision
 

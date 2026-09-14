@@ -112,6 +112,8 @@ describe("createCheckoutSession", () => {
 
     await expect(handleStripeWebhook(input)).resolves.toEqual({ ok: true, status: "active" });
     await expect(handleStripeWebhook(input)).resolves.toEqual({ ok: true, status: "duplicate" });
+    event.id = "evt_subscription_same_period_retry";
+    await expect(handleStripeWebhook(input)).resolves.toEqual({ ok: true, status: "active" });
     expect(constructEvent).toHaveBeenCalledWith(
       input.rawBody,
       input.signature,
@@ -133,6 +135,32 @@ describe("createCheckoutSession", () => {
     });
     expect(await store.getCreditBalance(BLADES_HAIR_ID)).toBe(1_500);
     expect(await store.listCreditLedger(BLADES_HAIR_ID)).toHaveLength(1);
+  });
+
+  it("keeps unresolved Stripe events failed for audited recovery", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    const event = {
+      id: "evt_unmatched",
+      type: "customer.subscription.updated",
+      livemode: false,
+      created: 1_788_511_200,
+      data: { object: {
+        id: "sub_unknown", object: "subscription", customer: "cus_unknown", status: "active",
+        created: 1_788_511_200, trial_end: null, cancel_at_period_end: false,
+        metadata: {}, items: { data: [{ price: { id: "price_unknown", metadata: {} } }] },
+      } },
+    } as unknown as Stripe.Event;
+    const stripe = {
+      webhooks: { constructEvent: vi.fn().mockReturnValue(event) },
+      subscriptions: { retrieve: vi.fn() },
+    } as unknown as Stripe;
+    await expect(handleStripeWebhook({
+      store, rawBody: "{}", signature: "valid", webhookSecret: "whsec_test", stripe,
+    })).resolves.toEqual({ ok: false, status: "unmatched" });
+    await expect(store.listStripeEvents("failed")).resolves.toEqual([
+      expect.objectContaining({ id: event.id, error: "tenant_unmatched" }),
+    ]);
   });
 
   it("rejects missing or invalid webhook signatures without throwing", async () => {

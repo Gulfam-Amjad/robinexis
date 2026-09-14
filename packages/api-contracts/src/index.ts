@@ -58,6 +58,8 @@ export interface ClientSummary {
   published: boolean;
   serviceStatus: ServiceStatus;
   onboardingStatus?: OnboardingStatus;
+  onboardingNotes?: string;
+  onboardingEta?: string;
   access?: { enabled?: boolean; inbound?: boolean; outbound?: boolean; reason?: string };
 }
 
@@ -97,6 +99,8 @@ export interface Client extends ClientSummary {
   monthlyMinuteLimit?: number;
   promptVersionId?: string;
   onboardingStatus?: OnboardingStatus;
+  onboardingNotes?: string;
+  onboardingEta?: string;
   phoneAcquisitionMode?: PhoneAcquisitionMode;
   requestedPhoneNumber?: string;
 }

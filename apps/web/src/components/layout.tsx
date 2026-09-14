@@ -42,6 +42,7 @@ const navigation = [
 const secondary = [
   { label: "Plan & billing", to: "/billing", icon: CircleDollarSign },
   { label: "Team", to: "/app/team", icon: Users },
+  { label: "Support", to: "/app/support", icon: MessageSquareText },
   { label: "Settings", to: "/app/settings", icon: Settings },
 ] as const;
 

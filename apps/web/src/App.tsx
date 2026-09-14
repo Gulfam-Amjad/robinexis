@@ -41,7 +41,9 @@ const IntegrationsPage = lazy(() => appPages().then((m) => ({ default: m.Integra
 const TeamPage = lazy(() => appPages().then((m) => ({ default: m.TeamPage })));
 const BillingPage = lazy(() => appPages().then((m) => ({ default: m.BillingPage })));
 const SettingsPage = lazy(() => appPages().then((m) => ({ default: m.SettingsPage })));
+const SupportPage = lazy(() => appPages().then((m) => ({ default: m.SupportPage })));
 const AdminOverviewPage = lazy(() => appPages().then((m) => ({ default: m.AdminOverviewPage })));
+const SetupConsolePage = lazy(() => appPages().then((m) => ({ default: m.SetupConsolePage })));
 
 function RequireSession() {
   const { apiKey, actor, actorError, actorLoading, logout } = useSession();
@@ -146,6 +148,7 @@ export default function App() {
               <Route path="integrations" element={<IntegrationsPage />} />
               <Route path="team" element={<TeamPage />} />
               <Route path="settings" element={<SettingsPage />} />
+              <Route path="support" element={<SupportPage />} />
               <Route element={<RequireOperator />}>
                 <Route path="onboarding" element={<Navigate to="/admin/clients/new" replace />} />
                 <Route path="agents/new" element={<Navigate to="/admin/agents/new" replace />} />
@@ -156,6 +159,7 @@ export default function App() {
             <Route element={<RequireOperator />}>
               <Route path="/admin" element={<AppShell />}>
                 <Route index element={<AdminOverviewPage />} />
+                <Route path="setup/:id" element={<SetupConsolePage />} />
                 <Route path="clients/new" element={<OnboardingPage />} />
                 <Route path="agents/new" element={<NewAgentPage />} />
                 <Route path="billing" element={<BillingPage />} />

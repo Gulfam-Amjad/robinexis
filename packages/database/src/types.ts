@@ -96,6 +96,8 @@ export interface ClientConfig {
   stripeSubscriptionId?: string;
   promptVersionId?: string;
   onboardingStatus?: OnboardingStatus;
+  onboardingNotes?: string;
+  onboardingEta?: string;
   phoneAcquisitionMode?: PhoneAcquisitionMode;
   requestedPhoneNumber?: string;
 }
@@ -317,6 +319,20 @@ export interface UserProfile {
   displayName?: string;
   platformRole: "admin" | "client";
   workspaceRole?: WorkspaceRole;
+  termsAcceptedAt?: string;
+  privacyAcceptedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TenantRequest {
+  id: string;
+  clientId: string;
+  type: "team_invite" | "data_export" | "workspace_deletion" | "support";
+  status: "pending" | "in_progress" | "completed" | "rejected" | "revoked";
+  requestedBy: string;
+  email?: string;
+  payload: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
 }

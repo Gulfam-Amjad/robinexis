@@ -79,6 +79,7 @@ const requiredEvents = [
   "customer.subscription.created",
   "customer.subscription.updated",
   "customer.subscription.deleted",
+  "customer.subscription.trial_will_end",
   "invoice.payment_succeeded",
   "invoice.payment_failed",
 ];
@@ -89,6 +90,9 @@ if (process.env.FORCE_RECREATE_STRIPE_WEBHOOK === "true" && existing) {
 }
 
 let webhook = existing;
+if (webhook && !requiredEvents.every((event) => webhook.enabled_events.includes(event))) {
+  webhook = await stripe.webhookEndpoints.update(webhook.id, { enabled_events: requiredEvents });
+}
 if (!webhook && !webhookError) {
   try {
     webhook = await stripe.webhookEndpoints.create({

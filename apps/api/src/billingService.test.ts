@@ -14,6 +14,14 @@ describe("ensureSelfServeWorkspace", () => {
     expect(first.id).toBe(second.id);
     expect((await store.listClients()).map((client) => client.id)).toEqual([first.id]);
     expect((await store.listMembershipsForEmail(actor.email))).toHaveLength(1);
+    expect(first.calendar).toEqual({ provider: "calcom" });
+    await expect(store.listCalendarConnections(first.id)).resolves.toEqual([
+      expect.objectContaining({
+        status: "pending",
+        credentialRef: "CONNECTION_REQUIRED",
+        metadata: { isolation: "connection_required" },
+      }),
+    ]);
   });
 
   it("maps duplicate identities for the same normalized email to one tenant", async () => {

@@ -1,7 +1,7 @@
 import { poolSsl } from "./env.js";
 import pg from "pg";
 import { sortClientsForDashboard } from "./clientOrder.js";
-import type { PlatformStore } from "./memory.js";
+import type { BillingTransition, PlatformStore } from "./memory.js";
 import type {
   AgentInstance,
   AnalyticsRange,
@@ -30,6 +30,7 @@ import type {
   StripeEvent,
   Subscription,
   Suppression,
+  TenantRequest,
   ToolActionRow,
   TwilioConnection,
   UsageCounters,
@@ -234,16 +235,50 @@ export class PostgresStore implements PlatformStore {
   async upsertUserProfile(profile: UserProfile) {
     await this.pool.query(
       `INSERT INTO user_profiles
-       (id, client_id, auth_user_id, email, display_name, platform_role, workspace_role, created_at, updated_at)
-       VALUES ($1,$2,$3,lower($4),$5,$6,$7,$8,$9)
+       (id, client_id, auth_user_id, email, display_name, platform_role, workspace_role,
+        terms_accepted_at, privacy_accepted_at, created_at, updated_at)
+       VALUES ($1,$2,$3,lower($4),$5,$6,$7,$8,$9,$10,$11)
        ON CONFLICT (id) DO UPDATE SET client_id = EXCLUDED.client_id, auth_user_id = EXCLUDED.auth_user_id,
          email = EXCLUDED.email, display_name = EXCLUDED.display_name,
          platform_role = EXCLUDED.platform_role, workspace_role = EXCLUDED.workspace_role,
+         terms_accepted_at = COALESCE(EXCLUDED.terms_accepted_at, user_profiles.terms_accepted_at),
+         privacy_accepted_at = COALESCE(EXCLUDED.privacy_accepted_at, user_profiles.privacy_accepted_at),
          updated_at = EXCLUDED.updated_at`,
       [profile.id, profile.clientId ?? null, profile.authUserId, profile.email.trim(),
         profile.displayName ?? null, profile.platformRole, profile.workspaceRole ?? null,
+        profile.termsAcceptedAt ?? null, profile.privacyAcceptedAt ?? null,
         profile.createdAt, profile.updatedAt],
     );
+  }
+  async saveTenantRequest(request: TenantRequest) {
+    const result = await this.pool.query(
+      `INSERT INTO tenant_requests
+       (id, client_id, type, status, requested_by, email, payload, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,lower($6),$7,$8,$9)
+       ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, email = EXCLUDED.email,
+         payload = EXCLUDED.payload, updated_at = EXCLUDED.updated_at
+       WHERE tenant_requests.client_id = EXCLUDED.client_id
+       RETURNING id`,
+      [request.id, request.clientId, request.type, request.status, request.requestedBy,
+        request.email ?? null, request.payload, request.createdAt, request.updatedAt],
+    );
+    if (result.rowCount !== 1) throw new Error("tenant_request_conflict");
+  }
+  async listTenantRequests(clientId?: string, type?: TenantRequest["type"]) {
+    const values: unknown[] = [];
+    const filters: string[] = [];
+    if (clientId) { values.push(clientId); filters.push(`client_id = $${values.length}`); }
+    if (type) { values.push(type); filters.push(`type = $${values.length}`); }
+    const result = await this.pool.query(
+      `SELECT * FROM tenant_requests ${filters.length ? `WHERE ${filters.join(" AND ")}` : ""}
+       ORDER BY created_at DESC LIMIT 500`,
+      values,
+    );
+    return result.rows.map(tenantRequestFromRow);
+  }
+  async getTenantRequest(id: string) {
+    const result = await this.pool.query("SELECT * FROM tenant_requests WHERE id = $1", [id]);
+    return result.rows[0] ? tenantRequestFromRow(result.rows[0]) : undefined;
   }
   async getLocation(clientId: string, id: string) {
     const r = await this.pool.query("SELECT * FROM locations WHERE client_id = $1 AND id = $2", [clientId, id]);
@@ -468,6 +503,24 @@ export class PostgresStore implements PlatformStore {
     );
     return r.rows.map(stripeEventFromRow);
   }
+  async applyBillingTransition(transition: BillingTransition) {
+    const connection = await this.pool.connect();
+    try {
+      await connection.query("BEGIN");
+      const transactional = new PostgresStore(connection as unknown as pg.Pool);
+      await transactional.upsertClient(transition.client);
+      await transactional.upsertSubscription(transition.subscription);
+      if (transition.credit) await transactional.appendCreditLedgerEntry(transition.credit);
+      await transactional.appendOperatorAudit(transition.audit);
+      await transactional.saveStripeEvent(transition.event);
+      await connection.query("COMMIT");
+    } catch (error) {
+      await connection.query("ROLLBACK");
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
   async saveBookingRecord(booking: BookingRecord) {
     await this.pool.query(
       `INSERT INTO booking_records
@@ -636,11 +689,16 @@ export class PostgresStore implements PlatformStore {
     );
   }
   async saveCall(c: CallSession) {
-    await this.pool.query(
+    const result = await this.pool.query(
       `INSERT INTO call_sessions (id, client_id, payload, updated_at) VALUES ($1, $2, $3, now())
-       ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload, updated_at = now()`,
+       ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload, updated_at = now()
+       WHERE call_sessions.client_id = EXCLUDED.client_id
+       RETURNING id`,
       [c.id, c.clientId, c],
     );
+    if (result.rowCount !== 1) {
+      throw new Error("call_session_tenant_conflict");
+    }
   }
   async getCall(id: string) {
     const r = await this.pool.query("SELECT payload FROM call_sessions WHERE id = $1", [id]);
@@ -1088,7 +1146,23 @@ function userProfileFromRow(row: Record<string, any>): UserProfile {
     id: row.id, clientId: row.client_id ?? undefined, authUserId: row.auth_user_id, email: row.email,
     displayName: row.display_name ?? undefined, platformRole: row.platform_role,
     workspaceRole: row.workspace_role ?? undefined,
+    termsAcceptedAt: row.terms_accepted_at ? toIso(row.terms_accepted_at) : undefined,
+    privacyAcceptedAt: row.privacy_accepted_at ? toIso(row.privacy_accepted_at) : undefined,
     createdAt: toIso(row.created_at), updatedAt: toIso(row.updated_at),
+  };
+}
+
+function tenantRequestFromRow(row: Record<string, any>): TenantRequest {
+  return {
+    id: row.id,
+    clientId: row.client_id,
+    type: row.type,
+    status: row.status,
+    requestedBy: row.requested_by,
+    email: row.email ?? undefined,
+    payload: row.payload ?? {},
+    createdAt: toIso(row.created_at),
+    updatedAt: toIso(row.updated_at),
   };
 }
 

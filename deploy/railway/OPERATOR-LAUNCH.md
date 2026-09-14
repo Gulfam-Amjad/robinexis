@@ -78,7 +78,9 @@ Customers purchase their own Twilio number. For customer-owned Twilio accounts, 
 1. Sign in as an `ADMIN_EMAILS` operator.
 2. `/admin/clients/new` — create the salon tenant.
 3. Publish prompt, connect Cal.com credential **ref** (env name, not raw key).
-4. After a supervised test provision, set `SAAS_PROVISIONING_ENABLED=true` on both API and worker. Paid customers are then routed to `/onboarding`; they paste a purchased number, while Cal.com event types, the ElevenLabs agent/tools, and Twilio routing are created automatically.
+4. Keep `SAAS_PROVISIONING_ENABLED=false`. Paid customers submit details into the assisted setup queue; an
+   operator records progress without creating provider resources. Do not change the flag until every gate in
+   `SAAS-READINESS.md` and `SAAS-CANARY.md` passes and an owner explicitly approves it.
 
 ### 6. Optional ops
 

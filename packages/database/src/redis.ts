@@ -34,6 +34,18 @@ export class RedisSessionCache {
     return (await this.client.ping()) === "PONG";
   }
 
+  async incrementRateLimit(key: string, windowMs: number): Promise<{ count: number; resetMs: number } | undefined> {
+    if (!this.client) return undefined;
+    const result = await this.client.eval(
+      `local count = redis.call('INCR', KEYS[1])
+       if count == 1 then redis.call('PEXPIRE', KEYS[1], ARGV[1]) end
+       local ttl = redis.call('PTTL', KEYS[1])
+       return {count, ttl}`,
+      { keys: [`rate-limit:${key}`], arguments: [String(windowMs)] },
+    ) as [number, number];
+    return { count: Number(result[0]), resetMs: Math.max(1, Number(result[1])) };
+  }
+
   async reserveCallSlot(
     clientId: string,
     reservationId: string,

@@ -11,6 +11,7 @@ Registry of every system your AIOS can reach. Filled by `/onboard` from Q4-Q7 an
 | 5 | Project / task tracking | Notion (roadmaps, onboarding pipeline, SOPs) · GitHub Issues (technical tasks) | not yet connected | — | — |
 | 6 | Meeting intelligence | Fireflies.ai · Google Meet recordings | not yet connected | — | — |
 | 7 | Knowledge / files | Google Drive · Notion | not yet connected | — | — |
+| 8 | Auth email delivery | Supabase Auth (magic links, sign-up confirmations) sending through Google Workspace SMTP on `hello@robinexis.com` | key+ref: `smtp.gmail.com:465` custom SMTP set in the Supabase dashboard | Google app password, held only in Google and the Supabase dashboard — never in this repo | 2026-09-06 |
 
 **This registry is tool-agnostic — it mirrors *your* stack, whatever it is.** If you already run Asana, Xero, HubSpot, etc., wire those. Greenfield and want a steer? See `references/recommended-stack.md` for the tools Sturdy Ai knows best — a starting point, never a requirement.
 

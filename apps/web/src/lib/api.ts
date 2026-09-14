@@ -87,8 +87,34 @@ async function fileToBase64(file: File): Promise<string> {
 }
 
 export const api = {
+  plans: () => request<{
+    items: Array<{
+      tier: "starter" | "pro" | "enterprise";
+      name: string;
+      monthlyPricePence: number | null;
+      trialDays: number;
+      includedMinutes: number;
+      features: Array<{ id: string; operational: boolean }>;
+    }>;
+    currency: "GBP";
+  }>("/api/v1/plans"),
   validateKey: (key: string) => request<BootstrapResponse>("/api/v1/bootstrap", {}, key),
   session: (accessKey?: string) => request<SessionActor>("/api/v1/session", {}, accessKey),
+  acceptLegal: (accessKey?: string) =>
+    request<{ acceptedAt: string }>("/api/v1/account/legal-consent", { method: "POST" }, accessKey),
+  acceptInvitations: (accessKey?: string) =>
+    request<{ clientIds: string[] }>("/api/v1/invitations/accept", { method: "POST" }, accessKey),
+  requests: () => request<{ items: Array<{ id: string; type: string; status: string; email?: string; payload: Record<string, unknown>; createdAt: string }> }>("/api/v1/requests").then((result) => result.items),
+  createRequest: (input: { type: "team_invite" | "data_export" | "workspace_deletion" | "support"; email?: string; role?: string; subject?: string; message?: string }) =>
+    request<{ request: { id: string; type: string; status: string } }>("/api/v1/requests", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  manageInvitation: (id: string, action: "resend" | "revoke") =>
+    request<{ request: { id: string; status: string } }>(`/api/v1/requests/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ action }),
+    }),
   bootstrap: (clientId?: string) =>
     request<BootstrapResponse>(`/api/v1/bootstrap${query({ clientId })}`),
   clients: async () => list(await request<ClientSummary[] | ListResponse<ClientSummary>>("/api/v1/clients")),
@@ -114,6 +140,23 @@ export const api = {
       failedCalls: number;
     }>;
   }>("/api/v1/admin/summary"),
+  replayBillingEvent: (eventId: string) =>
+    request<{ ok: boolean; status?: string }>(
+      `/api/v1/admin/billing-events/${encodeURIComponent(eventId)}/replay`,
+      { method: "POST" },
+    ),
+  adminAudit: (clientId?: string) =>
+    request<{ items: Array<{ id: string; clientId?: string; actorId: string; action: string; detail: Record<string, unknown>; createdAt: string }> }>(
+      `/api/v1/admin/audit${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ""}`,
+    ).then((result) => result.items),
+  transitionSetup: (
+    clientId: string,
+    input: { status: "setup_queued" | "setup_in_progress" | "needs_attention" | "active"; note?: string; eta?: string },
+  ) =>
+    request<{ client: Client }>(`/api/v1/admin/setup/${encodeURIComponent(clientId)}/transition`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
   client: (id: string) => request<Client>(`/api/v1/clients/${encodeURIComponent(id)}`),
   createClient: (input: Partial<Client> & {
     planTier?: "starter" | "pro" | "enterprise";
@@ -264,6 +307,15 @@ export const api = {
     request<WorkspaceMembership>("/api/v1/memberships", {
       method: "POST",
       body: JSON.stringify({ clientId, email, role }),
+    }),
+  updateMembershipRole: (clientId: string, id: string, role: "manager" | "viewer") =>
+    request<WorkspaceMembership>(`/api/v1/memberships/${encodeURIComponent(id)}${query({ clientId })}`, {
+      method: "PATCH",
+      body: JSON.stringify({ role }),
+    }),
+  transferOwnership: (clientId: string, id: string) =>
+    request<WorkspaceMembership>(`/api/v1/memberships/${encodeURIComponent(id)}/transfer-ownership${query({ clientId })}`, {
+      method: "POST",
     }),
   deleteMembership: (clientId: string, id: string) =>
     request<{ ok: boolean }>(`/api/v1/memberships/${encodeURIComponent(id)}${query({ clientId })}`, {

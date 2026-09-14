@@ -29,12 +29,21 @@ import type {
   StripeEvent,
   Subscription,
   Suppression,
+  TenantRequest,
   ToolActionRow,
   TwilioConnection,
   UsageCounters,
   UserProfile,
   WorkspaceMembership,
 } from "./types.js";
+
+export interface BillingTransition {
+  client: ClientConfig;
+  subscription: Subscription;
+  credit?: CreditLedgerEntry;
+  audit: OperatorAuditRecord;
+  event: StripeEvent;
+}
 
 export interface PlatformStore {
   getClient(id: string): Promise<ClientConfig | undefined>;
@@ -56,6 +65,9 @@ export interface PlatformStore {
   listUserProfilesForAuthUser(authUserId: string): Promise<UserProfile[]>;
   listUserProfiles(clientId: string): Promise<UserProfile[]>;
   upsertUserProfile(profile: UserProfile): Promise<void>;
+  saveTenantRequest(request: TenantRequest): Promise<void>;
+  listTenantRequests(clientId?: string, type?: TenantRequest["type"]): Promise<TenantRequest[]>;
+  getTenantRequest(id: string): Promise<TenantRequest | undefined>;
 
   getLocation(clientId: string, id: string): Promise<Location | undefined>;
   listLocations(clientId: string): Promise<Location[]>;
@@ -81,6 +93,7 @@ export interface PlatformStore {
   saveStripeEvent(event: StripeEvent): Promise<void>;
   getStripeEvent(clientId: string, id: string): Promise<StripeEvent | undefined>;
   listStripeEvents(status?: StripeEvent["status"], limit?: number): Promise<StripeEvent[]>;
+  applyBillingTransition(transition: BillingTransition): Promise<void>;
 
   saveBookingRecord(booking: BookingRecord): Promise<void>;
   findBookingByIdempotency(clientId: string, key: string): Promise<BookingRecord | undefined>;
@@ -158,6 +171,7 @@ export class MemoryStore implements PlatformStore {
   knowledgeChunks = new Map<string, KnowledgeChunk>();
   memberships = new Map<string, WorkspaceMembership>();
   userProfiles = new Map<string, UserProfile>();
+  tenantRequests = new Map<string, TenantRequest>();
   locations = new Map<string, Location>();
   agentInstances = new Map<string, AgentInstance>();
   phoneEndpoints = new Map<string, PhoneEndpoint>();
@@ -259,6 +273,19 @@ export class MemoryStore implements PlatformStore {
     }
     this.userProfiles.set(profile.id, { ...profile, email: profile.email.trim().toLowerCase() });
   }
+  async saveTenantRequest(request: TenantRequest) {
+    const existing = this.tenantRequests.get(request.id);
+    if (existing && existing.clientId !== request.clientId) throw new Error("tenant_request_conflict");
+    this.tenantRequests.set(request.id, request);
+  }
+  async listTenantRequests(clientId?: string, type?: TenantRequest["type"]) {
+    return [...this.tenantRequests.values()]
+      .filter((request) => (!clientId || request.clientId === clientId) && (!type || request.type === type))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+  async getTenantRequest(id: string) {
+    return this.tenantRequests.get(id);
+  }
   async getLocation(clientId: string, id: string) {
     return this.locations.get(`${clientId}:${id}`);
   }
@@ -348,6 +375,13 @@ export class MemoryStore implements PlatformStore {
       .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt))
       .slice(0, limit);
   }
+  async applyBillingTransition(transition: BillingTransition) {
+    await this.upsertClient(transition.client);
+    await this.upsertSubscription(transition.subscription);
+    if (transition.credit) await this.appendCreditLedgerEntry(transition.credit);
+    await this.appendOperatorAudit(transition.audit);
+    await this.saveStripeEvent(transition.event);
+  }
   async saveBookingRecord(booking: BookingRecord) {
     this.bookingRecords.set(`${booking.clientId}:${booking.id}`, { ...booking });
   }
@@ -432,6 +466,10 @@ export class MemoryStore implements PlatformStore {
     this.prompts.push(p);
   }
   async saveCall(c: CallSession) {
+    const existing = this.calls.get(c.id);
+    if (existing && existing.clientId !== c.clientId) {
+      throw new Error("call_session_tenant_conflict");
+    }
     this.calls.set(c.id, { ...c, updatedAt: new Date().toISOString() });
   }
   async getCall(id: string) {

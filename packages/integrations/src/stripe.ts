@@ -2,6 +2,7 @@ import Stripe from "stripe";
 import type { ClientConfig, PlatformStore, ServiceStatus } from "@robinexis/database";
 import { stripeStatusToLocal, structuredLog } from "@robinexis/database";
 import { isPlanTier, planDefinition, type PlanTier } from "./plans.js";
+import { sendNotification } from "./notifications.js";
 
 export function createStripe(secret = process.env.STRIPE_SECRET_KEY || "") {
   return secret ? new Stripe(secret) : null;
@@ -101,26 +102,32 @@ export async function handleStripeWebhook(opts: {
   signature: string;
   webhookSecret: string;
   stripe?: Stripe | null;
+  verifiedEvent?: Stripe.Event;
 }): Promise<{ ok: boolean; status?: string }> {
   const stripe = opts.stripe === undefined ? createStripe() : opts.stripe;
-  if (!stripe || !opts.webhookSecret) {
+  if (!stripe || (!opts.webhookSecret && !opts.verifiedEvent)) {
     structuredLog("stripe_webhook_skipped", { reason: "not_configured" });
     return { ok: false };
   }
   let event: Stripe.Event;
-  try {
-    event = stripe.webhooks.constructEvent(opts.rawBody, opts.signature, opts.webhookSecret);
-  } catch (error) {
-    structuredLog("stripe_webhook_rejected", {
-      reason: error instanceof Error ? error.message : "invalid_signature",
-    });
-    return { ok: false, status: "invalid_signature" };
+  if (opts.verifiedEvent) {
+    event = opts.verifiedEvent;
+  } else {
+    try {
+      event = stripe.webhooks.constructEvent(opts.rawBody, opts.signature, opts.webhookSecret);
+    } catch (error) {
+      structuredLog("stripe_webhook_rejected", {
+        reason: error instanceof Error ? error.message : "invalid_signature",
+      });
+      return { ok: false, status: "invalid_signature" };
+    }
   }
   const handled = [
     "checkout.session.completed",
     "customer.subscription.created",
     "customer.subscription.updated",
     "customer.subscription.deleted",
+    "customer.subscription.trial_will_end",
     "invoice.paid",
     "invoice.payment_succeeded",
     "invoice.payment_failed",
@@ -159,12 +166,12 @@ export async function handleStripeWebhook(opts: {
       eventType: event.type,
       livemode: event.livemode,
       payload: { customerId, subscriptionId: sub.id },
-      status: "processed",
+      status: "failed",
+      error: "tenant_unmatched",
       receivedAt: new Date(event.created * 1_000).toISOString(),
-      processedAt: new Date().toISOString(),
     });
     structuredLog("stripe_webhook_unmatched", { customerId, subscriptionId: sub.id });
-    return { ok: true, status: "unmatched" };
+    return { ok: false, status: "unmatched" };
   }
 
   const eventRow = {
@@ -198,12 +205,11 @@ export async function handleStripeWebhook(opts: {
     applyPlanMapping(client, sub);
     if (isPlanTier(metadataPlan)) client.subscribedProduct = metadataPlan;
     const planTier = isPlanTier(client.subscribedProduct) ? client.subscribedProduct : "starter";
-    await opts.store.upsertClient(client);
     const period = sub as Stripe.Subscription & {
       current_period_start?: number;
       current_period_end?: number;
     };
-    await opts.store.upsertSubscription({
+    const subscription = {
       id: `subscription_${client.id}_stripe`,
       clientId: client.id,
       provider: "stripe",
@@ -223,10 +229,10 @@ export async function handleStripeWebhook(opts: {
       metadata: {},
       createdAt: new Date(sub.created * 1_000).toISOString(),
       updatedAt: new Date().toISOString(),
-    });
-    if (local === "active" || local === "trialing") {
+    } as const;
+    const credit = local === "active" || local === "trialing" ? (() => {
       const periodReference = String(period.current_period_start || sub.trial_start || sub.created);
-      await opts.store.appendCreditLedgerEntry({
+      return {
         id: `credit_${client.id}_${sub.id}_${periodReference}`,
         clientId: client.id,
         minutes: planDefinition(planTier).includedMinutes,
@@ -235,13 +241,36 @@ export async function handleStripeWebhook(opts: {
         referenceId: `${sub.id}:${periodReference}`,
         description: `${planDefinition(planTier).name} included minutes`,
         createdAt: new Date().toISOString(),
-      });
-    }
-    await opts.store.saveStripeEvent({
-      ...eventRow,
-      status: "processed",
-      processedAt: new Date().toISOString(),
+      } as const;
+    })() : undefined;
+    await opts.store.applyBillingTransition({
+      client,
+      subscription,
+      credit,
+      audit: {
+        id: `audit_stripe_${event.id}`,
+        clientId: client.id,
+        actorId: "stripe",
+        action: `billing.${event.type}`,
+        detail: { subscriptionId: sub.id, status: local, plan: planTier },
+        createdAt: new Date().toISOString(),
+      },
+      event: {
+        ...eventRow,
+        status: "processed",
+        processedAt: new Date().toISOString(),
+      },
     });
+    if (event.type === "invoice.payment_failed" || event.type === "customer.subscription.trial_will_end") {
+      const template = event.type === "invoice.payment_failed"
+        ? "Payment needs attention\nUpdate your payment method securely from Plan & billing to keep your receptionist available."
+        : "Your Robinexis trial is ending\nReview your plan and payment method from Plan & billing before the trial ends.";
+      try {
+        await sendNotification({ channel: "email", to: client.email, template });
+      } catch (error) {
+        structuredLog("customer_email_failed", { clientId: client.id, stripeEventType: event.type, reason: String(error) });
+      }
+    }
     structuredLog("stripe_access_updated", { clientId: client.id, serviceStatus: local, event: event.type });
     return { ok: true, status: local };
   } catch (error) {
@@ -252,6 +281,24 @@ export async function handleStripeWebhook(opts: {
     });
     throw error;
   }
+}
+
+export async function replayStripeEvent(opts: {
+  store: PlatformStore;
+  eventId: string;
+  stripe?: Stripe | null;
+}) {
+  const stripe = opts.stripe === undefined ? createStripe() : opts.stripe;
+  if (!stripe) return { ok: false, status: "stripe_not_configured" };
+  const event = await stripe.events.retrieve(opts.eventId);
+  return handleStripeWebhook({
+    store: opts.store,
+    rawBody: "",
+    signature: "",
+    webhookSecret: "",
+    stripe,
+    verifiedEvent: event,
+  });
 }
 
 function localStatusForEvent(eventType: string, stripeStatus: string): ServiceStatus {

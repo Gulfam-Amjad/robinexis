@@ -1,4 +1,5 @@
 import type http from "node:http";
+import type { RedisSessionCache } from "@robinexis/database";
 
 type Bucket = { count: number; resetAt: number };
 
@@ -44,6 +45,22 @@ export function checkRateLimit(
     limit,
     remaining: Math.max(0, limit - bucket.count),
     retryAfterSeconds: Math.max(1, Math.ceil((bucket.resetAt - now) / 1_000)),
+  };
+}
+
+export async function checkDistributedRateLimit(
+  redis: RedisSessionCache,
+  key: string,
+  limit: number,
+  windowMs = 60_000,
+): Promise<RateLimitResult> {
+  const distributed = await redis.incrementRateLimit(key, windowMs);
+  if (!distributed) return checkRateLimit(key, limit, windowMs);
+  return {
+    allowed: distributed.count <= limit,
+    limit,
+    remaining: Math.max(0, limit - distributed.count),
+    retryAfterSeconds: Math.max(1, Math.ceil(distributed.resetMs / 1_000)),
   };
 }
 
