@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { MemoryStore } from "./memory.js";
 import type {
   BookingRecord,
+  CallSession,
   CreditLedgerEntry,
   Location,
   ProvisioningRun,
@@ -82,6 +83,28 @@ describe("MemoryStore SaaS foundation", () => {
     await store.saveBookingRecord(booking);
     expect((await store.findBookingByIdempotency("client-a", "conversation:slot"))?.id).toBe("booking-1");
     expect(await store.findBookingByIdempotency("client-b", "conversation:slot")).toBeUndefined();
+  });
+
+  it("rejects a provider call id reused by another tenant", async () => {
+    const store = new MemoryStore();
+    const call: CallSession = {
+      id: "provider-call-1",
+      clientId: "client-a",
+      direction: "inbound",
+      objective: "test",
+      promptVersionId: "prompt-1",
+      transcript: [],
+      collected: {},
+      toolHistory: [],
+      state: "started",
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    };
+    await store.saveCall(call);
+    await expect(store.saveCall({ ...call, clientId: "client-b" })).rejects.toThrow(
+      "call_session_tenant_conflict",
+    );
   });
 
   it("maintains an append-only credit balance and resumable provisioning run", async () => {

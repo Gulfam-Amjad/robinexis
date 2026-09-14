@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { config as loadEnv } from "dotenv";
 import {
   getStore,
+  getRedis,
   migrate,
   seedStore,
   structuredLog,
@@ -18,7 +19,7 @@ import {
 import { applyCors, authenticateRequest, describeAuthMode } from "./auth.js";
 import { ingestElevenLabsWebhook } from "./elevenLabsWebhook.js";
 import { completeTwilioOAuthCallback, handleProductRoute } from "./productRoutes.js";
-import { checkRateLimit, limitForPath, requestIp } from "./rateLimit.js";
+import { checkDistributedRateLimit, checkRateLimit, limitForPath, requestIp } from "./rateLimit.js";
 import { provisionClientAgent } from "./provisioningService.js";
 import { runVoiceTool, voiceToolClientIdForRequest } from "./voiceToolRoutes.js";
 
@@ -85,7 +86,14 @@ const server = http.createServer(async (req, res) => {
 
   const requestLimit = limitForPath(url.pathname);
   if (requestLimit) {
-    const rate = checkRateLimit(`${requestIp(req)}:${url.pathname}`, requestLimit);
+    const rateKey = `${requestIp(req)}:${url.pathname}`;
+    let rate;
+    try {
+      rate = await checkDistributedRateLimit(await getRedis(), rateKey, requestLimit);
+    } catch (error) {
+      structuredLog("rate_limit_redis_fallback", { reason: String(error) });
+      rate = checkRateLimit(rateKey, requestLimit);
+    }
     res.setHeader("X-RateLimit-Limit", String(rate.limit));
     res.setHeader("X-RateLimit-Remaining", String(rate.remaining));
     if (!rate.allowed) {
@@ -97,19 +105,38 @@ const server = http.createServer(async (req, res) => {
 
   try {
     const store = await getStore();
-    if (url.pathname === "/health") {
+    if (url.pathname === "/health" || url.pathname === "/health/database") {
       await store.listClients();
-      send(res, 200, {
-        status: "ok",
+      if (url.pathname === "/health/database") {
+        send(res, 200, { status: "ok", service: "database", buildVersion: BUILD_VERSION });
+        return;
+      }
+      const redisConfigured = Boolean(process.env.REDIS_URL);
+      const redisHealthy = redisConfigured ? await (await getRedis()).ping() : false;
+      const redisRequired = process.env.RATE_LIMIT_REDIS_REQUIRED === "true";
+      send(res, redisRequired && !redisHealthy ? 503 : 200, {
+        status: redisRequired && !redisHealthy ? "degraded" : "ok",
         service: "api",
         buildVersion: BUILD_VERSION,
-        checks: { database: "ok" },
+        checks: {
+          database: "ok",
+          sharedRateLimit: redisConfigured ? (redisHealthy ? "ok" : "degraded") : "not_configured",
+        },
+        constraints: {
+          singleReplicaRequired: !redisHealthy,
+          redisRequired,
+        },
       });
       return;
     }
     if (url.pathname === "/internal/provisioning/retry" && req.method === "POST") {
       if (!workerAuthorized(String(req.headers["x-worker-secret"] || ""))) {
         send(res, 401, { error: "unauthorized" });
+        return;
+      }
+      if (process.env.SAAS_PROVISIONING_ENABLED !== "true") {
+        structuredLog("provisioning_retry_blocked", { reason: "saas_provisioning_disabled" });
+        send(res, 503, { error: "saas_provisioning_disabled" });
         return;
       }
       const body = JSON.parse((await readRaw(req)).toString("utf8") || "{}") as {

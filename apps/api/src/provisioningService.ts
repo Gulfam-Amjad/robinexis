@@ -284,7 +284,7 @@ async function provisionClientAgentAttempt(
 
   const output = outputOf(run);
   if (selfServeProvisioning) {
-    client.onboardingStatus = "provisioning";
+    client.onboardingStatus = "setup_in_progress";
     await store.upsertClient(client);
   }
 
@@ -575,7 +575,7 @@ export async function provisionClientAgent(
     }
     const client = await dependencies.store.getClient(input.clientId);
     if (client?.onboardingStatus) {
-      client.onboardingStatus = "failed";
+      client.onboardingStatus = "needs_attention";
       await dependencies.store.upsertClient(client);
     }
     throw error;

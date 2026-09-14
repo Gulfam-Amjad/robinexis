@@ -10,6 +10,7 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   projects: [
+    { name: "accessibility", testMatch: "accessibility.spec.ts", use: { ...devices["Desktop Chrome"] } },
     { name: "chromium", testMatch: "product-flow.spec.ts", use: { ...devices["Desktop Chrome"] } },
     { name: "mobile", testMatch: "product-flow.spec.ts", use: { ...devices["Pixel 7"] } },
     {

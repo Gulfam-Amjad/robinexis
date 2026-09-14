@@ -45,7 +45,7 @@ export function LandingPage() {
             <p>Answer every call with a warm, capable receptionist built around your business.</p>
             <p>Robinexis handles enquiries, checks live availability, books appointments, and hands over safely when your team is needed.</p>
             <div className="hero-actions">
-              <Link className="button button-primary button-md" to="/signup">Request your demo <ArrowRight size={16} /></Link>
+              <Link className="button button-primary button-md" to="/signup?plan=starter">Start free trial <ArrowRight size={16} /></Link>
               <Link className="text-link" to="/demo/blades-hair"><span><Play size={14} fill="currentColor" /></span> Try a live receptionist</Link>
             </div>
             <div className="hero-proof">
@@ -112,10 +112,10 @@ export function LandingPage() {
           <span className="pill pill-light"><Sparkles size={14} /> Your next customer is calling</span>
           <h2>Let Robinexis pick up.</h2>
           <p>See how a receptionist trained around your business could answer, help, and book.</p>
-          <Link className="button button-light button-md" to="/signup">Request a live demo <ArrowRight size={16} /></Link>
+          <Link className="button button-light button-md" to="/signup?plan=starter">Start free trial <ArrowRight size={16} /></Link>
         </section>
       </main>
-      <footer className="public-footer"><LogoFooter /><span>AI receptionists that answer, help, and book · © 2026 Robinexis</span><div><Link to="/pricing">Pricing</Link><a href="mailto:hello@robinexis.com">Contact</a><a href="#">Privacy</a></div></footer>
+      <footer className="public-footer"><LogoFooter /><span>AI receptionists that answer, help, and book · © 2026 Robinexis</span><div><Link to="/pricing">Pricing</Link><a href="mailto:hello@robinexis.com">Contact</a><Link to="/privacy">Privacy</Link><Link to="/terms">Terms</Link></div></footer>
     </div>
   );
 }
@@ -203,13 +203,19 @@ export function SignupPage() {
   const [serverError, setServerError] = useState("");
   const [checking, setChecking] = useState(false);
   const [sent, setSent] = useState(false);
+  const [legalAccepted, setLegalAccepted] = useState(false);
   const intent = authIntent(search);
   if (!AUTH_REQUIRED) return <Navigate to="/app" replace />;
   if (actor) return <Navigate to="/dashboard" replace />;
   const google = async () => {
+    if (!legalAccepted) {
+      setServerError("Accept the Terms and Privacy Policy to create an account.");
+      return;
+    }
     setChecking(true);
     setServerError("");
     try {
+      localStorage.setItem("robinexis-legal-consent-v1", "accepted");
       await signInWithGoogle(intent);
     } catch (error) {
       setServerError(authErrorMessage(error, "Google sign-up could not be started."));
@@ -217,10 +223,15 @@ export function SignupPage() {
     }
   };
   const submit = async ({ email }: LoginFields) => {
+    if (!legalAccepted) {
+      setServerError("Accept the Terms and Privacy Policy to create an account.");
+      return;
+    }
     setChecking(true);
     setServerError("");
     setSent(false);
     try {
+      localStorage.setItem("robinexis-legal-consent-v1", "accepted");
       await signInWithEmail(email.trim(), intent);
       setSent(true);
     } catch (error) {
@@ -239,6 +250,10 @@ export function SignupPage() {
         <Field label="Work email" hint="Use the email your Robinexis workspace will be assigned to." error={errors.email?.message}>
           <input type="email" autoComplete="email" placeholder="you@company.com" {...register("email")} />
         </Field>
+        <label className="checkbox-row">
+          <input type="checkbox" checked={legalAccepted} onChange={(event) => setLegalAccepted(event.target.checked)} />
+          <span>I agree to the <Link to="/terms">Terms</Link> and acknowledge the <Link to="/privacy">Privacy Policy</Link>.</span>
+        </label>
         {serverError && <div className="form-alert" role="alert">{serverError}</div>}
         {sent && <div className="form-success" role="status">Check your inbox to finish creating your account. Open the link in this same browser — it only works where you asked for it.</div>}
         <Button type="submit" disabled={checking}>{checking ? "Sending link…" : "Continue with email"} <ArrowRight size={16} /></Button>
@@ -257,7 +272,19 @@ export function AuthCallbackPage() {
     let active = true;
     void completeAuthCallback()
       .then(async (result) => {
-        const actor = await api.session(result.accessToken);
+        let actor = await api.session(result.accessToken);
+        if (localStorage.getItem("robinexis-legal-consent-v1") === "accepted") {
+          await api.acceptLegal(result.accessToken);
+          localStorage.removeItem("robinexis-legal-consent-v1");
+        }
+        if (actor.role === "pending") {
+          try {
+            await api.acceptInvitations(result.accessToken);
+            actor = await api.session(result.accessToken);
+          } catch {
+            // A normal self-serve signup has no invitation and remains pending for checkout.
+          }
+        }
         return { result, actor };
       })
       .then(({ result, actor }) => {
@@ -292,6 +319,14 @@ export function SelfServeBillingPage() {
   const checkoutStatus = search.get("checkout");
   const selected = validPlan(search.get("plan")) || selectedPlan();
   const paid = actor?.subscriptionStatus === "active" || actor?.subscriptionStatus === "trialing";
+  const billing = useQuery({
+    queryKey: ["billing-status", actor?.clientId],
+    queryFn: () => api.billingStatus(actor?.clientId),
+    enabled: Boolean(actor?.clientId),
+    retry: false,
+  });
+  const canManagePortal = Boolean(billing.data?.canManagePortal);
+  const recovery = ["past_due", "unpaid", "incomplete"].includes(actor?.subscriptionStatus || "");
   const checkout = useMutation({
     mutationFn: async (plan: AuthPlan) => {
       const result = await api.createCheckout(plan, actor?.clientId);
@@ -301,6 +336,10 @@ export function SelfServeBillingPage() {
       return result.url;
     },
     onSuccess: (url) => window.location.assign(url),
+  });
+  const portal = useMutation({
+    mutationFn: () => api.createBillingPortal(actor?.clientId),
+    onSuccess: ({ url }) => window.location.assign(url),
   });
 
   useEffect(() => {
@@ -312,7 +351,10 @@ export function SelfServeBillingPage() {
 
   useEffect(() => {
     if (checkoutStatus !== "success" || paid) return;
-    const refresh = () => void queryClient.invalidateQueries({ queryKey: ["session-actor"] });
+    const refresh = () => {
+      void queryClient.invalidateQueries({ queryKey: ["session-actor"] });
+      void queryClient.invalidateQueries({ queryKey: ["billing-status"] });
+    };
     refresh();
     const interval = window.setInterval(refresh, 1_500);
     const timeout = window.setTimeout(() => window.clearInterval(interval), 30_000);
@@ -328,13 +370,15 @@ export function SelfServeBillingPage() {
   const error = checkout.error instanceof Error ? checkout.error.message : checkout.error ? "Checkout could not be started." : "";
   return (
     <AuthShell
-      title={paid ? "Your Robinexis plan" : "Choose a plan to continue"}
+      title={paid ? "Your Robinexis plan" : recovery && canManagePortal ? "Your billing needs attention" : "Choose a plan to continue"}
       copy={
         checkoutStatus === "success"
           ? "Stripe confirmed checkout. We’ll unlock the dashboard as soon as the subscription is marked trialing or active."
           : paid
-            ? `This workspace is ${actor?.subscriptionStatus}. You can change plan from Stripe checkout if you need to.`
-            : "Starter and Pro include a 3-day trial. A card is only collected if Stripe requires one for the trial."
+            ? billing.data?.trialEndsAt
+              ? `Your ${billing.data.plan || "Robinexis"} trial runs until ${new Date(billing.data.trialEndsAt).toLocaleDateString("en-GB")}. Manage payment and cancellation securely in Stripe.`
+              : `This workspace is ${actor?.subscriptionStatus}. Manage payment and cancellation securely in Stripe.`
+            : "Starter and Pro include a 3-day trial. Stripe securely collects a card now and billing starts only after the trial."
       }
     >
       <div className="auth-note">
@@ -347,9 +391,16 @@ export function SelfServeBillingPage() {
       {checkoutStatus === "cancelled" && (
         <div className="form-alert" role="status">Checkout was cancelled. Pick a plan when you are ready.</div>
       )}
+      {checkoutStatus === "success" && !paid && (
+        <div className="auth-note" role="status"><p>Payment details are confirmed. Stripe’s subscription update is still arriving; this page refreshes automatically.</p></div>
+      )}
+      {recovery && canManagePortal && (
+        <div className="form-alert" role="alert">Your plan needs attention. Open secure billing to update the payment method or review the subscription.</div>
+      )}
       {error && <div className="form-alert" role="alert">{error}</div>}
+      {portal.error && <div className="form-alert" role="alert">{portal.error.message}</div>}
       <div className="auth-form">
-        {(["starter", "pro"] as const).map((plan) => (
+        {!paid && !canManagePortal && (["starter", "pro"] as const).map((plan) => (
           <Button
             key={plan}
             type="button"
@@ -364,6 +415,11 @@ export function SelfServeBillingPage() {
                 : "Pro · £249/month"}
           </Button>
         ))}
+        {canManagePortal && (
+          <Button type="button" variant="secondary" disabled={portal.isPending} onClick={() => portal.mutate()}>
+            {portal.isPending ? "Opening secure billing…" : "Manage billing in Stripe"}
+          </Button>
+        )}
         {paid && <Link className="button button-ghost button-md" to={actor?.onboardingStatus === "active" ? "/dashboard" : "/onboarding"}>{actor?.onboardingStatus === "active" ? "Open dashboard" : "Set up my receptionist"}</Link>}
         <Button type="button" variant="ghost" onClick={logout}>Sign out</Button>
       </div>
@@ -380,24 +436,11 @@ const selfServeOnboardingSchema = z.object({
   prices: z.string().optional(),
   services: z.string().min(3, "Add at least one service"),
   phoneMode: z.enum(["robinexis_account", "customer_oauth"]),
-  twilioNumber: z.string().regex(/^\+[1-9]\d{7,14}$/, "Paste the purchased number in international format."),
-  twilioApiKeySid: z.string().optional(),
-  twilioApiKeySecret: z.string().optional(),
-}).superRefine((value, context) => {
-  if (value.phoneMode === "customer_oauth") {
-    if (!/^SK[0-9a-f]{32}$/i.test(value.twilioApiKeySid || "")) {
-      context.addIssue({ code: "custom", path: ["twilioApiKeySid"], message: "Enter the API Key SID beginning SK." });
-    }
-    if (!value.twilioApiKeySecret) {
-      context.addIssue({ code: "custom", path: ["twilioApiKeySecret"], message: "Enter the API Key secret." });
-    }
-  }
+  twilioNumber: z.string().regex(/^\+[1-9]\d{7,14}$/, "Use international format such as +447700900123").optional().or(z.literal("")),
 });
 
 export function SelfServeOnboardingPage() {
   const { actor } = useSession();
-  const navigate = useNavigate();
-  const [search] = useSearchParams();
   const queryClient = useQueryClient();
   const form = useForm<z.infer<typeof selfServeOnboardingSchema>>({
     resolver: zodResolver(selfServeOnboardingSchema),
@@ -406,22 +449,12 @@ export function SelfServeOnboardingPage() {
       phoneMode: "robinexis_account",
     },
   });
-  const mode = form.watch("phoneMode");
-  const twilioConnection = useQuery({
-    queryKey: ["twilio-connection", actor?.clientId],
-    queryFn: () => api.twilioConnection(actor!.clientId!),
-    enabled: Boolean(actor?.clientId),
-  });
   const onboarding = useQuery({
     queryKey: ["self-serve-onboarding", actor?.clientId],
     queryFn: () => api.onboarding(actor!.clientId!),
     enabled: Boolean(actor?.clientId),
     refetchInterval: (query) =>
       ["pending", "running"].includes(query.state.data?.provisioning?.status || "") ? 3_000 : false,
-  });
-  const startTwilio = useMutation({
-    mutationFn: () => api.startTwilioConnection(actor!.clientId!),
-    onSuccess: ({ url }) => window.location.assign(url),
   });
   const finalize = useMutation({
     mutationFn: async (values: z.infer<typeof selfServeOnboardingSchema>) => {
@@ -433,16 +466,6 @@ export function SelfServeOnboardingPage() {
           durationMinutes: Number(duration || 30),
         };
       }).filter((service) => service.title && service.slug && service.durationMinutes > 0);
-      if (values.phoneMode === "customer_oauth") {
-        if (!["credentials_required", "active"].includes(twilioConnection.data?.status || "")) {
-          throw new Error("Connect your Twilio account before launching.");
-        }
-        await api.saveTwilioCredentials(actor!.clientId!, {
-          apiKeySid: values.twilioApiKeySid!,
-          apiKeySecret: values.twilioApiKeySecret!,
-          twilioNumber: values.twilioNumber,
-        });
-      }
       return api.finalizeOnboarding(actor!.clientId!, {
         businessName: values.businessName,
         location: values.location,
@@ -452,7 +475,7 @@ export function SelfServeOnboardingPage() {
         prices: values.prices,
         services,
         phoneMode: values.phoneMode,
-        twilioNumber: values.twilioNumber,
+        twilioNumber: values.twilioNumber || undefined,
         publishedFacts: [
           `Opening hours: ${values.hours}`,
           ...(values.prices ? [`Pricing information: ${values.prices}`] : []),
@@ -464,7 +487,6 @@ export function SelfServeOnboardingPage() {
         queryClient.invalidateQueries({ queryKey: ["session-actor"] }),
         queryClient.invalidateQueries({ queryKey: ["clients"] }),
       ]);
-      navigate("/app", { replace: true });
     },
   });
 
@@ -473,10 +495,44 @@ export function SelfServeOnboardingPage() {
     return <Navigate to="/billing" replace />;
   }
   if (actor.onboardingStatus === "active") return <Navigate to="/app" replace />;
+  if (["setup_queued", "setup_in_progress", "needs_attention"].includes(actor.onboardingStatus || "")) {
+    const needsAttention = actor.onboardingStatus === "needs_attention";
+    const inProgress = actor.onboardingStatus === "setup_in_progress";
+    return (
+      <AuthShell
+        title={needsAttention ? "We need one more detail" : inProgress ? "Your setup is in progress" : "Your setup is in the queue"}
+        copy={needsAttention
+          ? "A Robinexis specialist has paused setup safely and will contact you before anything goes live."
+          : inProgress
+            ? "A Robinexis specialist is configuring and testing your receptionist. No phone routing changes are made without review."
+            : "Your details are saved. We will review the call flow, calendar and phone setup before activating your receptionist."}
+      >
+        <div className="setup-progress" role="status">
+          {["Payment confirmed", "Business details received", "Specialist setup", "Test and activate"].map((step, index) => (
+            <div className={index < (inProgress ? 3 : 2) ? "complete" : needsAttention && index === 2 ? "attention" : ""} key={step}>
+              <span>{index + 1}</span><p><strong>{step}</strong><small>{index === 3 ? "Only after your setup is approved" : index < 2 ? "Complete" : index === 2 ? "Robinexis is handling this" : "Next"}</small></p>
+            </div>
+          ))}
+        </div>
+        {(onboarding.data?.client?.onboardingNotes || onboarding.data?.client?.onboardingEta) && (
+          <div className="auth-note">
+            <p>
+              {onboarding.data?.client?.onboardingNotes || "Your setup is progressing."}
+              {onboarding.data?.client?.onboardingEta
+                ? ` Target completion: ${new Date(onboarding.data.client.onboardingEta).toLocaleString("en-GB")}.`
+                : ""}
+            </p>
+          </div>
+        )}
+        <Link className="button button-secondary button-md full-button" to="/billing">Manage billing</Link>
+        <a className="button button-ghost button-md full-button" href="mailto:hello@robinexis.com">Contact setup support</a>
+      </AuthShell>
+    );
+  }
   return (
     <AuthShell
-      title="Set up your receptionist"
-      copy="Enter your business details once. Robinexis creates the calendar services, ElevenLabs agent, tools, and phone routing automatically."
+      title="Tell us how your front desk works"
+      copy="Submit the essentials now. A Robinexis specialist will review, configure and test your receptionist before anything goes live."
     >
       <form className="auth-form" onSubmit={form.handleSubmit((values) => finalize.mutate(values))}>
         <Field label="Business name" error={form.formState.errors.businessName?.message}><input {...form.register("businessName")} /></Field>
@@ -488,26 +544,11 @@ export function SelfServeOnboardingPage() {
         <Field label="Prices"><textarea rows={3} placeholder="Haircut from £40" {...form.register("prices")} /></Field>
         <Field label="Phone setup">
           <select {...form.register("phoneMode")}>
-            <option value="robinexis_account">Use a purchased number in Robinexis Twilio</option>
-            <option value="customer_oauth">Use a purchased number in my own Twilio account</option>
+            <option value="robinexis_account">I need Robinexis to arrange a number</option>
+            <option value="customer_oauth">I already use Twilio / want to keep my number</option>
           </select>
         </Field>
-        {mode === "customer_oauth" && (
-          <>
-            <div className="auth-note">
-              <p>Twilio connection: <strong>{twilioConnection.data?.status || "not connected"}</strong></p>
-            </div>
-            {!["credentials_required", "active"].includes(twilioConnection.data?.status || "") && (
-              <Button type="button" variant="secondary" disabled={startTwilio.isPending} onClick={() => startTwilio.mutate()}>
-                {startTwilio.isPending ? "Opening Twilio…" : "Connect Twilio securely"}
-              </Button>
-            )}
-            <Field label="Twilio API Key SID" hint="Create a Standard API Key in Twilio. This is only used server-side." error={form.formState.errors.twilioApiKeySid?.message}><input autoComplete="off" placeholder="SK…" {...form.register("twilioApiKeySid")} /></Field>
-            <Field label="Twilio API Key secret" error={form.formState.errors.twilioApiKeySecret?.message}><input type="password" autoComplete="new-password" {...form.register("twilioApiKeySecret")} /></Field>
-          </>
-        )}
-        <Field label="Purchased Twilio number" hint={mode === "customer_oauth" ? "The number must exist in the connected account." : "The number must exist in the Robinexis Twilio account."} error={form.formState.errors.twilioNumber?.message}><input placeholder="+44…" {...form.register("twilioNumber")} /></Field>
-        {search.get("twilio") === "failed" && <div className="form-alert" role="alert">Twilio authorization did not complete. Retry the secure connection.</div>}
+        <Field label="Existing phone number (optional)" hint="Add the number you want to keep or transfer. We will confirm options before changing routing." error={form.formState.errors.twilioNumber?.message}><input placeholder="+44…" {...form.register("twilioNumber")} /></Field>
         {onboarding.data?.provisioning && (
           <div className="auth-note" role="status">
             <p>
@@ -518,7 +559,7 @@ export function SelfServeOnboardingPage() {
           </div>
         )}
         {finalize.error && <div className="form-alert" role="alert">{finalize.error.message}</div>}
-        <Button disabled={finalize.isPending}>{finalize.isPending ? "Creating your receptionist…" : "Create and activate receptionist"}</Button>
+        <Button disabled={finalize.isPending}>{finalize.isPending ? "Submitting securely…" : "Submit for specialist setup"}</Button>
       </form>
     </AuthShell>
   );
@@ -537,27 +578,57 @@ function AuthShell({ title, copy, children }: { title: string; copy: string; chi
 }
 
 export function PricingPage() {
-  const plans = [
+  const catalog = useQuery({ queryKey: ["public-plans"], queryFn: api.plans, staleTime: 300_000 });
+  const fallbackPlans = [
     { name: "Starter", price: "£99", plan: "starter" as const, copy: "For independent businesses ready to stop missing calls.", features: ["One AI receptionist", "300 included minutes", "Booking & call summaries", "3-day trial"] },
-    { name: "Pro", price: "£249", plan: "pro" as const, copy: "For busy teams turning more calls into appointments.", features: ["Everything in Starter", "1,500 included minutes", "Smart rebooking & waitlist", "Revenue recovery dashboard"], featured: true },
+    { name: "Pro", price: "£249", plan: "pro" as const, copy: "For busy teams turning more calls into appointments.", features: ["Everything in Starter", "1,500 included minutes", "Revenue recovery dashboard", "3-day trial"], featured: true },
     { name: "Enterprise", price: "Let’s talk", copy: "For multi-location teams with more complex workflows.", features: ["Multiple locations", "Custom integrations", "Priority onboarding", "Dedicated optimisation"] },
   ];
+  const featureLabels: Record<string, string> = {
+    "automated-call-answering": "Automated call answering",
+    "cancellation-follow-up": "Cancellation follow-up",
+    "rescheduling-dashboard": "Rescheduling dashboard",
+    "smart-rebooking": "Smart rebooking",
+    "automatic-waitlist-filling": "Automatic waitlist filling",
+    "revenue-recovery-dashboard": "Revenue recovery dashboard",
+    "multi-location-calendars": "Multi-location calendars",
+    "custom-workflows": "Custom workflows",
+    "advanced-reporting": "Advanced reporting",
+    "dedicated-onboarding": "Dedicated onboarding",
+    "premium-support": "Premium support",
+  };
+  const plans = catalog.data?.items.map((plan) => ({
+    name: plan.name,
+    price: plan.monthlyPricePence === null ? "Let’s talk" : `£${plan.monthlyPricePence / 100}`,
+    plan: plan.tier === "enterprise" ? undefined : plan.tier,
+    copy: plan.tier === "starter"
+      ? "For independent businesses ready to stop missing calls."
+      : plan.tier === "pro"
+        ? "For busy teams turning more calls into appointments."
+        : "For multi-location teams with more complex workflows.",
+    features: [
+      `${plan.includedMinutes.toLocaleString("en-GB")} included minutes`,
+      ...plan.features.filter((feature) => feature.operational).map((feature) => featureLabels[feature.id] || feature.id),
+      `${plan.trialDays}-day trial`,
+    ],
+    featured: plan.tier === "pro",
+  })) || fallbackPlans;
   return (
     <div className="public-page pricing-page">
       <PublicHeader />
       <main className="pricing-main">
-        <div className="section-intro"><span className="eyebrow">Pricing</span><h1>Simple self-serve plans</h1><p>Start with a 3-day trial on Starter or Pro. Stripe hosts checkout after you sign in with Google.</p></div>
+        <div className="section-intro"><span className="eyebrow">Pricing</span><h1>Simple plans. A receptionist built for you.</h1><p>Start with a 3-day trial on Starter or Pro. Add a card securely in Stripe; you will not be charged until the trial ends.</p></div>
         <div className="pricing-grid">
           {plans.map((plan) => <Card className={`price-card ${plan.featured ? "price-featured" : ""}`} key={plan.name}>
             {plan.featured && <span className="popular">Most popular</span>}
             <h2>{plan.name}</h2><p>{plan.copy}</p><strong>{plan.price}{plan.price.startsWith("£") && <small>/month</small>}</strong>
             {"plan" in plan && plan.plan
               ? <Link className={`button button-${plan.featured ? "primary" : "secondary"} button-md`} to={`/signup?plan=${plan.plan}`}>Start trial <ArrowRight size={15} /></Link>
-              : <a className="button button-secondary button-md" href="mailto:hello@robinexis.com?subject=Enterprise%20Robinexis">Contact sales <ArrowRight size={15} /></a>}
+              : <Link className="button button-secondary button-md" to="/enterprise-contact">Contact sales <ArrowRight size={15} /></Link>}
             <ul>{plan.features.map((feature) => <li key={feature}><Check size={16} />{feature}</li>)}</ul>
           </Card>)}
         </div>
-        <p className="pricing-footnote">Test-mode Stripe checkout in this environment. VAT and live billing are confirmed before production go-live.</p>
+        <p className="pricing-footnote">Secure checkout by Stripe. Prices exclude VAT where applicable. Cancel before the trial ends to avoid a charge.</p>
       </main>
     </div>
   );
@@ -598,7 +669,7 @@ export function EnterpriseContactPage() {
           </ul>
         </Card>
       </main>
-      <footer className="public-footer"><LogoFooter /><span>AI receptionists that answer, help, and book · © 2026 Robinexis</span><div><Link to="/pricing">Pricing</Link><a href="mailto:hello@robinexis.com">Contact</a><a href="#">Privacy</a></div></footer>
+      <footer className="public-footer"><LogoFooter /><span>AI receptionists that answer, help, and book · © 2026 Robinexis</span><div><Link to="/pricing">Pricing</Link><a href="mailto:hello@robinexis.com">Contact</a><Link to="/privacy">Privacy</Link><Link to="/terms">Terms</Link></div></footer>
     </div>
   );
 }

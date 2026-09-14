@@ -24,6 +24,22 @@ describe("database migrations", () => {
     expect(sql).toMatch(/ENABLE ROW LEVEL SECURITY/i);
   });
 
+  it("allows provider calendar slugs per tenant and locks call ownership", () => {
+    const sql = readFileSync(path.join(dir, "011_tenant_isolation_hardening.sql"), "utf8");
+    expect(sql).toMatch(/DROP CONSTRAINT IF EXISTS calendar_event_types_provider_slug_key/i);
+    expect(sql).toMatch(/calendar_event_types\s*\(client_id, provider_slug\)/i);
+    expect(sql).toMatch(/call_session tenant is immutable/i);
+  });
+
+  it("keeps the operator audit trail append-only and outside browser reach", () => {
+    const sql = readFileSync(path.join(dir, "010_operator_audit_log.sql"), "utf8");
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS operator_audit_log/i);
+    expect(sql).toMatch(/BEFORE UPDATE OR DELETE ON operator_audit_log/i);
+    expect(sql).toMatch(/ENABLE ROW LEVEL SECURITY/i);
+    expect(sql).toMatch(/REVOKE ALL ON public\.operator_audit_log FROM anon/i);
+    expect(sql).toMatch(/REVOKE ALL ON public\.operator_audit_log FROM authenticated/i);
+  });
+
   it("stores customer Twilio OAuth and API-key credentials outside browser-readable config", () => {
     const sql = readFileSync(path.join(dir, "009_twilio_oauth_connections.sql"), "utf8");
     expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS twilio_connections/i);

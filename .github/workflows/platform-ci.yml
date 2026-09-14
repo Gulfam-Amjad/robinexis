@@ -6,11 +6,41 @@ on:
     branches: [main]
 
 jobs:
+  secret-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: robinexis_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       VITE_SKIP_AUTH: "true"
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/robinexis_test
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/robinexis_test
+      DATABASE_SSL: "false"
+      REQUIRE_DATABASE: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -21,7 +51,34 @@ jobs:
       - run: npm run typecheck
       - run: npm run build:web
       - run: npm run build:backend
+      - run: npm run db:migrate
       - run: npm test
+      - run: npm audit --omit=dev --audit-level=high
       - run: npm run test:web
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        with:
+          name: robinexis-web-dist
+          path: dist
+          if-no-files-found: error
+
+  staging-smoke:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [secret-scan, verify]
+    runs-on: ubuntu-latest
+    environment: staging
+    env:
+      STAGING_API_ORIGIN: https://robinexisapi-staging.up.railway.app
+      STAGING_WEB_ORIGIN: https://robinexis-staging.vercel.app
+    steps:
+      - name: Require isolated staging URLs
+        run: |
+          test -n "$STAGING_API_ORIGIN"
+          test -n "$STAGING_WEB_ORIGIN"
+          test "$STAGING_API_ORIGIN" != "https://api.robinexis.com"
+          test "$STAGING_WEB_ORIGIN" != "https://app.robinexis.com"
+      - name: Verify API database health
+        run: curl --fail --retry 4 --retry-delay 3 "$STAGING_API_ORIGIN/health"
+      - name: Verify staging web
+        run: curl --fail --retry 4 --retry-delay 3 "$STAGING_WEB_ORIGIN/pricing"

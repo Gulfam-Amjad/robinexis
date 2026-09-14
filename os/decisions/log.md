@@ -104,3 +104,29 @@ salon fallback until the custom gateway passes sandbox tests).
 
 ---
 
+## 2026-09-07 — New customers buy Twilio; Cal.com stays on the Robinexis account
+
+**Decision:** Phone ownership **A** — the customer purchases the Twilio number and pastes the E.164 value. Calendar ownership **B** — bookings use the shared Robinexis Cal.com API key (`CALCOM_API_KEY`), with a per-workspace calendar connection row. Do not ask each salon for a Cal.com key.
+
+**Why:** The self-serve promise is that the only customer-owned purchase is the phone number. ElevenLabs, Cal.com, and Stripe stay on Robinexis accounts. Plan default for phone was A until chosen; “everything else automatic” selects calendar B.
+
+**Alternatives considered:** Robinexis auto-buys Twilio numbers (needs extra purchase code). Each salon connects their own Cal.com (safer diary isolation, more onboarding friction).
+
+**Owner:** Gulfam (implementation); Will/Ed if they want to reverse isolation later.
+
+---
+
+## 2026-09-14 — New tenants require isolated calendar connections
+
+**Decision:** Supersede the 2026-09-07 shared-Cal.com default for all new tenants. New workspaces start
+with `CONNECTION_REQUIRED` and never inherit the production `CALCOM_API_KEY`. Blades remains unchanged.
+
+**Why:** A shared production credential breaks tenant isolation and could place one salon's bookings in
+another account. Operator-assisted setup remains safer until dedicated staging and per-tenant connections pass.
+
+**Alternatives considered:** Continue assigning the platform credential automatically (rejected as unsafe).
+
+**Owner:** Robinexis launch plan; future automatic provisioning still requires explicit owner approval.
+
+---
+

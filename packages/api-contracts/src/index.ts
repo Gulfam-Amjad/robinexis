@@ -15,6 +15,9 @@ export type WorkspaceRole = "owner" | "manager" | "viewer";
 export type OnboardingStatus =
   | "payment_required"
   | "details_required"
+  | "setup_queued"
+  | "setup_in_progress"
+  | "needs_attention"
   | "ready_to_provision"
   | "provisioning"
   | "active"
@@ -54,6 +57,9 @@ export interface ClientSummary {
   businessName: string;
   published: boolean;
   serviceStatus: ServiceStatus;
+  onboardingStatus?: OnboardingStatus;
+  onboardingNotes?: string;
+  onboardingEta?: string;
   access?: { enabled?: boolean; inbound?: boolean; outbound?: boolean; reason?: string };
 }
 
@@ -93,6 +99,8 @@ export interface Client extends ClientSummary {
   monthlyMinuteLimit?: number;
   promptVersionId?: string;
   onboardingStatus?: OnboardingStatus;
+  onboardingNotes?: string;
+  onboardingEta?: string;
   phoneAcquisitionMode?: PhoneAcquisitionMode;
   requestedPhoneNumber?: string;
 }

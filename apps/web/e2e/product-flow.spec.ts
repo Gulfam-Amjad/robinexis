@@ -14,7 +14,7 @@ async function openWorkspaceSession(
   page: Page,
   role: "operator" | "salon" = "operator",
   subscriptionStatus: "trialing" | "active" | "past_due" = "trialing",
-  onboardingStatus?: "details_required" | "provisioning" | "active",
+  onboardingStatus?: "details_required" | "setup_queued" | "setup_in_progress" | "needs_attention" | "active",
 ) {
   await page.addInitScript(() => {
     sessionStorage.setItem("robinexis_admin_api_key", "test-admin-key");
@@ -66,6 +66,14 @@ async function openWorkspaceSession(
     if (path === "/api/v1/integrations/status") return route.fulfill({ json: { items: [{ id: "calcom", name: "Cal.com", connected: true }] } });
     if (path === "/api/v1/memberships") return route.fulfill({ json: { items: role === "salon" ? [{ id: "member_1", clientId: client.id, email: "owner@demo-salon.test", role: "owner", createdAt: "2026-09-01T00:00:00.000Z" }] : [] } });
     if (path === "/api/v1/usage") return route.fulfill({ json: { clientId: client.id, month: "2026-08", inboundMinutes: 10, outboundMinutes: 2 } });
+    if (path === "/api/v1/billing/status") return route.fulfill({ json: {
+      configured: true,
+      canManagePortal: true,
+      plan: "starter",
+      status: subscriptionStatus,
+      trialEndsAt: "2026-09-16T00:00:00.000Z",
+      cancelAtPeriodEnd: false,
+    } });
     if (path === `/api/v1/clients/${client.id}`) return route.fulfill({ json: { ...client, role: "AI receptionist", tone: "Warm and concise", publishedFacts: [], services: [] } });
     return route.fulfill({ json: { items: [] } });
   });
@@ -80,7 +88,7 @@ async function expectNoPageOverflow(page: Page) {
 
 test("public pricing explains the product and access model", async ({ page }) => {
   await page.goto("/pricing");
-  await expect(page.getByRole("heading", { name: /simple self-serve plans/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /a receptionist built for you/i })).toBeVisible();
   await expect(page.getByText(/3-day trial/i).first()).toBeVisible();
   await expectNoPageOverflow(page);
 });
@@ -195,7 +203,7 @@ test("salon owners see only their workspace experience", async ({ page }) => {
   await expect(page.getByText("Salon owner", { exact: true })).toBeVisible();
   await expect(page.getByText("Demo Salon", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("link", { name: "Campaigns" })).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "Billing" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Plan & billing" })).toHaveAttribute("href", "/billing");
   await expect(page.getByRole("link", { name: "Operator admin" })).toHaveCount(0);
 
   await page.goto("/app/team");
@@ -208,21 +216,30 @@ test("salon owners see only their workspace experience", async ({ page }) => {
   await expect(page).toHaveURL(/\/app$/);
 });
 
-test("unpaid salon deep links are redirected to Sophie with an upgrade action", async ({ page }) => {
+test("past-due salon deep links are redirected to billing recovery", async ({ page }) => {
   await openWorkspaceSession(page, "salon", "past_due");
 
   await page.goto("/app/agents");
 
-  await expect(page).toHaveURL(/\/demo\/blades-hair$/);
-  await expect(page.getByRole("heading", { name: /Meet Sophie, the AI receptionist/i })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Choose a plan" })).toHaveAttribute("href", "/billing");
+  await expect(page).toHaveURL(/\/billing$/);
+  await expect(page.getByRole("heading", { name: /billing needs attention/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Manage billing in Stripe/i })).toBeVisible();
+  await expect(page.getByText(/plan needs attention/i)).toBeVisible();
 });
 
-test("paid incomplete salon is routed into automatic onboarding", async ({ page }) => {
+test("paid incomplete salon is routed into assisted onboarding", async ({ page }) => {
   await openWorkspaceSession(page, "salon", "active", "details_required");
   await page.goto("/app");
   await expect(page).toHaveURL(/\/onboarding$/);
-  await expect(page.getByRole("heading", { name: "Set up your receptionist" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Tell us how your front desk works" })).toBeVisible();
   await expect(page.getByLabel("Phone setup")).toHaveValue("robinexis_account");
-  await expect(page.getByText(/creates the calendar services, ElevenLabs agent, tools, and phone routing automatically/i)).toBeVisible();
+  await expect(page.getByText(/specialist will review, configure and test/i)).toBeVisible();
+});
+
+test("submitted salon sees setup queue progress", async ({ page }) => {
+  await openWorkspaceSession(page, "salon", "active", "setup_queued");
+  await page.goto("/onboarding");
+  await expect(page.getByRole("heading", { name: /setup is in the queue/i })).toBeVisible();
+  await expect(page.getByText("Business details received")).toBeVisible();
+  await expect(page.getByText(/Only after your setup is approved/i)).toBeVisible();
 });

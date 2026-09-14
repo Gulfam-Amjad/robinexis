@@ -40,7 +40,9 @@ const navigation = [
 ] as const;
 
 const secondary = [
+  { label: "Plan & billing", to: "/billing", icon: CircleDollarSign },
   { label: "Team", to: "/app/team", icon: Users },
+  { label: "Support", to: "/app/support", icon: MessageSquareText },
   { label: "Settings", to: "/app/settings", icon: Settings },
 ] as const;
 
@@ -226,7 +228,7 @@ export function PublicHeader() {
         <a href="/#features" onClick={() => setOpen(false)}>Features</a>
         <Link to="/pricing" onClick={() => setOpen(false)}>Pricing</Link>
         <Link to={AUTH_REQUIRED ? "/login" : "/app"} onClick={() => setOpen(false)}>{AUTH_REQUIRED ? "Log in" : "Open app"}</Link>
-        <Link className="button button-primary button-sm" to="/signup" onClick={() => setOpen(false)}>Request demo</Link>
+        <Link className="button button-primary button-sm" to="/signup?plan=starter" onClick={() => setOpen(false)}>Start free trial</Link>
       </nav>
     </header>
   );

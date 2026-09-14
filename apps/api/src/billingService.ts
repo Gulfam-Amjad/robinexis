@@ -1,5 +1,5 @@
+import { createHash } from "node:crypto";
 import {
-  newId,
   type ClientConfig,
   type PlatformStore,
   type UserProfile,
@@ -30,11 +30,9 @@ export async function ensureSelfServeWorkspace(
   }
 
   const now = new Date().toISOString();
-  const client = await uniqueSkeletonClient(store, actor.email, plan);
+  const client = await uniqueSkeletonClient(actor.email, plan);
   client.calendar = {
     provider: "calcom",
-    username: process.env.CALCOM_USERNAME || undefined,
-    credentialRef: "CALCOM_API_KEY",
   };
   await store.upsertClient(client);
   await store.upsertLocation({
@@ -53,10 +51,9 @@ export async function ensureSelfServeWorkspace(
     clientId: client.id,
     locationId: `loc_${client.id}_primary`,
     provider: "calcom",
-    externalAccountId: process.env.CALCOM_USERNAME,
-    credentialRef: "CALCOM_API_KEY",
+    credentialRef: "CONNECTION_REQUIRED",
     status: "pending",
-    metadata: { isolation: "shared-platform-account" },
+    metadata: { isolation: "connection_required" },
     createdAt: now,
     updatedAt: now,
   });
@@ -82,24 +79,20 @@ export async function ensureSelfServeWorkspace(
 }
 
 async function uniqueSkeletonClient(
-  store: PlatformStore,
   email: string,
   plan: PlanTier,
 ): Promise<ClientConfig> {
   const definition = planDefinition(plan);
-  const local = email.split("@")[0] || "workspace";
+  const normalizedEmail = email.trim().toLowerCase();
+  const identityHash = createHash("sha256").update(normalizedEmail).digest("hex");
+  const local = normalizedEmail.split("@")[0] || "workspace";
   const base = local
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 40) || "workspace";
-  let slug = base;
-  let suffix = 0;
-  while (await store.getClientBySlug(slug)) {
-    suffix += 1;
-    slug = `${base}-${suffix}`;
-  }
-  const id = newId("client_");
+  const slug = `${base}-${identityHash.slice(0, 8)}`;
+  const id = `client_self_${identityHash.slice(0, 24)}`;
   return {
     id,
     slug,
@@ -120,8 +113,6 @@ async function uniqueSkeletonClient(
     unknownTopics: [],
     calendar: {
       provider: "calcom",
-      username: process.env.CALCOM_USERNAME || undefined,
-      credentialRef: "CALCOM_API_KEY",
     },
     calendarNoteMode: "summary",
     enabledFeatures: [...definition.features],

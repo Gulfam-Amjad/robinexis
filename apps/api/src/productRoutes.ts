@@ -3,15 +3,18 @@ import { compilePrompt } from "@robinexis/brain";
 import {
   isAiServiceEnabled,
   newId,
+  structuredLog,
   type CallSession,
   type ClientConfig,
   type OutboundJob,
   type PlatformStore,
+  type TenantRequest,
 } from "@robinexis/database";
 import {
   calcom,
   calcomTenantFromClient,
   checkoutConfigurationError,
+  createBillingPortalSession,
   createTwilioOAuthState,
   createCheckoutSession,
   discoverTwilioAccountSid,
@@ -25,6 +28,8 @@ import {
   planDefinition,
   probeCalcomForClient,
   publicClientView,
+  replayStripeEvent,
+  sendNotification,
   twilioOAuthAuthorizeUrl,
   verifyTwilioOAuthState,
 } from "@robinexis/integrations";
@@ -292,6 +297,16 @@ async function requireManageClient(ctx: ProductRouteContext, id: string): Promis
   return client;
 }
 
+async function notifyCustomer(to: string | undefined, template: string) {
+  if (!to || (!process.env.RESEND_API_KEY && process.env.EMAIL_DELIVERY_MODE !== "log")) return undefined;
+  try {
+    return (await sendNotification({ channel: "email", to, template })).providerId;
+  } catch (error) {
+    structuredLog("customer_email_failed", { to, reason: String(error) });
+    return undefined;
+  }
+}
+
 export async function handleProductRoute(ctx: ProductRouteContext): Promise<boolean> {
   const { req, res, url, store, actor, send } = ctx;
   const route = url.pathname.slice("/api/v1".length) || "/";
@@ -333,6 +348,7 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       return true;
     }
     const clients = await store.listClients();
+    const failedBillingEvents = await store.listStripeEvents("failed", 25);
     const month = new Date().toISOString().slice(0, 7);
     const items = await Promise.all(clients.map(async (client) => {
       const subscription = await store.getCurrentSubscription(client.id);
@@ -360,8 +376,314 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       mrrPence,
       totalUsedMinutes: items.reduce((sum, item) => sum + item.usedMinutes, 0),
       totalFailedCalls: items.reduce((sum, item) => sum + item.failedCalls, 0),
+      failedBillingEvents: failedBillingEvents.map((event) => ({
+        id: event.id,
+        clientId: event.clientId,
+        eventType: event.eventType,
+        error: event.error,
+        receivedAt: event.receivedAt,
+      })),
+      setupQueueCount: clients.filter((client) =>
+        ["setup_queued", "setup_in_progress", "needs_attention"].includes(client.onboardingStatus || ""),
+      ).length,
       clients: items,
     });
+    return true;
+  }
+  if (route === "/admin/audit" && req.method === "GET") {
+    if (!canAdministerPlatform(actor)) {
+      send(res, 403, { error: "platform_admin_required" });
+      return true;
+    }
+    const clientId = url.searchParams.get("clientId") || undefined;
+    send(res, 200, { items: await store.listOperatorAudit(clientId, 100) });
+    return true;
+  }
+  const billingReplayMatch = route.match(/^\/admin\/billing-events\/([^/]+)\/replay$/);
+  if (billingReplayMatch && req.method === "POST") {
+    if (!canAdministerPlatform(actor)) {
+      send(res, 403, { error: "platform_admin_required" });
+      return true;
+    }
+    const eventId = decodeURIComponent(billingReplayMatch[1]);
+    const failed = (await store.listStripeEvents("failed", 500)).find((event) => event.id === eventId);
+    if (!failed) {
+      send(res, 404, { error: "failed_billing_event_not_found" });
+      return true;
+    }
+    await store.appendOperatorAudit({
+      id: newId("audit_"),
+      clientId: failed.clientId,
+      actorId: actor.subject,
+      action: "billing.webhook_replay_requested",
+      detail: { eventId, eventType: failed.eventType },
+      createdAt: new Date().toISOString(),
+    });
+    const result = await replayStripeEvent({ store, eventId });
+    send(res, result.ok ? 200 : 409, result);
+    return true;
+  }
+  const setupTransitionMatch = route.match(/^\/admin\/setup\/([^/]+)\/transition$/);
+  if (setupTransitionMatch && req.method === "POST") {
+    if (!canAdministerPlatform(actor)) {
+      send(res, 403, { error: "platform_admin_required" });
+      return true;
+    }
+    const client = await requireClient(ctx, setupTransitionMatch[1]);
+    if (!client) return true;
+    const body = await readJson<{
+      status?: "setup_queued" | "setup_in_progress" | "needs_attention" | "active";
+      note?: string;
+      eta?: string;
+    }>(ctx);
+    const transitions: Record<string, string[]> = {
+      setup_queued: ["setup_in_progress", "needs_attention"],
+      setup_in_progress: ["needs_attention", "active"],
+      needs_attention: ["setup_queued", "setup_in_progress"],
+    };
+    if (!body.status || !transitions[client.onboardingStatus || ""]?.includes(body.status)) {
+      send(res, 409, { error: "invalid_setup_transition" });
+      return true;
+    }
+    if (body.status === "active" && (
+      process.env.SAAS_PROVISIONING_ENABLED !== "true" ||
+      !client.published ||
+      !client.elevenlabsAgentId ||
+      !client.inboundNumbers.length
+    )) {
+      send(res, 409, { error: "activation_requirements_not_met" });
+      return true;
+    }
+    if (body.eta && !Number.isFinite(Date.parse(body.eta))) {
+      send(res, 400, { error: "valid_setup_eta_required" });
+      return true;
+    }
+    const previous = client.onboardingStatus;
+    client.onboardingStatus = body.status;
+    client.onboardingNotes = body.note?.trim().slice(0, 1_000) || client.onboardingNotes;
+    client.onboardingEta = body.eta || client.onboardingEta;
+    await store.upsertClient(client);
+    await store.appendOperatorAudit({
+      id: newId("audit_"),
+      clientId: client.id,
+      actorId: actor.subject,
+      action: "onboarding.status_changed",
+      detail: { from: previous, to: body.status, note: client.onboardingNotes, eta: client.onboardingEta },
+      createdAt: new Date().toISOString(),
+    });
+    if (body.status === "needs_attention") {
+      await notifyCustomer(client.email, `Robinexis setup needs your input\n${client.onboardingNotes || "Open your workspace to review the information we need."}`);
+    }
+    if (body.status === "active") {
+      await notifyCustomer(client.email, "Your Robinexis receptionist is active\nYour specialist-tested setup has been approved and activated.");
+    }
+    send(res, 200, { client: safeEditableClient(client) });
+    return true;
+  }
+  if (route === "/account/legal-consent" && req.method === "POST") {
+    const now = new Date().toISOString();
+    const existing = await store.getUserProfileByAuthUserId(actor.subject);
+    await store.upsertUserProfile({
+      id: existing?.id || `user_${actor.subject}`,
+      clientId: existing?.clientId,
+      authUserId: actor.subject,
+      email: actor.email,
+      displayName: existing?.displayName,
+      platformRole: existing?.platformRole || "client",
+      workspaceRole: existing?.workspaceRole,
+      termsAcceptedAt: now,
+      privacyAcceptedAt: now,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+    });
+    send(res, 200, { acceptedAt: now });
+    return true;
+  }
+  if (route === "/invitations/accept" && req.method === "POST") {
+    const invitations = (await store.listTenantRequests(undefined, "team_invite"))
+      .filter((request) => request.status === "pending" && request.email === actor.email.toLowerCase());
+    if (!invitations.length) {
+      send(res, 404, { error: "pending_invitation_not_found" });
+      return true;
+    }
+    const accepted: string[] = [];
+    for (const invitation of invitations) {
+      const role = invitation.payload.role === "manager" ? "manager" : "viewer";
+      await store.upsertMembership({
+        id: `mem_${invitation.clientId}_${actor.subject}`,
+        clientId: invitation.clientId,
+        email: actor.email,
+        role,
+        createdAt: new Date().toISOString(),
+      });
+      invitation.status = "completed";
+      invitation.updatedAt = new Date().toISOString();
+      await store.saveTenantRequest(invitation);
+      accepted.push(invitation.clientId);
+      await store.appendOperatorAudit({
+        id: newId("audit_"), clientId: invitation.clientId, actorId: actor.subject,
+        action: "team_invite.accepted", detail: { requestId: invitation.id, role }, createdAt: invitation.updatedAt,
+      });
+    }
+    const primary = invitations[0];
+    const profile = await store.getUserProfileByAuthUserId(actor.subject);
+    await store.upsertUserProfile({
+      id: profile?.id || `user_${actor.subject}`,
+      clientId: primary.clientId,
+      authUserId: actor.subject,
+      email: actor.email,
+      displayName: profile?.displayName,
+      platformRole: "client",
+      workspaceRole: primary.payload.role === "manager" ? "manager" : "viewer",
+      termsAcceptedAt: profile?.termsAcceptedAt,
+      privacyAcceptedAt: profile?.privacyAcceptedAt,
+      createdAt: profile?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    send(res, 200, { clientIds: accepted });
+    return true;
+  }
+  if (route === "/requests" && req.method === "GET") {
+    const requestedClientId = url.searchParams.get("clientId") || undefined;
+    const clientId = requestedClientId && canAdministerPlatform(actor)
+      ? requestedClientId
+      : writableClientId(actor);
+    if (!clientId) {
+      send(res, 403, { error: "workspace_required" });
+      return true;
+    }
+    send(res, 200, { items: await store.listTenantRequests(clientId) });
+    return true;
+  }
+  if (route === "/requests" && req.method === "POST") {
+    const body = await readJson<{
+      type?: "team_invite" | "data_export" | "workspace_deletion" | "support";
+      email?: string;
+      role?: "manager" | "staff" | "viewer";
+      subject?: string;
+      message?: string;
+    }>(ctx);
+    const clientId = writableClientId(actor);
+    if (!clientId || !body.type) {
+      send(res, 403, { error: "workspace_required" });
+      return true;
+    }
+    const role = actor.clientRoles[clientId];
+    if (body.type !== "support" && role !== "owner" && role !== "manager") {
+      send(res, 403, { error: "workspace_owner_or_manager_required" });
+      return true;
+    }
+    if (body.type === "workspace_deletion" && role !== "owner") {
+      send(res, 403, { error: "workspace_owner_required" });
+      return true;
+    }
+    if (body.type === "team_invite" && (!body.email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(body.email))) {
+      send(res, 400, { error: "valid_invite_email_required" });
+      return true;
+    }
+    if (body.type === "support" && (!body.subject?.trim() || !body.message?.trim())) {
+      send(res, 400, { error: "support_subject_and_message_required" });
+      return true;
+    }
+    const now = new Date().toISOString();
+    const request: TenantRequest = {
+      id: newId("request_"),
+      clientId,
+      type: body.type,
+      status: "pending" as const,
+      requestedBy: actor.subject,
+      email: body.email?.trim().toLowerCase(),
+      payload: {
+        role: body.role,
+        subject: body.subject?.trim(),
+        message: body.message?.trim(),
+        delivery: body.type === "team_invite" ? "queued_provider_required" : undefined,
+      },
+      createdAt: now,
+      updatedAt: now,
+    };
+    await store.saveTenantRequest(request);
+    const providerId = body.type === "team_invite"
+      ? await notifyCustomer(request.email, `You are invited to Robinexis\n${actor.email} invited you to join their workspace as ${body.role || "viewer"}. Sign in securely at ${process.env.WEB_ORIGIN || "https://app.robinexis.com"}/login.`)
+      : body.type === "support"
+        ? await notifyCustomer(process.env.SUPPORT_EMAIL, `New Robinexis support request\nTenant: ${clientId}\nSubject: ${body.subject}\n\n${body.message}`)
+        : undefined;
+    if (providerId) {
+      request.payload = { ...request.payload, delivery: "sent", providerId };
+      await store.saveTenantRequest(request);
+    }
+    await store.appendOperatorAudit({
+      id: newId("audit_"),
+      clientId,
+      actorId: actor.subject,
+      action: `${body.type}.requested`,
+      detail: { requestId: request.id, email: request.email },
+      createdAt: now,
+    });
+    send(res, 202, { request });
+    return true;
+  }
+  const tenantRequestMatch = route.match(/^\/requests\/([^/]+)$/);
+  if (tenantRequestMatch && req.method === "PATCH") {
+    const request = await store.getTenantRequest(tenantRequestMatch[1]);
+    if (!request || (!canAdministerPlatform(actor) && !actor.clientRoles[request.clientId])) {
+      send(res, 404, { error: "request_not_found" });
+      return true;
+    }
+    if (!canAdministerPlatform(actor) && !["owner", "manager"].includes(actor.clientRoles[request.clientId])) {
+      send(res, 403, { error: "workspace_owner_or_manager_required" });
+      return true;
+    }
+    const body = await readJson<{ action?: "resend" | "revoke" }>(ctx);
+    if (request.type !== "team_invite" || !body.action || request.status !== "pending") {
+      send(res, 409, { error: "pending_invitation_required" });
+      return true;
+    }
+    request.updatedAt = new Date().toISOString();
+    if (body.action === "revoke") request.status = "revoked";
+    if (body.action === "resend") {
+      request.payload = {
+        ...request.payload,
+        delivery: "queued_provider_required",
+        resendCount: Number(request.payload.resendCount || 0) + 1,
+      };
+    }
+    await store.saveTenantRequest(request);
+    await store.appendOperatorAudit({
+      id: newId("audit_"), clientId: request.clientId, actorId: actor.subject,
+      action: `team_invite.${body.action}`, detail: { requestId: request.id }, createdAt: request.updatedAt,
+    });
+    send(res, 200, { request });
+    return true;
+  }
+  const requestStatusMatch = route.match(/^\/admin\/requests\/([^/]+)\/status$/);
+  if (requestStatusMatch && req.method === "POST") {
+    if (!canAdministerPlatform(actor)) {
+      send(res, 403, { error: "platform_admin_required" });
+      return true;
+    }
+    const request = await store.getTenantRequest(requestStatusMatch[1]);
+    if (!request) {
+      send(res, 404, { error: "request_not_found" });
+      return true;
+    }
+    const body = await readJson<{ status?: "pending" | "in_progress" | "completed" | "rejected" | "revoked" }>(ctx);
+    if (!body.status) {
+      send(res, 400, { error: "request_status_required" });
+      return true;
+    }
+    request.status = body.status;
+    request.updatedAt = new Date().toISOString();
+    await store.saveTenantRequest(request);
+    await store.appendOperatorAudit({
+      id: newId("audit_"),
+      clientId: request.clientId,
+      actorId: actor.subject,
+      action: `${request.type}.status_changed`,
+      detail: { requestId: request.id, status: body.status },
+      createdAt: request.updatedAt,
+    });
+    send(res, 200, { request });
     return true;
   }
 
@@ -505,6 +827,14 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
     }
     client.serviceStatus = body.action === "suspend" ? "paused" : "active";
     await store.upsertClient(client);
+    await store.appendOperatorAudit({
+      id: newId("audit_"),
+      clientId: client.id,
+      actorId: actor.subject,
+      action: `service.${body.action}`,
+      detail: { serviceStatus: client.serviceStatus },
+      createdAt: new Date().toISOString(),
+    });
     send(res, 200, { clientId: client.id, serviceStatus: client.serviceStatus });
     return true;
   }
@@ -541,6 +871,16 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       description: `${body.reason.trim()} — ${actor.email}`,
       createdAt: new Date().toISOString(),
     });
+    if (appended) {
+      await store.appendOperatorAudit({
+        id: newId("audit_"),
+        clientId: client.id,
+        actorId: actor.subject,
+        action: "billing.credit_adjusted",
+        detail: { minutes: Number(body.minutes), reason: body.reason.trim(), idempotencyKey: body.idempotencyKey.trim() },
+        createdAt: new Date().toISOString(),
+      });
+    }
     send(res, appended ? 201 : 200, {
       appended,
       remainingMinutes: Math.max(0, await store.getCreditBalance(client.id)),
@@ -743,10 +1083,6 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
   if (finalizeOnboardingMatch && req.method === "POST") {
     const liveClient = await requireManageClient(ctx, finalizeOnboardingMatch[1]);
     if (!liveClient) return true;
-    if (process.env.SAAS_PROVISIONING_ENABLED !== "true") {
-      send(res, 503, { error: "saas_provisioning_disabled" });
-      return true;
-    }
     const subscription = await store.getCurrentSubscription(liveClient.id);
     if (!subscription || !["active", "trialing"].includes(subscription.status)) {
       send(res, 402, { error: "active_subscription_required" });
@@ -778,7 +1114,7 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
         service.durationMinutes > 0
       ) ||
       !["robinexis_account", "customer_oauth"].includes(body.phoneMode || "") ||
-      !body.twilioNumber?.match(/^\+[1-9]\d{7,14}$/)
+      (body.twilioNumber && !body.twilioNumber.match(/^\+[1-9]\d{7,14}$/))
     ) {
       send(res, 400, { error: "complete_business_services_phone_details_required" });
       return true;
@@ -798,25 +1134,12 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       publishedFacts: body.publishedFacts || [],
       services: body.services,
       phoneAcquisitionMode: body.phoneMode,
-      requestedPhoneNumber: body.twilioNumber,
-      onboardingStatus: "ready_to_provision",
+      requestedPhoneNumber: body.twilioNumber || undefined,
+      onboardingStatus: "setup_queued",
     });
     const now = new Date().toISOString();
-    const latest = await store.latestPrompt(client.id);
-    const prompt = {
-      id: newId("pv_"),
-      clientId: client.id,
-      version: (latest?.version ?? 0) + 1,
-      compiled: compilePrompt({
-        client,
-        direction: "inbound",
-        objective: "Answer, retrieve knowledge, book, reschedule, cancel, capture a callback, or transfer safely.",
-      }),
-      createdAt: now,
-    };
-    client.promptVersionId = prompt.id;
-    client.published = true;
-    await store.publishClientDraft({
+    client.published = false;
+    await store.saveDraftClient({
       id: existingDraft?.id || newId("client_revision_"),
       clientId: client.id,
       status: "draft",
@@ -824,25 +1147,23 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       createdBy: actor.subject,
       createdAt: existingDraft?.createdAt || now,
       updatedAt: now,
-    }, prompt);
-    try {
-      const result = await provisionClientAgent({
-        clientId: client.id,
-        operationKey: `self-serve-${client.id}-${prompt.id}`,
-        apiBaseUrl: process.env.API_PUBLIC_BASE_URL || `https://${ctx.req.headers.host}`,
-        transferNumber: client.transferNumber,
-        twilioNumber: body.twilioNumber,
-        phoneMode: body.phoneMode,
-        twilioAccountSid: process.env.TWILIO_ACCOUNT_SID,
-        twilioAuthToken: process.env.TWILIO_AUTH_TOKEN,
-      }, {
-        store,
-        elevenLabs: new ElevenLabsManagementClient({ apiKey: process.env.ELEVENLABS_API_KEY || "" }),
-      });
-      send(res, 200, { client: safeEditableClient(await store.getClient(client.id) || client), provisioning: result });
-    } catch (error) {
-      send(res, 502, { error: error instanceof Error ? error.message : "provisioning_failed" });
-    }
+    });
+    await store.upsertClient(client);
+    await store.appendOperatorAudit({
+      id: newId("audit_"),
+      clientId: client.id,
+      actorId: actor.subject,
+      action: "onboarding.setup_queued",
+      detail: { phoneMode: body.phoneMode, serviceCount: body.services.length },
+      createdAt: now,
+    });
+    await notifyCustomer(client.email, "Robinexis setup received\nYour receptionist brief is safely in our specialist queue. We will show progress and any questions in your workspace.");
+    structuredLog("onboarding_setup_queued", { clientId: client.id, actorId: actor.subject });
+    send(res, 202, {
+      client: safeEditableClient(client),
+      onboardingStatus: "setup_queued",
+      message: "Your setup details are queued for Robinexis review.",
+    });
     return true;
   }
 
@@ -920,6 +1241,14 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       send(res, 400, { error: "operation_key_required" });
       return true;
     }
+    await store.appendOperatorAudit({
+      id: newId("audit_"),
+      clientId: client.id,
+      actorId: actor.subject,
+      action: "provisioning.started",
+      detail: { operationKey: body.operationKey, phoneMode: body.phoneMode || client.phoneAcquisitionMode },
+      createdAt: new Date().toISOString(),
+    });
     try {
       const result = await provisionClientAgent(
         {
@@ -942,9 +1271,25 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
           }),
         },
       );
+      await store.appendOperatorAudit({
+        id: newId("audit_"),
+        clientId: client.id,
+        actorId: actor.subject,
+        action: "provisioning.succeeded",
+        detail: { operationKey: body.operationKey, runId: result.runId },
+        createdAt: new Date().toISOString(),
+      });
       send(res, 200, result);
     } catch (error) {
       const message = error instanceof Error ? error.message : "provisioning_failed";
+      await store.appendOperatorAudit({
+        id: newId("audit_"),
+        clientId: client.id,
+        actorId: actor.subject,
+        action: "provisioning.failed",
+        detail: { operationKey: body.operationKey, error: message.slice(0, 300) },
+        createdAt: new Date().toISOString(),
+      });
       send(res, message === "provisioning_already_running" ? 409 : 502, { error: message });
     }
     return true;
@@ -1070,6 +1415,54 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       usedMinutes,
       remainingMinutes: Math.max(0, remainingMinutes),
     });
+    return true;
+  }
+
+  if (route === "/billing/status" && req.method === "GET") {
+    const requestedId = url.searchParams.get("clientId") || "";
+    const id = requestedId || writableClientId(actor);
+    if (!id) {
+      send(res, 200, { configured: false, status: "incomplete" });
+      return true;
+    }
+    const client = await requireManageClient(ctx, id);
+    if (!client) return true;
+    const subscription = await store.getCurrentSubscription(client.id);
+    send(res, 200, {
+      configured: Boolean(client.stripeCustomerId),
+      canManagePortal: Boolean(client.stripeCustomerId),
+      plan: subscription?.planTier || (isPlanTier(client.subscribedProduct) ? client.subscribedProduct : "starter"),
+      status: subscription?.status || client.serviceStatus,
+      trialEndsAt: subscription?.trialEndsAt,
+      currentPeriodEnd: subscription?.currentPeriodEnd,
+      cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd || false,
+    });
+    return true;
+  }
+
+  if (route === "/billing/portal" && req.method === "POST") {
+    const body = await readJson<{ clientId?: string }>(ctx);
+    const requestedId = String(body.clientId || "");
+    const id = requestedId || writableClientId(actor);
+    if (!id) {
+      send(res, 403, { error: "workspace_write_forbidden" });
+      return true;
+    }
+    const client = await requireManageClient(ctx, id);
+    if (!client) return true;
+    if (!client.stripeCustomerId) {
+      send(res, 409, { error: "billing_profile_pending" });
+      return true;
+    }
+    const portal = await createBillingPortalSession({
+      customerId: client.stripeCustomerId,
+      returnUrl: `${primaryWebOrigin()}/billing`,
+    });
+    if (!portal.configured) {
+      send(res, 503, { error: portal.reason });
+      return true;
+    }
+    send(res, 201, { portalSessionId: portal.id, url: portal.url });
     return true;
   }
 
@@ -1326,6 +1719,60 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
   }
 
   const membershipMatch = route.match(/^\/memberships\/([^/]+)$/);
+  if (membershipMatch && req.method === "PATCH") {
+    const id = clientId(url);
+    if (!(await requireClient(ctx, id))) return true;
+    if (!canAdministerPlatform(actor) && actor.clientRoles[id] !== "owner") {
+      send(res, 403, { error: "workspace_owner_required" });
+      return true;
+    }
+    const body = await readJson<{ role?: "manager" | "viewer" }>(ctx);
+    if (!body.role) {
+      send(res, 400, { error: "manager_or_viewer_role_required" });
+      return true;
+    }
+    const memberships = await store.listMembershipsForClient(id);
+    const selected = memberships.find((item) => item.id === membershipMatch[1]);
+    if (!selected) {
+      send(res, 404, { error: "membership_not_found" });
+      return true;
+    }
+    if (selected.role === "owner" && memberships.filter((item) => item.role === "owner").length === 1) {
+      send(res, 409, { error: "transfer_ownership_before_demoting_last_owner" });
+      return true;
+    }
+    await store.upsertMembership({ ...selected, role: body.role });
+    await store.appendOperatorAudit({
+      id: newId("audit_"), clientId: id, actorId: actor.subject, action: "membership.role_changed",
+      detail: { membershipId: selected.id, from: selected.role, to: body.role }, createdAt: new Date().toISOString(),
+    });
+    send(res, 200, { ...selected, role: body.role });
+    return true;
+  }
+  const ownershipMatch = route.match(/^\/memberships\/([^/]+)\/transfer-ownership$/);
+  if (ownershipMatch && req.method === "POST") {
+    const id = clientId(url);
+    if (!(await requireClient(ctx, id))) return true;
+    if (!canAdministerPlatform(actor) && actor.clientRoles[id] !== "owner") {
+      send(res, 403, { error: "workspace_owner_required" });
+      return true;
+    }
+    const memberships = await store.listMembershipsForClient(id);
+    const target = memberships.find((item) => item.id === ownershipMatch[1]);
+    const current = memberships.find((item) => item.email === actor.email && item.role === "owner");
+    if (!target || (!current && !canAdministerPlatform(actor))) {
+      send(res, 404, { error: "ownership_membership_not_found" });
+      return true;
+    }
+    await store.upsertMembership({ ...target, role: "owner" });
+    if (current && current.id !== target.id) await store.upsertMembership({ ...current, role: "manager" });
+    await store.appendOperatorAudit({
+      id: newId("audit_"), clientId: id, actorId: actor.subject, action: "membership.ownership_transferred",
+      detail: { fromMembershipId: current?.id, toMembershipId: target.id }, createdAt: new Date().toISOString(),
+    });
+    send(res, 200, { ...target, role: "owner" });
+    return true;
+  }
   if (membershipMatch && req.method === "DELETE") {
     const id = clientId(url);
     if (!(await requireClient(ctx, id))) return true;

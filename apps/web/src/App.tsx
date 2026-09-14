@@ -21,6 +21,7 @@ const SelfServeBillingPage = lazy(() => import("./pages/public").then((m) => ({ 
 const SelfServeOnboardingPage = lazy(() => import("./pages/public").then((m) => ({ default: m.SelfServeOnboardingPage })));
 const PricingPage = lazy(() => import("./pages/public").then((m) => ({ default: m.PricingPage })));
 const EnterpriseContactPage = lazy(() => import("./pages/public").then((m) => ({ default: m.EnterpriseContactPage })));
+const LegalPage = lazy(() => import("./pages/legal"));
 const BladesReceptionistDemoPage = lazy(() => import("./pages/blades-demo"));
 const appPages = () => import("./pages/app");
 
@@ -40,7 +41,9 @@ const IntegrationsPage = lazy(() => appPages().then((m) => ({ default: m.Integra
 const TeamPage = lazy(() => appPages().then((m) => ({ default: m.TeamPage })));
 const BillingPage = lazy(() => appPages().then((m) => ({ default: m.BillingPage })));
 const SettingsPage = lazy(() => appPages().then((m) => ({ default: m.SettingsPage })));
+const SupportPage = lazy(() => appPages().then((m) => ({ default: m.SupportPage })));
 const AdminOverviewPage = lazy(() => appPages().then((m) => ({ default: m.AdminOverviewPage })));
+const SetupConsolePage = lazy(() => appPages().then((m) => ({ default: m.SetupConsolePage })));
 
 function RequireSession() {
   const { apiKey, actor, actorError, actorLoading, logout } = useSession();
@@ -67,7 +70,7 @@ function RequireSession() {
 
 function RequireWorkspace() {
   const { actor } = useSession();
-  return actor?.role === "pending" ? <Navigate to={SOPHIE_DEMO_PATH} replace /> : <Outlet />;
+  return actor?.role === "pending" ? <Navigate to="/billing" replace /> : <Outlet />;
 }
 
 function RequireOperator() {
@@ -81,7 +84,7 @@ function RequireOperator() {
 function RequireSubscription() {
   const { actor, actorLoading } = useSession();
   if (actorLoading) return <div className="not-found">Checking your plan…</div>;
-  if (!canAccessProduct(actor)) return <Navigate to={SOPHIE_DEMO_PATH} replace />;
+  if (!canAccessProduct(actor)) return <Navigate to="/billing" replace />;
   if (
     actor?.role === "salon" &&
     actor.onboardingStatus &&
@@ -121,6 +124,8 @@ export default function App() {
         <Route path="/auth/callback" element={AUTH_REQUIRED ? <AuthCallbackPage /> : <Navigate to="/app" replace />} />
         <Route path="/pricing" element={<PricingPage />} />
         <Route path="/enterprise-contact" element={<EnterpriseContactPage />} />
+        <Route path="/privacy" element={<LegalPage kind="privacy" />} />
+        <Route path="/terms" element={<LegalPage kind="terms" />} />
         <Route path="/demo/blades-hair" element={<BladesReceptionistDemoPage />} />
         <Route element={<RequireSession />}>
           <Route path="/dashboard" element={<DashboardRoute />} />
@@ -143,6 +148,7 @@ export default function App() {
               <Route path="integrations" element={<IntegrationsPage />} />
               <Route path="team" element={<TeamPage />} />
               <Route path="settings" element={<SettingsPage />} />
+              <Route path="support" element={<SupportPage />} />
               <Route element={<RequireOperator />}>
                 <Route path="onboarding" element={<Navigate to="/admin/clients/new" replace />} />
                 <Route path="agents/new" element={<Navigate to="/admin/agents/new" replace />} />
@@ -153,6 +159,7 @@ export default function App() {
             <Route element={<RequireOperator />}>
               <Route path="/admin" element={<AppShell />}>
                 <Route index element={<AdminOverviewPage />} />
+                <Route path="setup/:id" element={<SetupConsolePage />} />
                 <Route path="clients/new" element={<OnboardingPage />} />
                 <Route path="agents/new" element={<NewAgentPage />} />
                 <Route path="billing" element={<BillingPage />} />

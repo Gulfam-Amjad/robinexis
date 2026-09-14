@@ -5,9 +5,11 @@ export { maskCalcomUsername } from "./calcom.js";
 export { appendVerifiedCalendarNote } from "./calendarNotes.js";
 export {
   checkoutConfigurationError,
+  createBillingPortalSession,
   createCheckoutSession,
   createStripe,
   handleStripeWebhook,
+  replayStripeEvent,
   reconcileStripe,
 } from "./stripe.js";
 export {

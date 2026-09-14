@@ -116,6 +116,8 @@ export function publicClientView(client: ClientConfig) {
     inboundNumbers: client.inboundNumbers,
     publishedFacts: client.publishedFacts,
     onboardingStatus: client.onboardingStatus,
+    onboardingNotes: client.onboardingNotes,
+    onboardingEta: client.onboardingEta,
     phoneAcquisitionMode: client.phoneAcquisitionMode,
     requestedPhoneNumber: client.requestedPhoneNumber,
     access,

@@ -1,0 +1,20 @@
+name: Robinexis Uptime
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  public-health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Production API database health
+        run: curl --fail --silent --show-error --retry 3 --retry-delay 5 https://api.robinexis.com/health
+      - name: Production application
+        run: curl --fail --silent --show-error --retry 3 --retry-delay 5 https://app.robinexis.com/
+      - name: Isolated staging API
+        run: curl --fail --silent --show-error --retry 3 --retry-delay 5 https://robinexisapi-staging.up.railway.app/health
+      - name: Isolated staging application
+        run: curl --fail --silent --show-error --retry 3 --retry-delay 5 https://robinexis-staging.vercel.app/pricing

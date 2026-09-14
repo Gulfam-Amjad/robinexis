@@ -64,7 +64,7 @@ import type { Booking, Call, Client, Job, TimeseriesPoint } from "@robinexis/api
 import { api, formatDate } from "../../lib/api";
 import { usePermissions } from "../../lib/permissions";
 import { workspaceReceptionistDemo } from "../../lib/receptionistDemo";
-import { useClient, useToast } from "../../state";
+import { useClient, useSession, useToast } from "../../state";
 import { ReceptionistCall } from "../../components/ReceptionistCall";
 import {
   Badge,
@@ -207,12 +207,23 @@ export function AdminOverviewPage() {
     },
     onError: (mutationError) => push({ title: "Credit adjustment failed", message: mutationError.message, tone: "error" }),
   });
+  const replayBilling = useMutation({
+    mutationFn: (eventId: string) => api.replayBillingEvent(eventId),
+    onSuccess: async (result) => {
+      await queryClient.invalidateQueries({ queryKey: ["admin-summary"] });
+      push({ title: "Billing event replayed", message: `Stripe state: ${result.status || "processed"}.`, tone: "success" });
+    },
+    onError: (mutationError) => push({ title: "Replay needs attention", message: mutationError.message, tone: "error" }),
+  });
   if (isLoading) return <LoadingState label="Loading client operations…" />;
   if (error) return <ErrorState error={error} />;
 
   const active = clients.filter((client) => client.access?.inbound).length;
   const drafts = clients.filter((client) => !client.published).length;
   const attention = clients.filter((client) => ["past_due", "unpaid", "canceled"].includes(client.serviceStatus)).length;
+  const setupQueue = clients.filter((client) =>
+    ["setup_queued", "setup_in_progress", "needs_attention"].includes(client.onboardingStatus || ""),
+  );
   const openWorkspace = (clientId: string) => {
     setActiveClientId(clientId);
     navigate("/app");
@@ -245,6 +256,43 @@ export function AdminOverviewPage() {
         <MetricCard label="Minutes used" value={Math.round(summary.data?.totalUsedMinutes || 0)} detail={`${summary.data?.totalFailedCalls || 0} failed calls`} icon={Clock3} />
         <MetricCard label="Needs attention" value={attention + drafts} detail={`${drafts} draft · ${attention} service status`} icon={ShieldCheck} tone="peach" />
       </div>
+      <Card className="panel">
+        <SectionHeading
+          title="Setup queue"
+          description={`${setupQueue.length} paid workspace${setupQueue.length === 1 ? "" : "s"} waiting for operator-assisted activation.`}
+        />
+        {setupQueue.length ? (
+          <div className="team-list">
+            {setupQueue.map((client) => (
+              <div className="team-row" key={client.id}>
+                <span className="client-avatar">{client.businessName.slice(0, 2).toUpperCase()}</span>
+                <div><strong>{client.businessName}</strong><small className="capitalize">{client.onboardingStatus?.replaceAll("_", " ")}</small></div>
+                <Badge tone={client.onboardingStatus === "needs_attention" ? "danger" : client.onboardingStatus === "setup_in_progress" ? "accent" : "warning"}>
+                  {client.onboardingStatus?.replaceAll("_", " ")}
+                </Badge>
+                <Button variant="secondary" onClick={() => navigate(`/admin/setup/${client.id}`)}>Review setup</Button>
+              </div>
+            ))}
+          </div>
+        ) : <EmptyState icon={CheckCircle2} title="Setup queue is clear" description="New paid workspaces will appear here after their business details are submitted." />}
+      </Card>
+      {Boolean(summary.data?.failedBillingEvents?.length) && (
+        <Card className="panel">
+          <SectionHeading title="Billing events needing recovery" description="Failed Stripe webhook processing is retained for operator review and safe replay." />
+          <div className="team-list">
+            {summary.data!.failedBillingEvents!.map((event) => (
+              <div className="team-row" key={event.id}>
+                <XCircle className="danger-icon" />
+                <div><strong>{event.eventType}</strong><small>{event.clientId || "Tenant not resolved"} · {formatDate(event.receivedAt, { dateStyle: "medium", timeStyle: "short" })}</small></div>
+                <Badge tone="danger">Failed</Badge>
+                <Button variant="secondary" disabled={replayBilling.isPending} onClick={() => replayBilling.mutate(event.id)}>
+                  {replayBilling.isPending ? "Replaying…" : "Safe replay"}
+                </Button>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
       <Card className="panel">
         <SectionHeading title="Client portfolio" description="Status comes directly from the client summaries returned by the API." />
         {!clients.length ? (
@@ -279,6 +327,111 @@ export function AdminOverviewPage() {
             ))}
           </div>
         )}
+      </Card>
+    </>
+  );
+}
+
+export function SetupConsolePage() {
+  const { id } = useParams();
+  const queryClient = useQueryClient();
+  const { push } = useToast();
+  const [note, setNote] = useState("");
+  const [eta, setEta] = useState("");
+  const client = useQuery({
+    queryKey: ["client", id],
+    queryFn: () => api.client(id!),
+    enabled: Boolean(id),
+    retry: false,
+  });
+  const onboarding = useQuery({
+    queryKey: ["operator-onboarding", id],
+    queryFn: () => api.onboarding(id!),
+    enabled: Boolean(id),
+    retry: false,
+  });
+  const audit = useQuery({
+    queryKey: ["admin-audit", id],
+    queryFn: () => api.adminAudit(id),
+    enabled: Boolean(id),
+    retry: false,
+  });
+  const transition = useMutation({
+    mutationFn: (status: "setup_queued" | "setup_in_progress" | "needs_attention" | "active") =>
+      api.transitionSetup(id!, {
+        status,
+        note: note.trim() || undefined,
+        eta: eta ? new Date(eta).toISOString() : undefined,
+      }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["client", id] }),
+        queryClient.invalidateQueries({ queryKey: ["operator-onboarding", id] }),
+        queryClient.invalidateQueries({ queryKey: ["admin-audit", id] }),
+        queryClient.invalidateQueries({ queryKey: ["clients"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin-summary"] }),
+      ]);
+      push({ title: "Setup status updated", tone: "success" });
+    },
+    onError: (error) => push({ title: "Setup transition blocked", message: error.message, tone: "error" }),
+  });
+  if (client.isLoading || onboarding.isLoading) return <LoadingState label="Loading setup workspace…" />;
+  if (client.error || onboarding.error || !client.data) return <ErrorState error={client.error || onboarding.error || new Error("Workspace not found")} />;
+  const status = client.data.onboardingStatus || "details_required";
+  const canStart = status === "setup_queued" || status === "needs_attention";
+  const canPause = status === "setup_queued" || status === "setup_in_progress";
+  return (
+    <>
+      <PageHeader
+        eyebrow="Assisted activation"
+        title={client.data.businessName}
+        description="Review the submitted brief, record progress, and keep provider creation locked until the separate provisioning approval."
+        actions={<Link className="button button-secondary button-md" to="/admin"><ArrowLeft size={15} /> Setup queue</Link>}
+      />
+      <div className="metrics-grid metrics-compact">
+        <MetricCard label="Setup state" value={status.replaceAll("_", " ")} detail="Customer-visible progress" icon={Clock3} tone="peach" />
+        <MetricCard label="Services" value={onboarding.data?.client.services?.length || 0} detail="Submitted services" icon={CalendarCheck2} tone="sage" />
+        <MetricCard label="Provider creation" value="Locked" detail="Provisioning flag remains off" icon={ShieldCheck} />
+      </div>
+      <div className="overview-grid">
+        <Card className="panel">
+          <SectionHeading title="Submitted setup brief" description="Read-only review of the tenant-scoped draft." />
+          <dl className="detail-list">
+            <div><dt>Business</dt><dd>{onboarding.data?.client.businessName}</dd></div>
+            <div><dt>Location</dt><dd>{onboarding.data?.client.location || "Not provided"}</dd></div>
+            <div><dt>Transfer number</dt><dd>{onboarding.data?.client.transferNumber || "Not provided"}</dd></div>
+            <div><dt>Phone choice</dt><dd className="capitalize">{onboarding.data?.client.phoneAcquisitionMode?.replaceAll("_", " ") || "Not selected"}</dd></div>
+            <div><dt>Requested number</dt><dd>{onboarding.data?.client.requestedPhoneNumber || "Robinexis to arrange"}</dd></div>
+            <div><dt>Hours</dt><dd>{onboarding.data?.client.hours || "Not provided"}</dd></div>
+          </dl>
+        </Card>
+        <Card className="panel">
+          <SectionHeading title="Operator update" description="This note and ETA are shown to the customer. No external resource is created." />
+          <div className="auth-form">
+            <Field label="Customer update"><textarea rows={4} value={note} onChange={(event) => setNote(event.target.value)} placeholder={client.data.onboardingNotes || "We are reviewing your call flow…"} /></Field>
+            <Field label="Target completion"><input type="datetime-local" value={eta} onChange={(event) => setEta(event.target.value)} /></Field>
+            <div className="row-actions">
+              {canStart && <Button disabled={transition.isPending} onClick={() => transition.mutate("setup_in_progress")}>Start specialist setup</Button>}
+              {canPause && <Button variant="secondary" disabled={transition.isPending} onClick={() => transition.mutate("needs_attention")}>Request information</Button>}
+              {status === "needs_attention" && <Button variant="ghost" disabled={transition.isPending} onClick={() => transition.mutate("setup_queued")}>Return to queue</Button>}
+            </div>
+            <p className="muted"><ShieldCheck size={14} /> Activation stays unavailable until isolated provider tests pass and provisioning is explicitly approved.</p>
+          </div>
+        </Card>
+      </div>
+      <Card className="panel">
+        <SectionHeading title="Immutable activity" description="Operator and billing actions for this tenant." />
+        {audit.isLoading ? <SkeletonRows count={3} /> : audit.data?.length ? (
+          <div className="team-list">
+            {audit.data.map((record) => (
+              <div className="team-row" key={record.id}>
+                <Activity />
+                <div><strong className="capitalize">{record.action.replaceAll(".", " ").replaceAll("_", " ")}</strong><small>{formatDate(record.createdAt, { dateStyle: "medium", timeStyle: "short" })}</small></div>
+                <Badge tone="neutral">{record.actorId === "stripe" ? "Stripe" : "Operator"}</Badge>
+              </div>
+            ))}
+          </div>
+        ) : <EmptyState icon={Activity} title="No setup activity yet" description="Status changes and billing events will appear here." />}
       </Card>
     </>
   );
@@ -900,10 +1053,11 @@ function IntegrationsContent({ clientId }: { clientId: string }) {
 
 export function TeamPage() {
   const { activeClientId, activeClient } = useClient();
+  const { actor } = useSession();
   const { push } = useToast();
   const queryClient = useQueryClient();
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState<"owner" | "manager" | "viewer">("viewer");
+  const [role, setRole] = useState<"manager" | "viewer">("viewer");
   const memberships = useQuery({
     queryKey: ["memberships", activeClientId],
     queryFn: () => api.memberships(activeClientId!),
@@ -911,12 +1065,13 @@ export function TeamPage() {
     retry: false,
   });
   const { canManageMembers: canAdminister } = usePermissions(activeClientId);
+  const requests = useQuery({ queryKey: ["tenant-requests"], queryFn: api.requests, enabled: Boolean(activeClientId), retry: false });
   const add = useMutation({
-    mutationFn: () => api.addMembership(activeClientId!, email.trim(), role),
+    mutationFn: () => api.createRequest({ type: "team_invite", email: email.trim(), role }),
     onSuccess: async () => {
       setEmail("");
-      await queryClient.invalidateQueries({ queryKey: ["memberships", activeClientId] });
-      push({ title: "Workspace access added", message: "They can now sign in with this email.", tone: "success" });
+      await queryClient.invalidateQueries({ queryKey: ["tenant-requests"] });
+      push({ title: "Invitation queued", message: "Access is granted only after the invite is accepted and verified.", tone: "success" });
     },
     onError: (error) => push({ title: "Could not add access", message: error.message, tone: "error" }),
   });
@@ -928,24 +1083,46 @@ export function TeamPage() {
     },
     onError: (error) => push({ title: "Could not remove access", message: error.message, tone: "error" }),
   });
+  const changeRole = useMutation({
+    mutationFn: ({ id, role }: { id: string; role: "manager" | "viewer" }) => api.updateMembershipRole(activeClientId!, id, role),
+    onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["memberships", activeClientId] }); push({ title: "Role updated", tone: "success" }); },
+    onError: (error) => push({ title: "Role update blocked", message: error.message, tone: "error" }),
+  });
+  const transfer = useMutation({
+    mutationFn: (id: string) => api.transferOwnership(activeClientId!, id),
+    onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["memberships", activeClientId] }); push({ title: "Ownership transferred", tone: "success" }); },
+    onError: (error) => push({ title: "Transfer blocked", message: error.message, tone: "error" }),
+  });
+  const manageInvite = useMutation({
+    mutationFn: ({ id, action }: { id: string; action: "resend" | "revoke" }) => api.manageInvitation(id, action),
+    onSuccess: async (_, input) => { await queryClient.invalidateQueries({ queryKey: ["tenant-requests"] }); push({ title: input.action === "resend" ? "Invitation re-queued" : "Invitation revoked", tone: "success" }); },
+    onError: (error) => push({ title: "Invitation update failed", message: error.message, tone: "error" }),
+  });
   if (!activeClientId) return <EmptyState title="No workspace selected" description="Select a client before managing access." />;
   return (
     <>
       <PageHeader eyebrow="Workspace access" title={`The people behind ${activeClient?.businessName || "this workspace"}`} description="Control who can view calls, update the receptionist, and manage workspace access." />
       {canAdminister && (
         <Card className="form-card team-access-form">
-          <SectionHeading title="Add an existing user" description="The email can sign in with a Supabase magic link after access is added." />
+          <SectionHeading title="Invite a teammate" description="The invitation remains pending until verified; no direct access is granted here." />
           <form onSubmit={(event) => { event.preventDefault(); if (email.trim()) add.mutate(); }}>
             <Field label="Work email"><input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="owner@salon.co.uk" /></Field>
             <Field label="Workspace role">
               <select value={role} onChange={(event) => setRole(event.target.value as typeof role)}>
-                <option value="owner">Owner — access and workspace control</option>
                 <option value="manager">Manager — edit and publish</option>
                 <option value="viewer">Viewer — read only</option>
               </select>
             </Field>
-            <Button disabled={add.isPending}><UserPlus size={15} /> {add.isPending ? "Adding…" : "Add access"}</Button>
+            <Button disabled={add.isPending}><UserPlus size={15} /> {add.isPending ? "Queuing…" : "Send invitation"}</Button>
           </form>
+        </Card>
+      )}
+      {requests.data?.some((request) => request.type === "team_invite" && request.status === "pending") && (
+        <Card className="panel">
+          <SectionHeading title="Pending invitations" description="Email delivery requires the staging transactional-email provider before launch." />
+          <div className="team-list">{requests.data.filter((request) => request.type === "team_invite" && request.status === "pending").map((request) => (
+            <div className="team-row" key={request.id}><Mail /><div><strong>{request.email}</strong><small>Queued {formatDate(request.createdAt, { dateStyle: "medium" })}</small></div><Badge tone="warning">Pending</Badge><Button variant="ghost" disabled={manageInvite.isPending} onClick={() => manageInvite.mutate({ id: request.id, action: "resend" })}>Resend</Button><Button variant="ghost" disabled={manageInvite.isPending} onClick={() => manageInvite.mutate({ id: request.id, action: "revoke" })}>Revoke</Button></div>
+          ))}</div>
         </Card>
       )}
       <Card className="panel">
@@ -956,8 +1133,11 @@ export function TeamPage() {
               <div className="team-row" key={member.id}>
                 <span className="profile-avatar large">{member.email.slice(0, 2).toUpperCase()}</span>
                 <div><strong>{member.email}</strong><small>Added {formatDate(member.createdAt, { dateStyle: "medium" })}</small></div>
-                <span className="capitalize">{member.role}</span>
+                {canAdminister && member.role !== "owner"
+                  ? <select aria-label={`Role for ${member.email}`} value={member.role} onChange={(event) => changeRole.mutate({ id: member.id, role: event.target.value as "manager" | "viewer" })}><option value="manager">Manager</option><option value="viewer">Viewer</option></select>
+                  : <span className="capitalize">{member.role}</span>}
                 <Badge tone="success">Active</Badge>
+                {canAdminister && member.role !== "owner" && member.email !== actor?.email && <Button variant="ghost" onClick={() => { if (window.confirm(`Transfer workspace ownership to ${member.email}? Your role will become manager.`)) transfer.mutate(member.id); }} disabled={transfer.isPending}>Make owner</Button>}
                 {canAdminister && <button className="icon-button danger-icon" aria-label={`Remove ${member.email}`} onClick={() => remove.mutate(member.id)} disabled={remove.isPending}><Trash2 /></button>}
               </div>
             ))}
@@ -1040,7 +1220,49 @@ function BillingContent({ clientId }: { clientId: string }) {
         <Card className="current-plan"><span className="pill pill-light">{client.data?.serviceStatus || "Not reported"}</span><h2>{product}</h2><p>{allowance ? `${allowance} voice minutes allocated to this workspace.` : "No minute allowance is configured in the current client data."}</p><div className="plan-price"><strong>{tier === "starter" ? "£99" : tier === "pro" ? "£249" : "Contact sales"}</strong><span>{tier === "enterprise" ? "tailored plan" : "per month"}</span></div>{tier === "enterprise" ? <a className="button button-secondary button-md" href="mailto:hello@robinexis.com?subject=Enterprise%20Robinexis">Contact sales</a> : <Button onClick={() => checkout.mutate(tier)} disabled={checkout.isPending}>{checkout.isPending ? "Opening checkout…" : "Continue with Stripe"}</Button>}</Card>
         <Card className="panel usage-card"><SectionHeading title="Monthly usage" description={`Billing period ${usage.data?.month || "current month"}`} /><div className="usage-count"><strong>{meteredUsed}</strong><span>{allowance ? `of ${allowance} minutes` : "minutes recorded"}</span></div>{usagePercent !== undefined && <div className="progress"><i style={{ width: `${usagePercent}%` }} /></div>}<p><ShieldCheck /> {`${usage.data?.inboundMinutes || 0} inbound · ${usage.data?.outboundMinutes || 0} outbound minutes`}</p></Card>
       </div>
-      <Card className="panel"><SectionHeading title="Billing details" description="Every plan begins with a three-day trial and no card is required to start." /><div className="deferred-row"><CircleDollarSign /><div><strong>Stripe activates when keys are connected</strong><p>The dashboard remains usable while billing is unconfigured; checkout never receives voice or salon credentials.</p></div><a className="button button-secondary button-md" href="mailto:hello@robinexis.com">Contact billing</a></div></Card>
+      <Card className="panel"><SectionHeading title="Billing details" description="Every plan begins with a three-day trial backed by a payment card secured by Stripe." /><div className="deferred-row"><CircleDollarSign /><div><strong>Stripe manages payment details</strong><p>Checkout receives only tenant billing metadata; voice, calendar and salon credentials stay in Robinexis.</p></div><a className="button button-secondary button-md" href="mailto:hello@robinexis.com">Contact billing</a></div></Card>
+    </>
+  );
+}
+
+export function SupportPage() {
+  const queryClient = useQueryClient();
+  const { push } = useToast();
+  const [subject, setSubject] = useState("");
+  const [message, setMessage] = useState("");
+  const requests = useQuery({ queryKey: ["tenant-requests"], queryFn: api.requests, retry: false });
+  const create = useMutation({
+    mutationFn: () => api.createRequest({ type: "support", subject: subject.trim(), message: message.trim() }),
+    onSuccess: async () => {
+      setSubject("");
+      setMessage("");
+      await queryClient.invalidateQueries({ queryKey: ["tenant-requests"] });
+      push({ title: "Support request received", message: "Your request is now tracked in the workspace.", tone: "success" });
+    },
+    onError: (error) => push({ title: "Could not send request", message: error.message, tone: "error" }),
+  });
+  const supportRequests = requests.data?.filter((request) => request.type === "support") || [];
+  return (
+    <>
+      <PageHeader eyebrow="Support" title="Ask Robinexis for help" description="Create a tracked, tenant-scoped request and follow its status here." />
+      <div className="overview-grid">
+        <Card className="form-card">
+          <SectionHeading title="New support request" description="Do not include passwords, API keys, or customer payment details." />
+          <form className="auth-form" onSubmit={(event) => { event.preventDefault(); create.mutate(); }}>
+            <Field label="Subject"><input value={subject} onChange={(event) => setSubject(event.target.value)} required maxLength={160} /></Field>
+            <Field label="What do you need help with?"><textarea value={message} onChange={(event) => setMessage(event.target.value)} required rows={6} maxLength={4_000} /></Field>
+            <Button disabled={create.isPending || !subject.trim() || !message.trim()}>{create.isPending ? "Sending…" : "Send support request"}</Button>
+          </form>
+        </Card>
+        <Card className="panel">
+          <SectionHeading title="Request history" description="Updates remain visible to your workspace." />
+          {requests.isLoading ? <SkeletonRows count={3} /> : supportRequests.length ? (
+            <div className="team-list">{supportRequests.map((request) => (
+              <div className="team-row" key={request.id}><MessageCircleMore /><div><strong>{String(request.payload.subject || "Support request")}</strong><small>{formatDate(request.createdAt, { dateStyle: "medium", timeStyle: "short" })}</small></div><Badge tone={request.status === "completed" ? "success" : "warning"}>{request.status.replaceAll("_", " ")}</Badge></div>
+            ))}</div>
+          ) : <EmptyState icon={MessageCircleMore} title="No support requests" description="Use the form to contact the Robinexis operations team." />}
+        </Card>
+      </div>
     </>
   );
 }
@@ -1058,6 +1280,15 @@ export function SettingsPage() {
     onSuccess: async () => { await Promise.all([queryClient.invalidateQueries({ queryKey: ["client", activeClientId] }), queryClient.invalidateQueries({ queryKey: ["clients"] })]); push({ title: "Settings saved", message: "Approve a new workspace version if these details affect conversations.", tone: "success" }); },
     onError: (error) => push({ title: "Save failed", message: error.message, tone: "error" }),
   });
+  const lifecycleRequest = useMutation({
+    mutationFn: (type: "data_export" | "workspace_deletion") => api.createRequest({ type }),
+    onSuccess: (_, type) => push({
+      title: type === "data_export" ? "Export requested" : "Deletion review requested",
+      message: "An operator will review this safely and keep an audit record.",
+      tone: "success",
+    }),
+    onError: (error) => push({ title: "Request failed", message: error.message, tone: "error" }),
+  });
   if (!activeClientId) return <EmptyState title="No client selected" description="Select a client workspace before changing settings." action={canCreateClients ? <LinkButton to="/admin/clients/new">Create client</LinkButton> : undefined} />;
   if (client.isLoading) return <LoadingState />;
   if (client.error) return <ErrorState error={client.error} />;
@@ -1069,6 +1300,7 @@ export function SettingsPage() {
         <div>
           <Card className="form-card" id="business"><SectionHeading title="Business profile" description={canEdit ? "Changing approved business details marks the current agent configuration as a draft." : "Your viewer role can review these details but cannot change them."} /><form onSubmit={form.handleSubmit((values) => save.mutate(values))}><fieldset disabled={!canEdit || save.isPending}><div className="form-grid"><Field label="Business name"><input {...form.register("businessName")} /></Field><Field label="Location"><input {...form.register("location")} /></Field><Field label="Public email"><input {...form.register("email")} /></Field><Field label="Public phone"><input {...form.register("phone")} /></Field></div>{canEdit && <div className="form-actions"><Button disabled={save.isPending}>{save.isPending ? "Saving…" : "Save changes"}</Button></div>}</fieldset></form></Card>
           <Card className="form-card" id="security"><SectionHeading title="Session security" description="The dashboard stores a short-lived access token for this tab only." /><div className="security-setting"><span><KeyRound /></span><div><strong>Supabase session</strong><p>A signed JWT is verified by the Railway API, then restricted to assigned workspaces and roles.</p></div><Badge tone="success">Protected</Badge></div></Card>
+          <Card className="form-card" id="data"><SectionHeading title="Your data" description="Exports and deletion are reviewed, tenant-scoped, and audited before any irreversible action." /><div className="row-actions"><Button variant="secondary" disabled={lifecycleRequest.isPending} onClick={() => lifecycleRequest.mutate("data_export")}>Request data export</Button><Button variant="ghost" disabled={lifecycleRequest.isPending} onClick={() => { if (window.confirm("Request operator review for permanent workspace deletion? No data is deleted immediately.")) lifecycleRequest.mutate("workspace_deletion"); }}>Request deletion review</Button></div></Card>
           {isOperator && <Card className="form-card" id="developer"><SectionHeading title="API environment" description="Production dashboard requests use the versioned Railway API." /><div className="code-line"><code>/api/v1</code><button className="icon-button" onClick={() => navigator.clipboard.writeText("/api/v1")}><Copy size={16} /></button></div></Card>}
         </div>
       </div>

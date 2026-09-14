@@ -27,6 +27,10 @@ export function dashboardPath(
   return SOPHIE_DEMO_PATH;
 }
 
-export function nonAdminPath(actor: SessionActor | undefined): "/app" | typeof SOPHIE_DEMO_PATH {
-  return actor?.role === "salon" && hasActiveSubscription(actor) ? "/app" : SOPHIE_DEMO_PATH;
+export function nonAdminPath(
+  actor: SessionActor | undefined,
+): "/app" | typeof BILLING_PATH | typeof SOPHIE_DEMO_PATH {
+  if (actor?.role === "salon" && hasActiveSubscription(actor)) return "/app";
+  if (actor?.role === "salon" || actor?.role === "pending") return BILLING_PATH;
+  return SOPHIE_DEMO_PATH;
 }

@@ -19,6 +19,9 @@ export type WorkspaceRole = "owner" | "manager" | "viewer";
 export type OnboardingStatus =
   | "payment_required"
   | "details_required"
+  | "setup_queued"
+  | "setup_in_progress"
+  | "needs_attention"
   | "ready_to_provision"
   | "provisioning"
   | "active"
@@ -93,6 +96,8 @@ export interface ClientConfig {
   stripeSubscriptionId?: string;
   promptVersionId?: string;
   onboardingStatus?: OnboardingStatus;
+  onboardingNotes?: string;
+  onboardingEta?: string;
   phoneAcquisitionMode?: PhoneAcquisitionMode;
   requestedPhoneNumber?: string;
 }
@@ -314,6 +319,20 @@ export interface UserProfile {
   displayName?: string;
   platformRole: "admin" | "client";
   workspaceRole?: WorkspaceRole;
+  termsAcceptedAt?: string;
+  privacyAcceptedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TenantRequest {
+  id: string;
+  clientId: string;
+  type: "team_invite" | "data_export" | "workspace_deletion" | "support";
+  status: "pending" | "in_progress" | "completed" | "rejected" | "revoked";
+  requestedBy: string;
+  email?: string;
+  payload: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
 }
@@ -465,6 +484,15 @@ export interface CreditLedgerEntry {
   referenceType?: string;
   referenceId?: string;
   description?: string;
+  createdAt: string;
+}
+
+export interface OperatorAuditRecord {
+  id: string;
+  clientId?: string;
+  actorId: string;
+  action: string;
+  detail: Record<string, unknown>;
   createdAt: string;
 }
 
