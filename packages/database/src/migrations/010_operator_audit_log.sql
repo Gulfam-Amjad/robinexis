@@ -10,6 +10,18 @@ CREATE TABLE IF NOT EXISTS operator_audit_log (
 CREATE INDEX IF NOT EXISTS operator_audit_log_client_created_idx
   ON operator_audit_log(client_id, created_at DESC);
 
+ALTER TABLE operator_audit_log ENABLE ROW LEVEL SECURITY;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+    REVOKE ALL ON public.operator_audit_log FROM anon;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+    REVOKE ALL ON public.operator_audit_log FROM authenticated;
+  END IF;
+END
+$$;
+
 CREATE OR REPLACE FUNCTION prevent_operator_audit_mutation()
 RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
