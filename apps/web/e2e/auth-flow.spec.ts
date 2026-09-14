@@ -61,6 +61,14 @@ async function seedSupabaseSession(
       onCheckout?.(body.plan || "");
       return route.fulfill({ status: 201, json: { checkoutSessionId: "cs_test_pro", url: null } });
     }
+    if (path === "/api/v1/billing/status") {
+      return route.fulfill({ json: {
+        configured: false,
+        canManagePortal: false,
+        plan: "starter",
+        status: status || "incomplete",
+      } });
+    }
     if (path === "/api/v1/bootstrap") {
       return route.fulfill({ json: {
         clients: [{ id: "client_demo", slug: "demo", businessName: "Demo Salon", published: true, serviceStatus: "trialing" }],
@@ -126,7 +134,7 @@ test("pending signup is sent to checkout until a plan is active", async ({ page 
   await page.reload();
   await expect(page.getByRole("heading", { name: "Choose a plan to continue" })).toBeVisible();
   await page.goto("/admin");
-  await expect(page).toHaveURL(/\/demo\/blades-hair$/);
+  await expect(page).toHaveURL(/\/billing$/);
 });
 
 test("unpaid salon workspaces are sent to checkout, not the dashboard", async ({ page }) => {
@@ -135,7 +143,7 @@ test("unpaid salon workspaces are sent to checkout, not the dashboard", async ({
   await expect(page).toHaveURL(/\/billing$/);
   await expect(page.getByRole("heading", { name: "Choose a plan to continue" })).toBeVisible();
   await page.goto("/app");
-  await expect(page).toHaveURL(/\/demo\/blades-hair$/);
+  await expect(page).toHaveURL(/\/billing$/);
   await page.goto("/onboarding");
   await expect(page).toHaveURL(/\/billing$/);
 });

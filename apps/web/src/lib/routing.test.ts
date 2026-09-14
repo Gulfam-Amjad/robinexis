@@ -41,11 +41,11 @@ describe("post-login routing policy", () => {
   });
 
   it.each(["past_due", "canceled", "unpaid", "incomplete", "incomplete_expired", "paused"] as const)(
-    "sends %s salon accounts to billing, and keeps Sophie as the product fallback",
+    "sends %s salon accounts to billing recovery",
     (status) => {
       const salon = actor("salon", status);
       expect(dashboardPath(salon)).toBe(BILLING_PATH);
-      expect(nonAdminPath(salon)).toBe(SOPHIE_DEMO_PATH);
+      expect(nonAdminPath(salon)).toBe(BILLING_PATH);
       expect(canAccessProduct(salon)).toBe(false);
     },
   );

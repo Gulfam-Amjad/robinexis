@@ -1,7 +1,7 @@
 import type Stripe from "stripe";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BLADES_HAIR_ID, MemoryStore, seedStore } from "@robinexis/database";
-import { createCheckoutSession, handleStripeWebhook } from "./stripe.js";
+import { createBillingPortalSession, createCheckoutSession, handleStripeWebhook } from "./stripe.js";
 
 afterEach(() => {
   delete process.env.STRIPE_PRICE_IDS_JSON;
@@ -45,7 +45,7 @@ describe("createCheckoutSession", () => {
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
         client_reference_id: "client_two",
-        payment_method_collection: "if_required",
+        payment_method_collection: "always",
         metadata: { clientId: "client_two", plan: "pro" },
         line_items: [{ price: "price_pro", quantity: 1 }],
         subscription_data: {
@@ -55,6 +55,24 @@ describe("createCheckoutSession", () => {
       }),
       { idempotencyKey: "checkout:client_two:pro:1" },
     );
+  });
+
+  it("creates a customer-scoped billing portal session", async () => {
+    const create = vi.fn().mockResolvedValue({ id: "bps_123", url: "https://billing.stripe.test/session" });
+    const stripe = { billingPortal: { sessions: { create } } } as unknown as Stripe;
+    await expect(createBillingPortalSession({
+      customerId: "cus_tenant",
+      returnUrl: "https://app.example/billing",
+      stripe,
+    })).resolves.toEqual({
+      configured: true,
+      id: "bps_123",
+      url: "https://billing.stripe.test/session",
+    });
+    expect(create).toHaveBeenCalledWith({
+      customer: "cus_tenant",
+      return_url: "https://app.example/billing",
+    });
   });
 
   it("verifies, normalizes, and idempotently records subscription webhooks", async () => {
@@ -109,6 +127,12 @@ describe("createCheckoutSession", () => {
     await expect(store.getStripeEvent(BLADES_HAIR_ID, event.id)).resolves.toMatchObject({
       status: "processed",
     });
+    await expect(store.getClient(BLADES_HAIR_ID)).resolves.toMatchObject({
+      subscribedProduct: "pro",
+      monthlyMinuteLimit: 1_500,
+    });
+    expect(await store.getCreditBalance(BLADES_HAIR_ID)).toBe(1_500);
+    expect(await store.listCreditLedger(BLADES_HAIR_ID)).toHaveLength(1);
   });
 
   it("rejects missing or invalid webhook signatures without throwing", async () => {

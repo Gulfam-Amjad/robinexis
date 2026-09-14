@@ -48,3 +48,4 @@ brains/**/*.wav
 brains/**/*.zip
 
 .vercel
+supabase/.temp/

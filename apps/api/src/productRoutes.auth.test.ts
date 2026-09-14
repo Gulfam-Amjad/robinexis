@@ -110,14 +110,34 @@ describe("product route tenant authorization", () => {
     const previous = process.env.SAAS_PROVISIONING_ENABLED;
     process.env.SAAS_PROVISIONING_ENABLED = "false";
     try {
+      const now = new Date().toISOString();
+      await store.upsertSubscription({
+        id: "subscription_onboarding_test",
+        clientId: BLADES_HAIR_ID,
+        provider: "stripe",
+        planTier: "starter",
+        status: "trialing",
+        cancelAtPeriodEnd: false,
+        metadata: {},
+        createdAt: now,
+        updatedAt: now,
+      });
       const own = await request(
         store,
         salonActor,
         `/api/v1/clients/${BLADES_HAIR_ID}/onboarding/finalize`,
         "POST",
-        {},
+        {
+          businessName: "Isolated Test Salon",
+          transferNumber: "+447700900123",
+          services: [{ title: "Cut", slug: "cut", durationMinutes: 30 }],
+          phoneMode: "robinexis_account",
+        },
       );
-      expect(own).toMatchObject({ status: 503, body: { error: "saas_provisioning_disabled" } });
+      expect(own).toMatchObject({ status: 202, body: { onboardingStatus: "setup_queued" } });
+      expect((await store.getClient(BLADES_HAIR_ID))?.onboardingStatus).toBe("setup_queued");
+      expect(await store.listProvisioningRuns(BLADES_HAIR_ID)).toEqual([]);
+      expect((await store.listOperatorAudit(BLADES_HAIR_ID))[0]?.action).toBe("onboarding.setup_queued");
       const other = await request(
         store,
         salonActor,
@@ -130,6 +150,19 @@ describe("product route tenant authorization", () => {
       if (previous === undefined) delete process.env.SAAS_PROVISIONING_ENABLED;
       else process.env.SAAS_PROVISIONING_ENABLED = previous;
     }
+  });
+
+  it("authorizes the Stripe portal only for the owning workspace", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    const own = await request(store, salonActor, "/api/v1/billing/portal", "POST", {
+      clientId: BLADES_HAIR_ID,
+    });
+    expect(own).toMatchObject({ status: 409, body: { error: "billing_profile_pending" } });
+    const other = await request(store, salonActor, "/api/v1/billing/portal", "POST", {
+      clientId: DEMO_CLIENT_ID,
+    });
+    expect(other).toMatchObject({ status: 404, body: { error: "client_not_found" } });
   });
 
   it("returns not found instead of exposing another tenant or its calls", async () => {

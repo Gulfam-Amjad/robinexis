@@ -63,7 +63,7 @@ export async function createCheckoutSession(opts: {
       success_url: opts.successUrl,
       cancel_url: opts.cancelUrl,
       allow_promotion_codes: true,
-      payment_method_collection: "if_required",
+      payment_method_collection: "always",
       client_reference_id: opts.clientId,
       customer: opts.customerId,
       customer_email: opts.customerId ? undefined : opts.customerEmail,
@@ -75,6 +75,23 @@ export async function createCheckoutSession(opts: {
     },
     opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : undefined,
   );
+  return { configured: true, id: session.id, url: session.url };
+}
+
+export async function createBillingPortalSession(opts: {
+  customerId: string;
+  returnUrl: string;
+  stripe?: Stripe | null;
+}): Promise<
+  | { configured: false; reason: "stripe_not_configured" }
+  | { configured: true; id: string; url: string }
+> {
+  const stripe = opts.stripe === undefined ? createStripe() : opts.stripe;
+  if (!stripe) return { configured: false, reason: "stripe_not_configured" };
+  const session = await stripe.billingPortal.sessions.create({
+    customer: opts.customerId,
+    return_url: opts.returnUrl,
+  });
   return { configured: true, id: session.id, url: session.url };
 }
 
@@ -207,6 +224,19 @@ export async function handleStripeWebhook(opts: {
       createdAt: new Date(sub.created * 1_000).toISOString(),
       updatedAt: new Date().toISOString(),
     });
+    if (local === "active" || local === "trialing") {
+      const periodReference = String(period.current_period_start || sub.trial_start || sub.created);
+      await opts.store.appendCreditLedgerEntry({
+        id: `credit_${client.id}_${sub.id}_${periodReference}`,
+        clientId: client.id,
+        minutes: planDefinition(planTier).includedMinutes,
+        kind: "grant",
+        referenceType: "stripe_subscription_period",
+        referenceId: `${sub.id}:${periodReference}`,
+        description: `${planDefinition(planTier).name} included minutes`,
+        createdAt: new Date().toISOString(),
+      });
+    }
     await opts.store.saveStripeEvent({
       ...eventRow,
       status: "processed",
@@ -323,7 +353,23 @@ function applyPlanMapping(
 ) {
   const priceId = subscription.items.data[0]?.price.id;
   if (!priceId) return;
-  client.subscribedProduct = priceId;
+  const metadataTier = subscription.metadata?.plan;
+  if (isPlanTier(metadataTier)) {
+    client.subscribedProduct = metadataTier;
+  } else {
+    try {
+      const prices = JSON.parse(process.env.STRIPE_PRICE_IDS_JSON || "{}") as Record<string, string>;
+      const matchedTier = Object.entries(prices).find(([, configuredPrice]) => configuredPrice === priceId)?.[0];
+      if (isPlanTier(matchedTier)) client.subscribedProduct = matchedTier;
+    } catch {
+      structuredLog("stripe_price_mapping_invalid", {});
+    }
+  }
+  if (isPlanTier(client.subscribedProduct)) {
+    const definition = planDefinition(client.subscribedProduct);
+    client.monthlyMinuteLimit = definition.includedMinutes;
+    client.enabledFeatures = [...definition.features];
+  }
   const raw = process.env.STRIPE_PRICE_FEATURES_JSON;
   if (!raw) return;
   try {

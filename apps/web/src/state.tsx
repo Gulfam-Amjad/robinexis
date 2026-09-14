@@ -20,7 +20,9 @@ const SessionContext = createContext<SessionValue | null>(null);
 export function SessionProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const location = useLocation();
-  const inProduct = location.pathname.startsWith("/app") || location.pathname.startsWith("/admin") || location.pathname.startsWith("/dashboard") || location.pathname.startsWith("/billing");
+  const inProduct = ["/app", "/admin", "/dashboard", "/billing", "/onboarding"].some((path) =>
+    location.pathname.startsWith(path),
+  );
   const [apiKey, setApiKey] = useState(() => sessionStorage.getItem(API_KEY_STORAGE));
   const [authReady, setAuthReady] = useState(!AUTH_REQUIRED);
   const actorQuery = useQuery({

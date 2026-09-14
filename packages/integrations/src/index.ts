@@ -5,6 +5,7 @@ export { maskCalcomUsername } from "./calcom.js";
 export { appendVerifiedCalendarNote } from "./calendarNotes.js";
 export {
   checkoutConfigurationError,
+  createBillingPortalSession,
   createCheckoutSession,
   createStripe,
   handleStripeWebhook,

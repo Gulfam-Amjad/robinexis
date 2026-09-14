@@ -213,6 +213,9 @@ export function AdminOverviewPage() {
   const active = clients.filter((client) => client.access?.inbound).length;
   const drafts = clients.filter((client) => !client.published).length;
   const attention = clients.filter((client) => ["past_due", "unpaid", "canceled"].includes(client.serviceStatus)).length;
+  const setupQueue = clients.filter((client) =>
+    ["setup_queued", "setup_in_progress", "needs_attention"].includes(client.onboardingStatus || ""),
+  );
   const openWorkspace = (clientId: string) => {
     setActiveClientId(clientId);
     navigate("/app");
@@ -245,6 +248,40 @@ export function AdminOverviewPage() {
         <MetricCard label="Minutes used" value={Math.round(summary.data?.totalUsedMinutes || 0)} detail={`${summary.data?.totalFailedCalls || 0} failed calls`} icon={Clock3} />
         <MetricCard label="Needs attention" value={attention + drafts} detail={`${drafts} draft · ${attention} service status`} icon={ShieldCheck} tone="peach" />
       </div>
+      <Card className="panel">
+        <SectionHeading
+          title="Setup queue"
+          description={`${setupQueue.length} paid workspace${setupQueue.length === 1 ? "" : "s"} waiting for operator-assisted activation.`}
+        />
+        {setupQueue.length ? (
+          <div className="team-list">
+            {setupQueue.map((client) => (
+              <div className="team-row" key={client.id}>
+                <span className="client-avatar">{client.businessName.slice(0, 2).toUpperCase()}</span>
+                <div><strong>{client.businessName}</strong><small className="capitalize">{client.onboardingStatus?.replaceAll("_", " ")}</small></div>
+                <Badge tone={client.onboardingStatus === "needs_attention" ? "danger" : client.onboardingStatus === "setup_in_progress" ? "accent" : "warning"}>
+                  {client.onboardingStatus?.replaceAll("_", " ")}
+                </Badge>
+                <Button variant="secondary" onClick={() => openWorkspace(client.id)}>Review setup</Button>
+              </div>
+            ))}
+          </div>
+        ) : <EmptyState icon={CheckCircle2} title="Setup queue is clear" description="New paid workspaces will appear here after their business details are submitted." />}
+      </Card>
+      {Boolean(summary.data?.failedBillingEvents?.length) && (
+        <Card className="panel">
+          <SectionHeading title="Billing events needing recovery" description="Failed Stripe webhook processing is retained for operator review and safe replay." />
+          <div className="team-list">
+            {summary.data!.failedBillingEvents!.map((event) => (
+              <div className="team-row" key={event.id}>
+                <XCircle className="danger-icon" />
+                <div><strong>{event.eventType}</strong><small>{event.clientId || "Tenant not resolved"} · {formatDate(event.receivedAt, { dateStyle: "medium", timeStyle: "short" })}</small></div>
+                <Badge tone="danger">Failed</Badge>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
       <Card className="panel">
         <SectionHeading title="Client portfolio" description="Status comes directly from the client summaries returned by the API." />
         {!clients.length ? (
@@ -1040,7 +1077,7 @@ function BillingContent({ clientId }: { clientId: string }) {
         <Card className="current-plan"><span className="pill pill-light">{client.data?.serviceStatus || "Not reported"}</span><h2>{product}</h2><p>{allowance ? `${allowance} voice minutes allocated to this workspace.` : "No minute allowance is configured in the current client data."}</p><div className="plan-price"><strong>{tier === "starter" ? "£99" : tier === "pro" ? "£249" : "Contact sales"}</strong><span>{tier === "enterprise" ? "tailored plan" : "per month"}</span></div>{tier === "enterprise" ? <a className="button button-secondary button-md" href="mailto:hello@robinexis.com?subject=Enterprise%20Robinexis">Contact sales</a> : <Button onClick={() => checkout.mutate(tier)} disabled={checkout.isPending}>{checkout.isPending ? "Opening checkout…" : "Continue with Stripe"}</Button>}</Card>
         <Card className="panel usage-card"><SectionHeading title="Monthly usage" description={`Billing period ${usage.data?.month || "current month"}`} /><div className="usage-count"><strong>{meteredUsed}</strong><span>{allowance ? `of ${allowance} minutes` : "minutes recorded"}</span></div>{usagePercent !== undefined && <div className="progress"><i style={{ width: `${usagePercent}%` }} /></div>}<p><ShieldCheck /> {`${usage.data?.inboundMinutes || 0} inbound · ${usage.data?.outboundMinutes || 0} outbound minutes`}</p></Card>
       </div>
-      <Card className="panel"><SectionHeading title="Billing details" description="Every plan begins with a three-day trial and no card is required to start." /><div className="deferred-row"><CircleDollarSign /><div><strong>Stripe activates when keys are connected</strong><p>The dashboard remains usable while billing is unconfigured; checkout never receives voice or salon credentials.</p></div><a className="button button-secondary button-md" href="mailto:hello@robinexis.com">Contact billing</a></div></Card>
+      <Card className="panel"><SectionHeading title="Billing details" description="Every plan begins with a three-day trial backed by a payment card secured by Stripe." /><div className="deferred-row"><CircleDollarSign /><div><strong>Stripe manages payment details</strong><p>Checkout receives only tenant billing metadata; voice, calendar and salon credentials stay in Robinexis.</p></div><a className="button button-secondary button-md" href="mailto:hello@robinexis.com">Contact billing</a></div></Card>
     </>
   );
 }

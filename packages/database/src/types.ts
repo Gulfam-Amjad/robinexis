@@ -19,6 +19,9 @@ export type WorkspaceRole = "owner" | "manager" | "viewer";
 export type OnboardingStatus =
   | "payment_required"
   | "details_required"
+  | "setup_queued"
+  | "setup_in_progress"
+  | "needs_attention"
   | "ready_to_provision"
   | "provisioning"
   | "active"
@@ -465,6 +468,15 @@ export interface CreditLedgerEntry {
   referenceType?: string;
   referenceId?: string;
   description?: string;
+  createdAt: string;
+}
+
+export interface OperatorAuditRecord {
+  id: string;
+  clientId?: string;
+  actorId: string;
+  action: string;
+  detail: Record<string, unknown>;
   createdAt: string;
 }
 

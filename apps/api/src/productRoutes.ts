@@ -3,6 +3,7 @@ import { compilePrompt } from "@robinexis/brain";
 import {
   isAiServiceEnabled,
   newId,
+  structuredLog,
   type CallSession,
   type ClientConfig,
   type OutboundJob,
@@ -12,6 +13,7 @@ import {
   calcom,
   calcomTenantFromClient,
   checkoutConfigurationError,
+  createBillingPortalSession,
   createTwilioOAuthState,
   createCheckoutSession,
   discoverTwilioAccountSid,
@@ -333,6 +335,7 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       return true;
     }
     const clients = await store.listClients();
+    const failedBillingEvents = await store.listStripeEvents("failed", 25);
     const month = new Date().toISOString().slice(0, 7);
     const items = await Promise.all(clients.map(async (client) => {
       const subscription = await store.getCurrentSubscription(client.id);
@@ -360,8 +363,27 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       mrrPence,
       totalUsedMinutes: items.reduce((sum, item) => sum + item.usedMinutes, 0),
       totalFailedCalls: items.reduce((sum, item) => sum + item.failedCalls, 0),
+      failedBillingEvents: failedBillingEvents.map((event) => ({
+        id: event.id,
+        clientId: event.clientId,
+        eventType: event.eventType,
+        error: event.error,
+        receivedAt: event.receivedAt,
+      })),
+      setupQueueCount: clients.filter((client) =>
+        ["setup_queued", "setup_in_progress", "needs_attention"].includes(client.onboardingStatus || ""),
+      ).length,
       clients: items,
     });
+    return true;
+  }
+  if (route === "/admin/audit" && req.method === "GET") {
+    if (!canAdministerPlatform(actor)) {
+      send(res, 403, { error: "platform_admin_required" });
+      return true;
+    }
+    const clientId = url.searchParams.get("clientId") || undefined;
+    send(res, 200, { items: await store.listOperatorAudit(clientId, 100) });
     return true;
   }
 
@@ -505,6 +527,14 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
     }
     client.serviceStatus = body.action === "suspend" ? "paused" : "active";
     await store.upsertClient(client);
+    await store.appendOperatorAudit({
+      id: newId("audit_"),
+      clientId: client.id,
+      actorId: actor.subject,
+      action: `service.${body.action}`,
+      detail: { serviceStatus: client.serviceStatus },
+      createdAt: new Date().toISOString(),
+    });
     send(res, 200, { clientId: client.id, serviceStatus: client.serviceStatus });
     return true;
   }
@@ -541,6 +571,16 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       description: `${body.reason.trim()} — ${actor.email}`,
       createdAt: new Date().toISOString(),
     });
+    if (appended) {
+      await store.appendOperatorAudit({
+        id: newId("audit_"),
+        clientId: client.id,
+        actorId: actor.subject,
+        action: "billing.credit_adjusted",
+        detail: { minutes: Number(body.minutes), reason: body.reason.trim(), idempotencyKey: body.idempotencyKey.trim() },
+        createdAt: new Date().toISOString(),
+      });
+    }
     send(res, appended ? 201 : 200, {
       appended,
       remainingMinutes: Math.max(0, await store.getCreditBalance(client.id)),
@@ -743,10 +783,6 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
   if (finalizeOnboardingMatch && req.method === "POST") {
     const liveClient = await requireManageClient(ctx, finalizeOnboardingMatch[1]);
     if (!liveClient) return true;
-    if (process.env.SAAS_PROVISIONING_ENABLED !== "true") {
-      send(res, 503, { error: "saas_provisioning_disabled" });
-      return true;
-    }
     const subscription = await store.getCurrentSubscription(liveClient.id);
     if (!subscription || !["active", "trialing"].includes(subscription.status)) {
       send(res, 402, { error: "active_subscription_required" });
@@ -778,7 +814,7 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
         service.durationMinutes > 0
       ) ||
       !["robinexis_account", "customer_oauth"].includes(body.phoneMode || "") ||
-      !body.twilioNumber?.match(/^\+[1-9]\d{7,14}$/)
+      (body.twilioNumber && !body.twilioNumber.match(/^\+[1-9]\d{7,14}$/))
     ) {
       send(res, 400, { error: "complete_business_services_phone_details_required" });
       return true;
@@ -798,25 +834,12 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       publishedFacts: body.publishedFacts || [],
       services: body.services,
       phoneAcquisitionMode: body.phoneMode,
-      requestedPhoneNumber: body.twilioNumber,
-      onboardingStatus: "ready_to_provision",
+      requestedPhoneNumber: body.twilioNumber || undefined,
+      onboardingStatus: "setup_queued",
     });
     const now = new Date().toISOString();
-    const latest = await store.latestPrompt(client.id);
-    const prompt = {
-      id: newId("pv_"),
-      clientId: client.id,
-      version: (latest?.version ?? 0) + 1,
-      compiled: compilePrompt({
-        client,
-        direction: "inbound",
-        objective: "Answer, retrieve knowledge, book, reschedule, cancel, capture a callback, or transfer safely.",
-      }),
-      createdAt: now,
-    };
-    client.promptVersionId = prompt.id;
-    client.published = true;
-    await store.publishClientDraft({
+    client.published = false;
+    await store.saveDraftClient({
       id: existingDraft?.id || newId("client_revision_"),
       clientId: client.id,
       status: "draft",
@@ -824,25 +847,22 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       createdBy: actor.subject,
       createdAt: existingDraft?.createdAt || now,
       updatedAt: now,
-    }, prompt);
-    try {
-      const result = await provisionClientAgent({
-        clientId: client.id,
-        operationKey: `self-serve-${client.id}-${prompt.id}`,
-        apiBaseUrl: process.env.API_PUBLIC_BASE_URL || `https://${ctx.req.headers.host}`,
-        transferNumber: client.transferNumber,
-        twilioNumber: body.twilioNumber,
-        phoneMode: body.phoneMode,
-        twilioAccountSid: process.env.TWILIO_ACCOUNT_SID,
-        twilioAuthToken: process.env.TWILIO_AUTH_TOKEN,
-      }, {
-        store,
-        elevenLabs: new ElevenLabsManagementClient({ apiKey: process.env.ELEVENLABS_API_KEY || "" }),
-      });
-      send(res, 200, { client: safeEditableClient(await store.getClient(client.id) || client), provisioning: result });
-    } catch (error) {
-      send(res, 502, { error: error instanceof Error ? error.message : "provisioning_failed" });
-    }
+    });
+    await store.upsertClient(client);
+    await store.appendOperatorAudit({
+      id: newId("audit_"),
+      clientId: client.id,
+      actorId: actor.subject,
+      action: "onboarding.setup_queued",
+      detail: { phoneMode: body.phoneMode, serviceCount: body.services.length },
+      createdAt: now,
+    });
+    structuredLog("onboarding_setup_queued", { clientId: client.id, actorId: actor.subject });
+    send(res, 202, {
+      client: safeEditableClient(client),
+      onboardingStatus: "setup_queued",
+      message: "Your setup details are queued for Robinexis review.",
+    });
     return true;
   }
 
@@ -920,6 +940,14 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       send(res, 400, { error: "operation_key_required" });
       return true;
     }
+    await store.appendOperatorAudit({
+      id: newId("audit_"),
+      clientId: client.id,
+      actorId: actor.subject,
+      action: "provisioning.started",
+      detail: { operationKey: body.operationKey, phoneMode: body.phoneMode || client.phoneAcquisitionMode },
+      createdAt: new Date().toISOString(),
+    });
     try {
       const result = await provisionClientAgent(
         {
@@ -942,9 +970,25 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
           }),
         },
       );
+      await store.appendOperatorAudit({
+        id: newId("audit_"),
+        clientId: client.id,
+        actorId: actor.subject,
+        action: "provisioning.succeeded",
+        detail: { operationKey: body.operationKey, runId: result.runId },
+        createdAt: new Date().toISOString(),
+      });
       send(res, 200, result);
     } catch (error) {
       const message = error instanceof Error ? error.message : "provisioning_failed";
+      await store.appendOperatorAudit({
+        id: newId("audit_"),
+        clientId: client.id,
+        actorId: actor.subject,
+        action: "provisioning.failed",
+        detail: { operationKey: body.operationKey, error: message.slice(0, 300) },
+        createdAt: new Date().toISOString(),
+      });
       send(res, message === "provisioning_already_running" ? 409 : 502, { error: message });
     }
     return true;
@@ -1070,6 +1114,54 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       usedMinutes,
       remainingMinutes: Math.max(0, remainingMinutes),
     });
+    return true;
+  }
+
+  if (route === "/billing/status" && req.method === "GET") {
+    const requestedId = url.searchParams.get("clientId") || "";
+    const id = requestedId || writableClientId(actor);
+    if (!id) {
+      send(res, 200, { configured: false, status: "incomplete" });
+      return true;
+    }
+    const client = await requireManageClient(ctx, id);
+    if (!client) return true;
+    const subscription = await store.getCurrentSubscription(client.id);
+    send(res, 200, {
+      configured: Boolean(client.stripeCustomerId),
+      canManagePortal: Boolean(client.stripeCustomerId),
+      plan: subscription?.planTier || (isPlanTier(client.subscribedProduct) ? client.subscribedProduct : "starter"),
+      status: subscription?.status || client.serviceStatus,
+      trialEndsAt: subscription?.trialEndsAt,
+      currentPeriodEnd: subscription?.currentPeriodEnd,
+      cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd || false,
+    });
+    return true;
+  }
+
+  if (route === "/billing/portal" && req.method === "POST") {
+    const body = await readJson<{ clientId?: string }>(ctx);
+    const requestedId = String(body.clientId || "");
+    const id = requestedId || writableClientId(actor);
+    if (!id) {
+      send(res, 403, { error: "workspace_write_forbidden" });
+      return true;
+    }
+    const client = await requireManageClient(ctx, id);
+    if (!client) return true;
+    if (!client.stripeCustomerId) {
+      send(res, 409, { error: "billing_profile_pending" });
+      return true;
+    }
+    const portal = await createBillingPortalSession({
+      customerId: client.stripeCustomerId,
+      returnUrl: `${primaryWebOrigin()}/billing`,
+    });
+    if (!portal.configured) {
+      send(res, 503, { error: portal.reason });
+      return true;
+    }
+    send(res, 201, { portalSessionId: portal.id, url: portal.url });
     return true;
   }
 

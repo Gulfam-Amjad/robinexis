@@ -21,6 +21,7 @@ import type {
   KnowledgeDocumentListOptions,
   KnowledgeSearchOptions,
   Location,
+  OperatorAuditRecord,
   OutboundJob,
   Page,
   PhoneEndpoint,
@@ -458,6 +459,15 @@ export class PostgresStore implements PlatformStore {
     const r = await this.pool.query("SELECT * FROM stripe_events WHERE client_id = $1 AND id = $2", [clientId, id]);
     return r.rows[0] ? stripeEventFromRow(r.rows[0]) : undefined;
   }
+  async listStripeEvents(status?: StripeEvent["status"], limit = 100) {
+    const r = await this.pool.query(
+      `SELECT * FROM stripe_events
+       WHERE ($1::text IS NULL OR status = $1)
+       ORDER BY received_at DESC, id DESC LIMIT $2`,
+      [status ?? null, Math.max(1, Math.min(limit, 500))],
+    );
+    return r.rows.map(stripeEventFromRow);
+  }
   async saveBookingRecord(booking: BookingRecord) {
     await this.pool.query(
       `INSERT INTO booking_records
@@ -516,6 +526,23 @@ export class PostgresStore implements PlatformStore {
       [clientId],
     );
     return Number(r.rows[0]?.balance ?? 0);
+  }
+  async appendOperatorAudit(record: OperatorAuditRecord) {
+    const r = await this.pool.query(
+      `INSERT INTO operator_audit_log (id, client_id, actor_id, action, detail, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING RETURNING id`,
+      [record.id, record.clientId ?? null, record.actorId, record.action, record.detail, record.createdAt],
+    );
+    return r.rowCount === 1;
+  }
+  async listOperatorAudit(clientId?: string, limit = 100) {
+    const r = await this.pool.query(
+      `SELECT * FROM operator_audit_log
+       WHERE ($1::text IS NULL OR client_id = $1)
+       ORDER BY created_at DESC, id DESC LIMIT $2`,
+      [clientId ?? null, Math.max(1, Math.min(limit, 500))],
+    );
+    return r.rows.map(operatorAuditFromRow);
   }
   async claimProvisioningRun(run: ProvisioningRun) {
     const r = await this.pool.query(
@@ -1180,6 +1207,17 @@ function creditLedgerEntryFromRow(row: Record<string, any>): CreditLedgerEntry {
     kind: row.kind, direction: row.direction ?? undefined,
     referenceType: row.reference_type ?? undefined,
     referenceId: row.reference_id ?? undefined, description: row.description ?? undefined,
+    createdAt: toIso(row.created_at),
+  };
+}
+
+function operatorAuditFromRow(row: Record<string, any>): OperatorAuditRecord {
+  return {
+    id: row.id,
+    clientId: row.client_id ?? undefined,
+    actorId: row.actor_id,
+    action: row.action,
+    detail: row.detail ?? {},
     createdAt: toIso(row.created_at),
   };
 }

@@ -110,6 +110,12 @@ export async function runVoiceTool(
       body: { ok: false, error: "service_unavailable", reason: "trial_expired" },
     };
   }
+  if (subscription?.provider === "stripe" && await store.getCreditBalance(client.id) <= 0) {
+    return {
+      status: 403,
+      body: { ok: false, error: "service_unavailable", reason: "minute_allowance_exhausted" },
+    };
+  }
   if (!client.enabledFeatures.includes("booking")) {
     return { status: 403, body: { ok: false, error: "booking_not_enabled" } };
   }

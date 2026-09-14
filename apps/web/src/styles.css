@@ -208,6 +208,16 @@ svg { flex: 0 0 auto; }
 .enterprise-card ul { border-top: 1px solid rgba(255,255,255,.12); list-style: none; margin: 0; padding: 20px 0 0; }
 .enterprise-card li { align-items: flex-start; color: #d4d4d4; display: flex; font-size: 14px; gap: 11px; margin: 16px 0; }
 .enterprise-card li svg { color: var(--accent); flex: 0 0 auto; }
+.legal-main { margin: auto; max-width: 850px; padding: 72px 25px 110px; }
+.legal-main h1 { font-family: var(--font-display); font-size: clamp(42px, 6vw, 68px); font-weight: 500; margin: 12px 0 14px; }
+.legal-updated { color: var(--faint); font-size: 12px; }
+.legal-intro { color: var(--muted); font-size: 18px; max-width: 720px; }
+.legal-sections { background: var(--paper); border: 1px solid var(--line); border-radius: 20px; margin: 38px 0; padding: 10px 32px; }
+.legal-sections section { border-bottom: 1px solid var(--line); padding: 24px 0; }
+.legal-sections section:last-child { border-bottom: 0; }
+.legal-sections h2 { font-size: 18px; letter-spacing: -.02em; margin-bottom: 8px; }
+.legal-sections p, .legal-contact { color: var(--muted); margin: 0; }
+.legal-contact a { font-weight: 750; text-decoration: underline; text-underline-offset: 3px; }
 
 .auth-page { background: #f0f0f0; min-height: 100vh; padding: 30px; }
 .auth-page > .logo { margin: 0 0 25px 3vw; }
@@ -224,6 +234,14 @@ svg { flex: 0 0 auto; }
 .auth-callback-loader { animation: spin 1s linear infinite; border: 3px solid var(--line); border-radius: 50%; border-top-color: var(--accent); height: 34px; margin: 30px auto 0; width: 34px; }
 .auth-note { align-items: flex-start; background: var(--accent-soft); border-radius: 12px; color: #06603a; display: flex; font-size: 11px; gap: 10px; margin-top: 20px; padding: 12px; }
 .auth-note p { line-height: 1.45; margin: 0; }
+.setup-progress { display: grid; gap: 4px; margin: 8px 0 24px; }
+.setup-progress > div { align-items: center; border-left: 2px solid var(--line); display: flex; gap: 13px; margin-left: 15px; min-height: 64px; padding-left: 24px; }
+.setup-progress > div > span { align-items: center; background: #fff; border: 2px solid var(--line-strong); border-radius: 50%; display: flex; font-size: 11px; font-weight: 800; height: 32px; justify-content: center; margin-left: -41px; width: 32px; }
+.setup-progress > div.complete { border-color: var(--accent); }
+.setup-progress > div.complete > span { background: var(--accent); border-color: var(--accent); }
+.setup-progress > div.attention > span { background: var(--amber-soft); border-color: var(--amber); }
+.setup-progress p, .setup-progress strong, .setup-progress small { display: block; margin: 0; }
+.setup-progress small { color: var(--muted); margin-top: 3px; }
 .auth-switch { font-size: 12px !important; margin: 20px 0 0 !important; text-align: center; }
 .auth-switch a { color: var(--ink); font-weight: 750; text-decoration: underline; }
 .auth-aside { align-items: flex-end; background: #171717; border-radius: 0 24px 24px 0; color: #fff; display: flex; overflow: hidden; padding: 45px; position: relative; }

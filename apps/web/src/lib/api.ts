@@ -97,6 +97,14 @@ export const api = {
     mrrPence: number;
     totalUsedMinutes: number;
     totalFailedCalls: number;
+    setupQueueCount?: number;
+    failedBillingEvents?: Array<{
+      id: string;
+      clientId?: string;
+      eventType: string;
+      error?: string;
+      receivedAt: string;
+    }>;
     clients: Array<{
       clientId: string;
       plan: "starter" | "pro" | "enterprise";
@@ -184,7 +192,7 @@ export const api = {
     phoneMode: "robinexis_account" | "customer_oauth";
     twilioNumber?: string;
   }) =>
-    request<{ client: Client; provisioning: { runId: string; phoneNumber?: string } }>(
+    request<{ client: Client; onboardingStatus: "setup_queued"; message: string }>(
       `/api/v1/clients/${encodeURIComponent(id)}/onboarding/finalize`,
       { method: "POST", body: JSON.stringify(input) },
     ),
@@ -215,6 +223,21 @@ export const api = {
       method: "POST",
       body: JSON.stringify(clientId ? { clientId, plan } : { plan }),
     }),
+  createBillingPortal: (clientId?: string) =>
+    request<{ portalSessionId: string; url: string }>("/api/v1/billing/portal", {
+      method: "POST",
+      body: JSON.stringify(clientId ? { clientId } : {}),
+    }),
+  billingStatus: (clientId?: string) =>
+    request<{
+      configured: boolean;
+      canManagePortal?: boolean;
+      plan?: "starter" | "pro" | "enterprise";
+      status: string;
+      trialEndsAt?: string;
+      currentPeriodEnd?: string;
+      cancelAtPeriodEnd?: boolean;
+    }>(`/api/v1/billing/status${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ""}`),
   slots: async (clientId: string, eventTypeSlug: string) =>
     list(await request<CalendarSlot[] | ListResponse<CalendarSlot>>(`/api/v1/calendar/slots${query({ clientId, eventTypeSlug })}`)),
   bookings: async (clientId: string) =>

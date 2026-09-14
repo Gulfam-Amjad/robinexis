@@ -15,6 +15,9 @@ export type WorkspaceRole = "owner" | "manager" | "viewer";
 export type OnboardingStatus =
   | "payment_required"
   | "details_required"
+  | "setup_queued"
+  | "setup_in_progress"
+  | "needs_attention"
   | "ready_to_provision"
   | "provisioning"
   | "active"
@@ -54,6 +57,7 @@ export interface ClientSummary {
   businessName: string;
   published: boolean;
   serviceStatus: ServiceStatus;
+  onboardingStatus?: OnboardingStatus;
   access?: { enabled?: boolean; inbound?: boolean; outbound?: boolean; reason?: string };
 }
 

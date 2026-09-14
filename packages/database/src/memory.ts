@@ -20,6 +20,7 @@ import type {
   KnowledgeSearchOptions,
   KnowledgeSearchResult,
   Location,
+  OperatorAuditRecord,
   OutboundJob,
   Page,
   PhoneEndpoint,
@@ -79,6 +80,7 @@ export interface PlatformStore {
   claimStripeEvent(event: StripeEvent): Promise<boolean>;
   saveStripeEvent(event: StripeEvent): Promise<void>;
   getStripeEvent(clientId: string, id: string): Promise<StripeEvent | undefined>;
+  listStripeEvents(status?: StripeEvent["status"], limit?: number): Promise<StripeEvent[]>;
 
   saveBookingRecord(booking: BookingRecord): Promise<void>;
   findBookingByIdempotency(clientId: string, key: string): Promise<BookingRecord | undefined>;
@@ -86,6 +88,8 @@ export interface PlatformStore {
   appendCreditLedgerEntry(entry: CreditLedgerEntry): Promise<boolean>;
   listCreditLedger(clientId: string): Promise<CreditLedgerEntry[]>;
   getCreditBalance(clientId: string): Promise<number>;
+  appendOperatorAudit(record: OperatorAuditRecord): Promise<boolean>;
+  listOperatorAudit(clientId?: string, limit?: number): Promise<OperatorAuditRecord[]>;
   claimProvisioningRun(run: ProvisioningRun): Promise<boolean>;
   saveProvisioningRun(run: ProvisioningRun): Promise<void>;
   getProvisioningRun(clientId: string, id: string): Promise<ProvisioningRun | undefined>;
@@ -164,6 +168,7 @@ export class MemoryStore implements PlatformStore {
   stripeEvents = new Map<string, StripeEvent>();
   bookingRecords = new Map<string, BookingRecord>();
   creditLedger = new Map<string, CreditLedgerEntry>();
+  operatorAudit = new Map<string, OperatorAuditRecord>();
   provisioningRuns = new Map<string, ProvisioningRun>();
 
   async getClient(id: string) {
@@ -337,6 +342,12 @@ export class MemoryStore implements PlatformStore {
     const event = this.stripeEvents.get(id);
     return event?.clientId === clientId ? event : undefined;
   }
+  async listStripeEvents(status?: StripeEvent["status"], limit = 100) {
+    return [...this.stripeEvents.values()]
+      .filter((event) => !status || event.status === status)
+      .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt))
+      .slice(0, limit);
+  }
   async saveBookingRecord(booking: BookingRecord) {
     this.bookingRecords.set(`${booking.clientId}:${booking.id}`, { ...booking });
   }
@@ -372,6 +383,18 @@ export class MemoryStore implements PlatformStore {
     return [...this.creditLedger.values()]
       .filter((entry) => entry.clientId === clientId)
       .reduce((sum, entry) => sum + entry.minutes, 0);
+  }
+  async appendOperatorAudit(record: OperatorAuditRecord) {
+    if (this.operatorAudit.has(record.id)) return false;
+    this.operatorAudit.set(record.id, structuredClone(record));
+    return true;
+  }
+  async listOperatorAudit(clientId?: string, limit = 100) {
+    return [...this.operatorAudit.values()]
+      .filter((record) => !clientId || record.clientId === clientId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, limit)
+      .map((record) => structuredClone(record));
   }
   async claimProvisioningRun(run: ProvisioningRun) {
     if (await this.getProvisioningRunByIdempotency(run.clientId, run.idempotencyKey)) return false;
