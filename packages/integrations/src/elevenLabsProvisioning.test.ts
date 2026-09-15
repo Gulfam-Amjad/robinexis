@@ -257,11 +257,12 @@ describe("ElevenLabsManagementClient", () => {
     expect(fetchMock.mock.calls[1]?.[0]).toBe("https://api.elevenlabs.io/v1/convai/tools");
   });
 
-  it("imports a Twilio number and can assign an existing imported number", async () => {
+  it("imports an SK Twilio number with signature token, assigns it, and deletes it", async () => {
     const fetchMock = vi.fn<typeof fetch>();
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ phone_number_id: "phone_new" }))
-      .mockResolvedValueOnce(jsonResponse({ phone_number_id: "phone_existing" }));
+      .mockResolvedValueOnce(jsonResponse({ phone_number_id: "phone_existing" }))
+      .mockResolvedValueOnce(jsonResponse({}));
     const client = new ElevenLabsManagementClient({
       apiKey: "test-key",
       fetch: fetchMock,
@@ -271,13 +272,15 @@ describe("ElevenLabsManagementClient", () => {
       {
         phoneNumber: "+442079460123",
         label: "Main line",
-        accountSid: "AC-test",
-        authToken: "twilio-test-token",
+        accountSid: "SK-test",
+        authToken: "twilio-api-key-secret",
+        accountAuthToken: "twilio-account-auth-token",
         agentId: "agent_1",
       },
       operationKey,
     );
     await client.assignAgentToPhoneNumber("phone/1", "agent_2", operationKey);
+    await client.deletePhoneNumber("phone/1", operationKey);
 
     const importBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
@@ -287,8 +290,9 @@ describe("ElevenLabsManagementClient", () => {
       provider: "twilio",
       phone_number: "+442079460123",
       label: "Main line",
-      sid: "AC-test",
-      token: "twilio-test-token",
+      sid: "SK-test",
+      token: "twilio-api-key-secret",
+      account_auth_token: "twilio-account-auth-token",
       agent_id: "agent_1",
       enable_sms: false,
     });
@@ -298,6 +302,11 @@ describe("ElevenLabsManagementClient", () => {
     expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
       agent_id: "agent_2",
     });
+    expect(fetchMock.mock.calls[2]?.[0]).toBe(
+      "https://api.elevenlabs.io/v1/convai/phone-numbers/phone%2F1",
+    );
+    expect(fetchMock.mock.calls[2]?.[1]).toMatchObject({ method: "DELETE" });
+    expect(fetchMock.mock.calls[2]?.[1]?.body).toBeUndefined();
   });
 
   it("returns a typed HTTP error with parsed details and retryability", async () => {

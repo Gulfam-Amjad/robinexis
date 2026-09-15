@@ -21,6 +21,11 @@ export interface PlanDefinition {
   calendarLimit: number | null;
   locationLimit: number | null;
   includedMinutes: number;
+  phoneProvisioning: {
+    customerOwned: boolean;
+    managed: boolean;
+    monthlySpendCapPence: number;
+  };
   features: readonly PlanFeature[];
 }
 
@@ -36,6 +41,11 @@ function configuredMinutes(tier: PlanTier): number {
   return Number.isFinite(configured) && configured >= 0
     ? Math.floor(configured)
     : DEFAULT_INCLUDED_MINUTES[tier];
+}
+
+function configuredPhoneSpendCap(tier: PlanTier): number {
+  const value = Number(process.env[`PLAN_${tier.toUpperCase()}_TWILIO_SPEND_CAP_PENCE`]);
+  return Number.isInteger(value) && value >= 0 ? value : 0;
 }
 
 export function planCatalog(): Record<PlanTier, PlanDefinition> {
@@ -60,6 +70,11 @@ export function planCatalog(): Record<PlanTier, PlanDefinition> {
       calendarLimit: 1,
       locationLimit: 1,
       includedMinutes: configuredMinutes("starter"),
+      phoneProvisioning: {
+        customerOwned: true,
+        managed: false,
+        monthlySpendCapPence: configuredPhoneSpendCap("starter"),
+      },
       features: starterFeatures,
     },
     pro: {
@@ -70,6 +85,11 @@ export function planCatalog(): Record<PlanTier, PlanDefinition> {
       calendarLimit: 5,
       locationLimit: 1,
       includedMinutes: configuredMinutes("pro"),
+      phoneProvisioning: {
+        customerOwned: true,
+        managed: true,
+        monthlySpendCapPence: configuredPhoneSpendCap("pro"),
+      },
       features: proFeatures,
     },
     enterprise: {
@@ -80,6 +100,11 @@ export function planCatalog(): Record<PlanTier, PlanDefinition> {
       calendarLimit: null,
       locationLimit: null,
       includedMinutes: configuredMinutes("enterprise"),
+      phoneProvisioning: {
+        customerOwned: true,
+        managed: true,
+        monthlySpendCapPence: configuredPhoneSpendCap("enterprise"),
+      },
       features: [
         ...proFeatures,
         "multi-location-calendars",

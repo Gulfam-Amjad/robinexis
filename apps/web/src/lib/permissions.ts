@@ -6,6 +6,8 @@ export type WorkspacePermissions = {
   canAdministerPlatform: boolean;
   canCreateClients: boolean;
   canEditWorkspace: boolean;
+  canPublishWorkspace: boolean;
+  canActivateWorkspace: boolean;
   canManageMembers: boolean;
 };
 
@@ -18,6 +20,8 @@ export function permissionsFor(actor?: SessionActor, clientId?: string): Workspa
     canAdministerPlatform: Boolean(isOperator && actor?.capabilities?.administerPlatform !== false),
     canCreateClients: Boolean(isOperator && actor?.capabilities?.createClients !== false),
     canEditWorkspace: Boolean(isOperator || workspaceRole === "owner" || workspaceRole === "manager"),
+    canPublishWorkspace: Boolean(isOperator || workspaceRole === "owner" || workspaceRole === "manager"),
+    canActivateWorkspace: workspaceRole === "owner",
     canManageMembers: Boolean(isOperator || workspaceRole === "owner"),
   };
 }

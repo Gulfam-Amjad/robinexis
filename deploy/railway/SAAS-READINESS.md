@@ -1,6 +1,6 @@
 # Robinexis SaaS readiness
 
-Updated: 2026-09-14
+Updated: 2026-09-15
 
 ## Shipped in the launch candidate
 
@@ -22,6 +22,9 @@ Updated: 2026-09-14
 - Operations: database health, Redis-backed distributed limiter with safe local fallback, structured failure
   events, scheduled public uptime checks, production dependency audit, secret scanning, migration/Postgres
   tests, staging smoke gate, and build artifacts.
+- Automatic provisioning foundation: resumable onboarding jobs, reviewed website extraction, hybrid Twilio,
+  connected/managed Cal.com, isolated ElevenLabs builds, readiness-only synthetic booking checks, owner-only
+  two-phase activation, provider compensation, durable lifecycle mail, and client/operator control planes.
 
 ## Safety state
 
@@ -30,9 +33,10 @@ Updated: 2026-09-14
 - No live Stripe charge was created. Checkout verification used Stripe's `4242` test card in an isolated sandbox.
 - Production was not promoted automatically; this candidate remains on `feat/multi-tenant-saas-conversion`.
 
-## Operator-assisted limitations
+## Release-gated limitations
 
-- Twilio, ElevenLabs, and Cal.com creation remains disabled. Paid users enter the setup queue.
+- Automatic activation remains disabled. The code is deployed only to isolated staging; paid production users
+  continue through operator-assisted setup.
 - Invitation and lifecycle requests are workflows, not destructive automation. An operator approves exports,
   ownership changes, and deletion.
 - Redis code is ready, but Railway refused another resource on the current free-plan resource limit. Keep one
@@ -42,13 +46,13 @@ Updated: 2026-09-14
 
 ## Manual owner inputs still required
 
-1. Claim the local Stripe staging sandbox before 2026-09-21 using the local claim command; its keys are not in git.
+1. Replace the invalid/placeholder Railway staging Stripe key with a claimed test-mode key and webhook secret.
 2. Upgrade Railway or provide a Redis/Upstash URL.
-3. Provide Resend/SMTP access, sending-domain DNS, support address, alert destination, support hours, and setup SLA.
+3. Provide Firecrawl, Cal.com OAuth/Platform, disposable Twilio/ElevenLabs staging, and Resend credentials.
 4. Enable Supabase backups/PITR and approve a staging restore drill.
 5. Provide legal company/address/company-number/VAT/privacy/refund facts and solicitor approval.
-6. Provide disposable staging Cal.com, Twilio, and ElevenLabs resources before automatic provisioning work.
-7. Authenticate GitHub CLI or approve the normal git credential prompt so the branch and PR can be published.
+6. Add the exact protected Blades Twilio provider resource IDs to `TWILIO_PROTECTED_RESOURCE_IDS`.
+7. Authenticate GitHub CLI if a pull request must be created from the command line.
 8. Apply the Framer links: Starter `/signup?plan=starter`, Pro `/signup?plan=pro`, Enterprise
    `/enterprise-contact` on `https://app.robinexis.com`.
 

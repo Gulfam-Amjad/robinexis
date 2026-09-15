@@ -2,7 +2,7 @@ import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PostgresStore } from "./postgres.js";
 import { robinexisDemoSeed } from "./seed.js";
-import type { CallSession } from "./types.js";
+import type { CallSession, OnboardingJob } from "./types.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const integration = databaseUrl ? describe : describe.skip;
@@ -83,5 +83,22 @@ integration("Postgres tenant isolation", () => {
     })).rejects.toThrow();
     await expect(store!.getClient(clientA)).resolves.toMatchObject({ serviceStatus: before!.serviceStatus });
     await expect(store!.listOperatorAudit(clientA)).resolves.toEqual([]);
+  });
+
+  it("claims one onboarding job only once across concurrent workers", async () => {
+    const now = new Date().toISOString();
+    const job: OnboardingJob = {
+      id: `job_${suffix}`, clientId: clientA, kind: "provision_client",
+      idempotencyKey: `provision_${suffix}`, status: "pending", payload: { operationKey: suffix },
+      attemptCount: 0, maxAttempts: 3, availableAt: now, createdAt: now, updatedAt: now,
+    };
+    expect(await store!.enqueueOnboardingJob(job)).toBe(true);
+    expect(await store!.enqueueOnboardingJob({ ...job, id: `${job.id}_duplicate` })).toBe(false);
+    const claims = await Promise.all([
+      store!.claimOnboardingJobs("worker-a", now, 60, 1),
+      store!.claimOnboardingJobs("worker-b", now, 60, 1),
+    ]);
+    expect(claims.flat()).toHaveLength(1);
+    expect(claims.flat()[0]).toMatchObject({ id: job.id, attemptCount: 1, status: "leased" });
   });
 });

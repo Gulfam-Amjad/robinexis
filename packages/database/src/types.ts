@@ -19,11 +19,14 @@ export type WorkspaceRole = "owner" | "manager" | "viewer";
 export type OnboardingStatus =
   | "payment_required"
   | "details_required"
+  | "integrations_required"
   | "setup_queued"
   | "setup_in_progress"
   | "needs_attention"
   | "ready_to_provision"
   | "provisioning"
+  | "testing"
+  | "awaiting_approval"
   | "active"
   | "failed";
 export type PhoneAcquisitionMode = "robinexis_account" | "customer_oauth";
@@ -42,12 +45,26 @@ export interface ClientService {
   durationMinutes: number;
 }
 
+export interface CalendarScheduleSettings {
+  timezone: string;
+  weeklyHours: Record<string, Array<{ start: string; end: string }>>;
+  overrides: Array<{ date: string; available: boolean; start?: string; end?: string }>;
+  bufferBeforeMinutes: number;
+  bufferAfterMinutes: number;
+  minimumNoticeMinutes: number;
+  cancellationAllowed: boolean;
+  rescheduleAllowed: boolean;
+}
+
 export interface CalendarConnectionConfig {
   provider: "calcom" | "google" | "outlook" | "fresha";
   username?: string;
   apiKeyEnv?: string;
   /** Encrypted-at-rest in production; local seed may hold a ref only. */
   credentialRef?: string;
+  destinationCalendarId?: string;
+  destinationProvider?: string;
+  schedule?: CalendarScheduleSettings;
 }
 
 export interface CalendarNoteConnection {
@@ -390,6 +407,13 @@ export interface TwilioConnection {
   accessTokenExpiresAt?: string;
   apiKeySid?: string;
   encryptedApiKeySecret?: string;
+  encryptedAccountAuthToken?: string;
+  selectedPhoneNumber?: string;
+  regulatoryBundleSid?: string;
+  emergencyAddressSid?: string;
+  monthlySpendCapPence?: number;
+  purchaseConfirmedBy?: string;
+  purchaseConfirmedAt?: string;
   status: "pending" | "credentials_required" | "active" | "expired" | "revoked" | "failed";
   metadata: Record<string, unknown>;
   createdAt: string;
@@ -402,8 +426,14 @@ export interface CalendarConnection {
   locationId?: string;
   provider: CalendarConnectionConfig["provider"];
   externalAccountId?: string;
-  credentialRef: string;
+  credentialRef?: string;
+  mode?: "oauth" | "managed" | "legacy";
+  encryptedAccessToken?: string;
+  encryptedRefreshToken?: string;
+  accessTokenExpiresAt?: string;
+  scopes?: string[];
   calendarId?: string;
+  destinationProvider?: string;
   status: LifecycleStatus;
   metadata: Record<string, unknown>;
   createdAt: string;
@@ -420,6 +450,7 @@ export interface CalendarEventType {
   title: string;
   durationMinutes: number;
   status: LifecycleStatus;
+  readinessOnly?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -500,13 +531,246 @@ export interface ProvisioningRun {
   id: string;
   clientId: string;
   idempotencyKey: string;
-  status: "pending" | "running" | "succeeded" | "failed" | "cancelled";
+  status:
+    | "pending"
+    | "running"
+    | "paused"
+    | "succeeded"
+    | "activation_pending"
+    | "activating"
+    | "failed"
+    | "cancelled";
   step?: string;
   input: Record<string, unknown>;
   output?: Record<string, unknown>;
   error?: string;
   startedAt?: string;
   finishedAt?: string;
+  claimToken?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProvisioningReadinessCheck {
+  key: string;
+  status: "passed" | "failed";
+  detail: string;
+}
+
+export interface ProvisioningReadinessReport {
+  generatedAt: string;
+  passed: boolean;
+  hardGaps: string[];
+  checks: ProvisioningReadinessCheck[];
+  syntheticBooking?: {
+    providerBookingId?: string;
+    created: boolean;
+    cancelled: boolean;
+  };
+  testCallLink?: string;
+}
+
+export interface ProvisioningActivationInput {
+  clientId: string;
+  runId: string;
+  actorId: string;
+  actorEmail: string;
+  prompt: PromptVersion;
+  profileChecksum: string;
+  now: string;
+}
+
+export interface ProvisioningActivationIntent {
+  promptId: string;
+  promptVersion: number;
+  profileChecksum: string;
+  operationKey: string;
+  providerAgentId: string;
+  phoneNumber?: string;
+  phoneEndpointId?: string;
+  providerPhoneNumberId?: string;
+  assignmentStatus: "pending" | "imported" | "assigned" | "needs_attention";
+  rollbackStatus?: "deleted" | "failed";
+  rollbackError?: string;
+}
+
+export interface ProvisioningActivationResult {
+  activated: boolean;
+  client?: ClientConfig;
+  error?: string;
+  blockers?: string[];
+  intent?: ProvisioningActivationIntent;
+}
+
+export type OnboardingJobStatus = "pending" | "leased" | "paused" | "completed" | "dead_letter";
+
+export interface OnboardingJob {
+  id: string;
+  clientId: string;
+  kind: string;
+  idempotencyKey: string;
+  status: OnboardingJobStatus;
+  payload: Record<string, unknown>;
+  attemptCount: number;
+  maxAttempts: number;
+  availableAt: string;
+  leaseOwner?: string;
+  leaseExpiresAt?: string;
+  lastError?: string;
+  completedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OnboardingOutboxEvent {
+  id: string;
+  clientId: string;
+  topic: string;
+  idempotencyKey: string;
+  payload: Record<string, unknown>;
+  publishedAt?: string;
+  attemptCount: number;
+  lastError?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type NotificationDeliveryStatus = "pending" | "leased" | "delivered" | "dead_letter";
+
+export interface NotificationDelivery {
+  id: string;
+  clientId: string;
+  operationId: string;
+  idempotencyKey: string;
+  channel: "email";
+  recipient: string;
+  template: string;
+  status: NotificationDeliveryStatus;
+  providerId?: string;
+  attemptCount: number;
+  maxAttempts: number;
+  nextAttemptAt: string;
+  leaseOwner?: string;
+  leaseExpiresAt?: string;
+  lastError?: string;
+  deliveredAt?: string;
+  deadLetteredAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NotificationHealth {
+  pending: number;
+  leased: number;
+  deadLetter: number;
+  oldestPendingAt?: string;
+  providerFailures24h: number;
+}
+
+export interface WebsiteSource {
+  id: string;
+  clientId: string;
+  url: string;
+  status: "pending" | "active" | "disabled" | "failed";
+  checksum?: string;
+  lastFetchedAt?: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WebsiteExtractionRun {
+  id: string;
+  clientId: string;
+  sourceId: string;
+  status: "pending" | "running" | "succeeded" | "failed";
+  extractorVersion: string;
+  startedAt?: string;
+  finishedAt?: string;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ExtractedFactReviewStatus = "extracted" | "confirmed" | "edited";
+
+export interface ExtractedFact {
+  id: string;
+  clientId: string;
+  extractionRunId: string;
+  key: string;
+  value: unknown;
+  confidence?: number;
+  sourceEvidence?: string;
+  reviewStatus: ExtractedFactReviewStatus;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  createdAt: string;
+}
+
+export interface OnboardingGap {
+  id: string;
+  clientId: string;
+  key: string;
+  status: "open" | "resolved" | "waived";
+  detail?: string;
+  resolvedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type OnboardingWizardStep =
+  | "website"
+  | "facts"
+  | "behavior"
+  | "operations"
+  | "phone"
+  | "calendar"
+  | "review";
+
+export interface OnboardingWizardData {
+  websiteUrl?: string;
+  websiteRunId?: string;
+  websiteApproved?: boolean;
+  businessName?: string;
+  location?: string;
+  greeting?: string;
+  tone?: string;
+  transferNumber?: string;
+  recordingConsent?: "always_ask" | "announcement" | "not_recording";
+  services?: ClientService[];
+  hours?: string;
+  timezone?: string;
+  bookingRules?: string;
+  phoneMode?: "managed" | "customer_twilio";
+  customerPhoneNumber?: string;
+  calendarMode?: "managed_calcom" | "connect_existing";
+  existingCalendarProvider?: "calcom" | "google" | "outlook" | "fresha";
+  calendarSchedule?: CalendarScheduleSettings;
+}
+
+export interface OnboardingWizardState {
+  clientId: string;
+  currentStep: OnboardingWizardStep;
+  completedSteps: OnboardingWizardStep[];
+  data: OnboardingWizardData;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  submittedAt?: string;
+}
+
+export interface ProviderResource {
+  id: string;
+  clientId: string;
+  provider: "elevenlabs" | "twilio" | "calcom" | "google" | "outlook" | "fresha";
+  resourceType: string;
+  providerResourceId?: string;
+  lifecycleStatus: "pending" | "provisioning" | "active" | "deleting" | "deleted" | "failed";
+  credentialRef?: string;
+  encryptedCredential?: string;
+  metadata: Record<string, unknown>;
+  lastError?: string;
   createdAt: string;
   updatedAt: string;
 }

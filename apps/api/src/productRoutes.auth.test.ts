@@ -104,6 +104,28 @@ describe("product route tenant authorization", () => {
     expect(operator.body.items.length).toBeGreaterThan(1);
   });
 
+  it("reports admin notification health without exposing tenant recipients", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    const now = new Date().toISOString();
+    await store.enqueueNotification({
+      id: "notification_health", clientId: BLADES_HAIR_ID, operationId: "op_health",
+      idempotencyKey: "health:1", channel: "email", recipient: "owner@blades.test",
+      template: "Status update", status: "pending", attemptCount: 0, maxAttempts: 5,
+      nextAttemptAt: now, createdAt: now, updatedAt: now,
+    });
+    const response = await request(store, operatorActor, "/api/v1/admin/control-plane");
+    expect(response).toMatchObject({
+      status: 200,
+      body: { health: { notificationQueue: { pending: 1, providerFailures24h: 0 } } },
+    });
+    expect(JSON.stringify(response.body)).not.toContain("owner@blades.test");
+    const forbidden = await request(
+      store, salonActor, `/api/v1/clients/${DEMO_CLIENT_ID}/notifications/status`,
+    );
+    expect(forbidden.status).toBe(404);
+  });
+
   it("authorizes self-serve finalize only for the owning salon", async () => {
     const store = new MemoryStore();
     await seedStore(store);
@@ -219,5 +241,43 @@ describe("product route tenant authorization", () => {
     expect((await store.latestPrompt(BLADES_HAIR_ID))?.id).toBe(
       (await store.getClient(BLADES_HAIR_ID))?.promptVersionId,
     );
+  });
+
+  it("keeps automatic SaaS publish as draft-only until activation", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    const client = (await store.getClient(DEMO_CLIENT_ID))!;
+    client.onboardingStatus = "awaiting_approval";
+    client.published = false;
+    await store.upsertClient(client);
+    await request(
+      store,
+      operatorActor,
+      `/api/v1/clients/${DEMO_CLIENT_ID}`,
+      "PATCH",
+      { greeting: "Approved only after activation" },
+    );
+    const previous = process.env.SAAS_PROVISIONING_ENABLED;
+    process.env.SAAS_PROVISIONING_ENABLED = "true";
+    try {
+      const response = await request(
+        store,
+        operatorActor,
+        `/api/v1/clients/${DEMO_CLIENT_ID}/publish`,
+        "POST",
+      );
+      expect(response).toMatchObject({
+        status: 202,
+        body: { draftPublished: true, activationRequired: true },
+      });
+      expect((await store.getClient(DEMO_CLIENT_ID))?.published).toBe(false);
+      expect((await store.getClient(DEMO_CLIENT_ID))?.greeting)
+        .not.toBe("Approved only after activation");
+      expect((await store.getDraftClient(DEMO_CLIENT_ID))?.config.greeting)
+        .toBe("Approved only after activation");
+    } finally {
+      if (previous === undefined) delete process.env.SAAS_PROVISIONING_ENABLED;
+      else process.env.SAAS_PROVISIONING_ENABLED = previous;
+    }
   });
 });

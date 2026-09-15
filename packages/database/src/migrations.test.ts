@@ -48,4 +48,80 @@ describe("database migrations", () => {
     expect(sql).toMatch(/ENABLE ROW LEVEL SECURITY/i);
     expect(sql).toMatch(/REVOKE ALL ON public\.twilio_connections FROM authenticated/i);
   });
+
+  it("ships durable lifecycle jobs, extraction records and provider resources", () => {
+    const sql = readFileSync(path.join(dir, "013_onboarding_lifecycle_data.sql"), "utf8");
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS onboarding_jobs/i);
+    expect(sql).toMatch(/UNIQUE \(client_id, idempotency_key\)/i);
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS onboarding_outbox/i);
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS website_extraction_runs/i);
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS extracted_facts/i);
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS onboarding_gaps/i);
+    expect(sql).toMatch(/encrypted_credential/i);
+    expect(sql).toMatch(/ENABLE ROW LEVEL SECURITY/i);
+  });
+
+  it("stores resumable onboarding wizard state outside browser access", () => {
+    const sql = readFileSync(path.join(dir, "015_onboarding_wizard.sql"), "utf8");
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS onboarding_wizard_states/i);
+    expect(sql).toMatch(/client_id TEXT PRIMARY KEY/i);
+    expect(sql).toMatch(/completed_steps JSONB/i);
+    expect(sql).toMatch(/ENABLE ROW LEVEL SECURITY/i);
+    expect(sql).toMatch(/REVOKE ALL ON public\.onboarding_wizard_states FROM authenticated/i);
+  });
+
+  it("adds Twilio regulatory fields and one active number constraints", () => {
+    const sql = readFileSync(path.join(dir, "016_twilio_hybrid_provisioning.sql"), "utf8");
+    expect(sql).toMatch(/regulatory_bundle_sid/i);
+    expect(sql).toMatch(/monthly_spend_cap_pence/i);
+    expect(sql).toMatch(/phone_endpoints_one_active_twilio_per_tenant/i);
+    expect(sql).toMatch(/provider_resources_one_active_twilio_number_per_tenant/i);
+  });
+
+  it("supports paused durable provisioning without weakening approval evidence", () => {
+    const sql = readFileSync(path.join(dir, "018_provisioning_approval_gate.sql"), "utf8");
+    expect(sql).toMatch(/provisioning_runs_status_check/i);
+    expect(sql).toMatch(/'paused'/i);
+    expect(sql).toMatch(/activation remains a separate/i);
+  });
+
+  it("stores leased idempotent notification delivery outside browser access", () => {
+    const sql = readFileSync(path.join(dir, "019_notification_observability.sql"), "utf8");
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS notification_deliveries/i);
+    expect(sql).toMatch(/UNIQUE \(client_id, idempotency_key\)/i);
+    expect(sql).toMatch(/provider_id/i);
+    expect(sql).toMatch(/dead_lettered_at/i);
+    expect(sql).toMatch(/REVOKE ALL ON public\.notification_deliveries FROM authenticated/i);
+  });
+
+  it("ships additive staging corrections and marks schema.sql non-executable", () => {
+    const lifecycle = readFileSync(path.join(dir, "013_onboarding_lifecycle_data.sql"), "utf8");
+    expect(lifecycle).toMatch(/client_id <> 'client_blades_hair'/i);
+    const hardening = readFileSync(
+      path.join(dir, "020_adversarial_provisioning_hardening.sql"),
+      "utf8",
+    );
+    expect(hardening).toMatch(/DELETE FROM onboarding_jobs WHERE client_id = 'client_blades_hair'/i);
+    expect(hardening).toMatch(/metadata = metadata - 'markdown'/i);
+    expect(hardening).toMatch(/provider_resources_tenant_provider_resource_idx/i);
+    expect(hardening).toMatch(/client_id, provider, provider_resource_id/i);
+    const activation = readFileSync(
+      path.join(dir, "021_two_phase_activation.sql"),
+      "utf8",
+    );
+    expect(activation).toMatch(/claim_token/i);
+    expect(activation).toMatch(/activation_pending/i);
+    expect(activation).toMatch(/readiness_only/i);
+    const signatureCredentials = readFileSync(
+      path.join(dir, "022_twilio_signature_credentials.sql"),
+      "utf8",
+    );
+    expect(signatureCredentials).toMatch(/encrypted_account_auth_token/i);
+    const postgresStore = readFileSync(path.join(dir, "..", "postgres.ts"), "utf8");
+    expect(postgresStore).toMatch(/FOR UPDATE OF c,p/i);
+    expect(postgresStore).toMatch(/WHERE client_id=\$1 AND id=\$5/i);
+    const schema = readFileSync(path.join(dir, "..", "schema.sql"), "utf8");
+    expect(schema).toMatch(/REFERENCE SNAPSHOT ONLY/i);
+    expect(schema).toMatch(/sole executable schema source/i);
+  });
 });

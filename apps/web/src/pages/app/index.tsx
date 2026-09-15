@@ -83,6 +83,14 @@ import {
   statusTone,
 } from "../../components/ui";
 
+export {
+  AdminControlPlanePage,
+  BusinessPage,
+  CalendarSettingsPage,
+  PhonePage,
+  SetupPage,
+} from "./control-planes";
+
 function ClientGate({ children }: { children: (clientId: string) => React.ReactNode }) {
   const { activeClientId, isLoading, error } = useClient();
   const { canCreateClients } = usePermissions();
@@ -375,11 +383,28 @@ export function SetupConsolePage() {
     },
     onError: (error) => push({ title: "Setup transition blocked", message: error.message, tone: "error" }),
   });
+  const provisioningAction = useMutation({
+    mutationFn: (action: "pause" | "retry" | "review") => {
+      const runId = onboarding.data?.provisioning?.id;
+      if (!runId) throw new Error("No provisioning run is available.");
+      return api.provisioningAction(id!, runId, action, note.trim() || undefined);
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["operator-onboarding", id] }),
+        queryClient.invalidateQueries({ queryKey: ["admin-audit", id] }),
+      ]);
+      push({ title: "Provisioning action recorded", tone: "success" });
+    },
+    onError: (error) => push({ title: "Provisioning action blocked", message: error.message, tone: "error" }),
+  });
   if (client.isLoading || onboarding.isLoading) return <LoadingState label="Loading setup workspace…" />;
   if (client.error || onboarding.error || !client.data) return <ErrorState error={client.error || onboarding.error || new Error("Workspace not found")} />;
   const status = client.data.onboardingStatus || "details_required";
   const canStart = status === "setup_queued" || status === "needs_attention";
   const canPause = status === "setup_queued" || status === "setup_in_progress";
+  const provisioning = onboarding.data?.provisioning;
+  const readiness = provisioning?.output?.readinessReport;
   return (
     <>
       <PageHeader
@@ -419,6 +444,21 @@ export function SetupConsolePage() {
           </div>
         </Card>
       </div>
+      <Card className="panel">
+        <SectionHeading title="Provisioning control" description="Pause, retry, or record a review without changing provider mappings." />
+        {provisioning ? <>
+          <p className="muted capitalize">{provisioning.status} · {(provisioning.step || "queued").replaceAll("_", " ")}</p>
+          {readiness && <div className={`onboarding-readiness ${readiness.passed ? "ready" : ""}`}>
+            <ShieldCheck /><div><strong>{readiness.passed ? "Readiness passed" : "Readiness blocked"}</strong>
+              <p>{readiness.checks.map((check) => `${check.key}: ${check.status}`).join(" · ")}</p></div>
+          </div>}
+          <div className="row-actions">
+            {["pending", "running"].includes(provisioning.status) && <Button variant="secondary" disabled={provisioningAction.isPending} onClick={() => provisioningAction.mutate("pause")}>Pause</Button>}
+            {["paused", "failed"].includes(provisioning.status) && <Button disabled={provisioningAction.isPending} onClick={() => provisioningAction.mutate("retry")}>Retry same steps</Button>}
+            <Button variant="ghost" disabled={provisioningAction.isPending} onClick={() => provisioningAction.mutate("review")}>Record review</Button>
+          </div>
+        </> : <p className="muted">No provisioning run has started.</p>}
+      </Card>
       <Card className="panel">
         <SectionHeading title="Immutable activity" description="Operator and billing actions for this tenant." />
         {audit.isLoading ? <SkeletonRows count={3} /> : audit.data?.length ? (
@@ -469,7 +509,6 @@ export function OnboardingPage() {
       planTier: values.planTier,
       calendar: {
         provider: "calcom",
-        credentialRef: "CALCOM_API_KEY",
       },
       role: "AI receptionist",
       tone: "Warm, professional and concise",
@@ -662,7 +701,7 @@ export function AgentDetailPage() {
   const { id } = useParams();
   const queryClient = useQueryClient();
   const { push } = useToast();
-  const { canEditWorkspace: canEdit, isOperator } = usePermissions(id);
+  const { canEditWorkspace: canEdit, canPublishWorkspace: canPublish, isOperator } = usePermissions(id);
   const client = useQuery({ queryKey: ["client", id], queryFn: () => api.client(id!), enabled: Boolean(id), retry: false });
   const versions = useQuery({ queryKey: ["promptVersions", id], queryFn: () => api.promptVersions(id!), enabled: Boolean(id), retry: false });
   const provisioning = useQuery({ queryKey: ["provisioning", id], queryFn: () => api.provisioningRuns(id!), enabled: Boolean(id && isOperator), retry: false });
@@ -694,12 +733,12 @@ export function AgentDetailPage() {
   return (
     <>
       <Link className="back-link" to="/app/agents"><ArrowLeft size={15} /> All agents</Link>
-      <PageHeader eyebrow={canEdit ? "Agent editor" : "Agent details"} title={client.data?.role || "Voice receptionist"} description={`${client.data?.businessName} · ${client.data?.tone || "Warm and professional"}`} actions={<><Link className="button button-secondary button-md" to="/app/playground"><Play size={15} /> Test</Link>{canEdit && isOperator && <Button onClick={() => publish.mutate()} disabled={publish.isPending}>{publish.isPending ? "Approving…" : "Approve version"} <UploadCloud size={15} /></Button>}{isOperator && <Button variant="secondary" onClick={() => provision.mutate()} disabled={provision.isPending || !client.data?.published}>{provision.isPending ? "Provisioning…" : client.data?.elevenlabsAgentId ? "Sync provider" : "Provision agent"}</Button>}</>} />
+      <PageHeader eyebrow={canEdit ? "Receptionist editor" : "Receptionist details"} title={client.data?.role || "Voice receptionist"} description={`${client.data?.businessName} · ${client.data?.tone || "Warm and professional"}`} actions={<><Link className="button button-secondary button-md" to="/app/playground"><Play size={15} /> Test</Link>{canPublish && <Button onClick={() => publish.mutate()} disabled={publish.isPending || !client.data?.hasUnpublishedChanges && client.data?.published}>{publish.isPending ? "Publishing…" : "Publish version"} <UploadCloud size={15} /></Button>}{isOperator && <Button variant="secondary" onClick={() => provision.mutate()} disabled={provision.isPending || !client.data?.published}>{provision.isPending ? "Provisioning…" : client.data?.elevenlabsAgentId ? "Sync provider" : "Provision agent"}</Button>}</>} />
       <div className="editor-layout">
         <div><AgentForm client={client.data!} /></div>
         <aside className="editor-aside">
           <Card className="panel"><SectionHeading title="Workspace version" /><div className="publish-status"><span className={client.data?.published && !client.data?.hasUnpublishedChanges ? "status-orb live" : "status-orb"}><Cloud /></span><div><strong>{client.data?.hasUnpublishedChanges ? "Draft changes" : client.data?.published ? "Approved" : "Draft changes"}</strong><p>{client.data?.hasUnpublishedChanges ? "The live receptionist is unchanged until you approve this draft." : client.data?.published ? "Stored for audit. Operators can sync this exact version to its isolated provider agent." : "Review and approve this workspace configuration."}</p></div></div>{isOperator && provisioning.data?.items[0] && <p className="muted capitalize">Provisioning: {provisioning.data.items[0].status} · {(provisioning.data.items[0].step || "queued").replaceAll("_", " ")}</p>}</Card>
-          <Card className="panel"><SectionHeading title="Prompt history" />{versions.isLoading ? <SkeletonRows count={3} /> : versions.data?.length ? <div className="version-list">{versions.data.slice(0, 5).map((version) => <span key={version.id}><i>v{version.version}</i><div><strong>Published prompt</strong><small>{formatDate(version.createdAt)}</small></div></span>)}</div> : <p className="muted">No published versions yet.</p>}</Card>
+          <Card className="panel"><SectionHeading title="Version history" description="Compiled system prompts stay server-side; this audit view shows safe version metadata only." />{versions.isLoading ? <SkeletonRows count={3} /> : versions.data?.length ? <div className="version-list">{versions.data.slice(0, 5).map((version, index) => <span key={version.id}><i>v{version.version}</i><div><strong>{index === 0 ? "Current published version" : `Superseded by v${versions.data![index - 1].version}`}</strong><small>{formatDate(version.createdAt)}</small></div></span>)}</div> : <p className="muted">No published versions yet.</p>}</Card>
           <Card className="safety-card"><ShieldCheck /><h3>Built-in safety</h3><p>Agent prompts are frozen per call. Updating settings never changes a conversation already in progress.</p></Card>
         </aside>
       </div>
@@ -1032,7 +1071,94 @@ export function IntegrationsPage() {
 }
 
 function IntegrationsContent({ clientId }: { clientId: string }) {
+  const queryClient = useQueryClient();
+  const { push } = useToast();
+  const { canEditWorkspace } = usePermissions(clientId);
+  const [twilioApiKeySid, setTwilioApiKeySid] = useState("");
+  const [twilioApiKeySecret, setTwilioApiKeySecret] = useState("");
+  const [twilioAccountAuthToken, setTwilioAccountAuthToken] = useState("");
+  const [twilioNumber, setTwilioNumber] = useState("");
+  const [calendarDestination, setCalendarDestination] = useState("");
   const status = useQuery({ queryKey: ["integrations", clientId], queryFn: () => api.integrations(clientId), retry: false });
+  const twilio = useQuery({
+    queryKey: ["twilio-connection", clientId],
+    queryFn: () => api.twilioConnection(clientId),
+    enabled: canEditWorkspace,
+    retry: false,
+  });
+  const calcomConnection = useQuery({
+    queryKey: ["calcom-connection", clientId],
+    queryFn: () => api.calendarConnection(clientId),
+    enabled: canEditWorkspace,
+    retry: false,
+  });
+  const ownedNumbers = useQuery({
+    queryKey: ["twilio-owned-numbers", clientId],
+    queryFn: () => api.twilioOwnedNumbers(clientId),
+    enabled: twilio.data?.status === "active",
+    retry: false,
+  });
+  const connectTwilio = useMutation({
+    mutationFn: () => api.startTwilioConnection(clientId),
+    onSuccess: ({ url }) => { window.location.assign(url); },
+    onError: (error) => push({ title: "Twilio connection could not start", message: error.message, tone: "error" }),
+  });
+  const verifyTwilio = useMutation({
+    mutationFn: () => api.saveTwilioCredentials(clientId, {
+      apiKeySid: twilioApiKeySid.trim(),
+      apiKeySecret: twilioApiKeySecret,
+      accountAuthToken: twilioAccountAuthToken,
+      twilioNumber: twilioNumber.trim(),
+    }),
+    onSuccess: async () => {
+      setTwilioApiKeySecret("");
+      setTwilioAccountAuthToken("");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["twilio-connection", clientId] }),
+        queryClient.invalidateQueries({ queryKey: ["twilio-owned-numbers", clientId] }),
+        queryClient.invalidateQueries({ queryKey: ["integrations", clientId] }),
+      ]);
+      push({ title: "Twilio number verified", tone: "success" });
+    },
+    onError: (error) => push({ title: "Twilio verification failed", message: error.message, tone: "error" }),
+  });
+  const disconnectTwilio = useMutation({
+    mutationFn: () => api.disconnectTwilio(clientId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["twilio-connection", clientId] });
+      push({ title: "Twilio connection revoked", tone: "success" });
+    },
+    onError: (error) => push({ title: "Twilio disconnect failed", message: error.message, tone: "error" }),
+  });
+  const refreshCalcom = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["calcom-connection", clientId] }),
+      queryClient.invalidateQueries({ queryKey: ["integrations", clientId] }),
+    ]);
+  };
+  const connectCalcom = useMutation({
+    mutationFn: () => api.startCalcomOAuth(clientId),
+    onSuccess: ({ url }) => window.location.assign(url),
+    onError: (error) => push({ title: "Cal.com connection could not start", message: error.message, tone: "error" }),
+  });
+  const createManagedCalcom = useMutation({
+    mutationFn: () => api.createManagedCalcom(clientId),
+    onSuccess: async () => { await refreshCalcom(); push({ title: "Managed Cal.com user connected", tone: "success" }); },
+    onError: (error) => push({ title: "Managed Cal.com setup failed", message: error.message, tone: "error" }),
+  });
+  const selectCalendar = useMutation({
+    mutationFn: () => {
+      const selected = calcomConnection.data?.availableCalendars.find((item) => item.id === calendarDestination);
+      return api.selectCalendarDestination(clientId, calendarDestination, selected?.provider);
+    },
+    onSuccess: async () => { await refreshCalcom(); push({ title: "Booking destination saved", tone: "success" }); },
+    onError: (error) => push({ title: "Calendar destination failed", message: error.message, tone: "error" }),
+  });
+  const disconnectCalcom = useMutation({
+    mutationFn: () => api.disconnectCalcom(clientId),
+    onSuccess: async () => { await refreshCalcom(); push({ title: "Cal.com disconnected", tone: "success" }); },
+    onError: (error) => push({ title: "Cal.com disconnect failed", message: error.message, tone: "error" }),
+  });
   const known = [
     { id: "twilio", name: "Twilio", description: "You buy the inbound number. Paste it in the agent editor; Robinexis routes it to ElevenLabs", icon: PhoneCall },
     { id: "calcom", name: "Cal.com", description: "Bookings land on the Robinexis calendar automatically. Each customer gets isolated event types.", icon: CalendarDays },
@@ -1046,6 +1172,81 @@ function IntegrationsContent({ clientId }: { clientId: string }) {
       <PageHeader eyebrow="Integrations" title="Connect the tools behind the conversation" description="Robinexis keeps credentials server-side. This page shows connection health, never secret values." />
       {status.error && <div className="notice notice-error"><div><XCircle /><span><strong>Connection status unavailable.</strong> {status.error.message}</span></div><button onClick={() => status.refetch()}>Retry</button></div>}
       <div className="integration-grid">{known.map(({ id, name, description, icon: Icon }) => { const item = byId.get(id); const connected = item?.connected || false; const needsSetup = !status.isLoading && !connected; return <Card className="integration-card" key={id}><div className={`integration-icon integration-${id}`}><Icon /></div><div><h3>{name}</h3><p>{item?.detail || description}</p></div><Badge tone={connected ? "success" : "neutral"}>{status.isLoading ? "Checking…" : connected ? "Connected" : "Needs setup"}</Badge>{needsSetup && <a className="button button-secondary button-sm" href="mailto:hello@robinexis.com?subject=Robinexis%20integration%20setup">Configure server-side</a>}</Card>; })}</div>
+      {canEditWorkspace && <Card className="form-card">
+        <SectionHeading title="Booking calendar" description="Connect an existing Cal.com account or create a tenant-isolated managed user. Tokens stay encrypted on the server." />
+        {calcomConnection.isLoading ? <LoadingState label="Checking calendar connection…" /> : <>
+          <div className="form-actions">
+            <Badge tone={calcomConnection.data?.status === "active" ? "success" : "neutral"}>
+              {calcomConnection.data?.status?.replaceAll("_", " ") || "not connected"}
+            </Badge>
+            {calcomConnection.data?.mode && <span>{calcomConnection.data.mode === "managed" ? "Managed Cal.com" : "Existing Cal.com"}</span>}
+            {calcomConnection.data?.accountMasked && <span>{calcomConnection.data.accountMasked}</span>}
+          </div>
+          {calcomConnection.data?.status !== "active" ? <div className="form-actions">
+            <Button type="button" variant="secondary" disabled={connectCalcom.isPending} onClick={() => connectCalcom.mutate()}>
+              <Link2 size={15} /> {calcomConnection.data?.canReconnect ? "Reconnect existing Cal.com" : "Connect existing Cal.com"}
+            </Button>
+            <Button type="button" disabled={createManagedCalcom.isPending} onClick={() => createManagedCalcom.mutate()}>
+              <Plus size={15} /> {createManagedCalcom.isPending ? "Creating…" : "Create managed Cal.com"}
+            </Button>
+          </div> : <>
+            {calcomConnection.data.availableCalendars.length > 0 && <div className="form-grid">
+              <Field label="Booking destination">
+                <select value={calendarDestination || calcomConnection.data.destinationCalendarId || ""} onChange={(event) => setCalendarDestination(event.target.value)}>
+                  <option value="">Choose destination calendar</option>
+                  {calcomConnection.data.availableCalendars.map((calendar) => <option key={calendar.id} value={calendar.id}>{calendar.name}{calendar.provider ? ` — ${calendar.provider}` : ""}</option>)}
+                </select>
+              </Field>
+              <Button type="button" disabled={!calendarDestination || selectCalendar.isPending} onClick={() => selectCalendar.mutate()}>
+                <Check size={15} /> Save destination
+              </Button>
+            </div>}
+            <div className="form-actions">
+              <Button type="button" variant="secondary" onClick={() => connectCalcom.mutate()} disabled={connectCalcom.isPending}><RefreshCw size={15} /> Reconnect</Button>
+              <Button type="button" variant="ghost" onClick={() => disconnectCalcom.mutate()} disabled={disconnectCalcom.isPending}>Disconnect and revoke</Button>
+            </div>
+          </>}
+        </>}
+      </Card>}
+      {canEditWorkspace && <Card className="form-card">
+        <SectionHeading
+          title="Customer-owned Twilio"
+          description="Connect your Twilio account, then verify one owned number. Credentials are encrypted server-side and never returned."
+        />
+        {twilio.isLoading ? <LoadingState label="Checking Twilio connection…" /> : <>
+          <div className="form-actions">
+            <Badge tone={twilio.data?.status === "active" ? "success" : "neutral"}>
+              {twilio.data?.status?.replaceAll("_", " ") || "not connected"}
+            </Badge>
+            {twilio.data?.accountSidMasked && <span>{twilio.data.accountSidMasked}</span>}
+            {twilio.data?.selectedPhoneNumber && <span>Selected: {twilio.data.selectedPhoneNumber}</span>}
+          </div>
+          {twilio.data?.status === "active" && ownedNumbers.data?.length ? (
+            <Field label="Owned Twilio numbers">
+              <select value={twilio.data.selectedPhoneNumber || ""} disabled>
+                {ownedNumbers.data.map((number) => <option key={number.phoneNumber} value={number.phoneNumber}>{number.phoneNumber}{number.selected ? " — verified" : ""}</option>)}
+              </select>
+            </Field>
+          ) : null}
+          {twilio.data?.status !== "active" && <>
+            <Button type="button" variant="secondary" disabled={connectTwilio.isPending} onClick={() => connectTwilio.mutate()}>
+              <Link2 size={15} /> {twilio.data?.canReconnect ? "Reconnect Twilio" : "Connect Twilio with OAuth"}
+            </Button>
+            {twilio.data?.status === "credentials_required" && <div className="form-grid">
+              <Field label="Twilio API key SID"><input autoComplete="off" placeholder="SK…" value={twilioApiKeySid} onChange={(event) => setTwilioApiKeySid(event.target.value)} /></Field>
+              <Field label="Twilio API key secret"><input autoComplete="new-password" type="password" value={twilioApiKeySecret} onChange={(event) => setTwilioApiKeySecret(event.target.value)} /></Field>
+              <Field label="Twilio Account Auth Token"><input autoComplete="new-password" type="password" value={twilioAccountAuthToken} onChange={(event) => setTwilioAccountAuthToken(event.target.value)} /></Field>
+              <Field label="Owned number to verify"><input inputMode="tel" placeholder="+44…" value={twilioNumber} onChange={(event) => setTwilioNumber(event.target.value)} /></Field>
+              <Button type="button" disabled={verifyTwilio.isPending || !twilioApiKeySid || !twilioApiKeySecret || !twilioAccountAuthToken || !twilioNumber} onClick={() => verifyTwilio.mutate()}>
+                <ShieldCheck size={15} /> {verifyTwilio.isPending ? "Verifying…" : "Verify owned number"}
+              </Button>
+            </div>}
+          </>}
+          {twilio.data && twilio.data.status !== "not_connected" && <Button type="button" variant="ghost" disabled={disconnectTwilio.isPending} onClick={() => disconnectTwilio.mutate()}>
+            Disconnect and revoke
+          </Button>}
+        </>}
+      </Card>}
       <Card className="security-strip"><KeyRound /><div><strong>Secrets stay out of the browser</strong><p>API keys and OAuth credentials are configured in the deployment environment. The frontend only receives redacted connection status.</p></div><ShieldCheck /></Card>
     </>
   );
@@ -1065,12 +1266,13 @@ export function TeamPage() {
     retry: false,
   });
   const { canManageMembers: canAdminister } = usePermissions(activeClientId);
-  const requests = useQuery({ queryKey: ["tenant-requests"], queryFn: api.requests, enabled: Boolean(activeClientId), retry: false });
+  const requests = useQuery({ queryKey: ["tenant-requests", activeClientId], queryFn: () => api.requests(activeClientId!), enabled: Boolean(activeClientId), retry: false });
+  const audit = useQuery({ queryKey: ["workspace-audit", activeClientId], queryFn: () => api.workspaceAudit(activeClientId!), enabled: Boolean(activeClientId), retry: false });
   const add = useMutation({
     mutationFn: () => api.createRequest({ type: "team_invite", email: email.trim(), role }),
     onSuccess: async () => {
       setEmail("");
-      await queryClient.invalidateQueries({ queryKey: ["tenant-requests"] });
+      await queryClient.invalidateQueries({ queryKey: ["tenant-requests", activeClientId] });
       push({ title: "Invitation queued", message: "Access is granted only after the invite is accepted and verified.", tone: "success" });
     },
     onError: (error) => push({ title: "Could not add access", message: error.message, tone: "error" }),
@@ -1095,7 +1297,7 @@ export function TeamPage() {
   });
   const manageInvite = useMutation({
     mutationFn: ({ id, action }: { id: string; action: "resend" | "revoke" }) => api.manageInvitation(id, action),
-    onSuccess: async (_, input) => { await queryClient.invalidateQueries({ queryKey: ["tenant-requests"] }); push({ title: input.action === "resend" ? "Invitation re-queued" : "Invitation revoked", tone: "success" }); },
+    onSuccess: async (_, input) => { await queryClient.invalidateQueries({ queryKey: ["tenant-requests", activeClientId] }); push({ title: input.action === "resend" ? "Invitation re-queued" : "Invitation revoked", tone: "success" }); },
     onError: (error) => push({ title: "Invitation update failed", message: error.message, tone: "error" }),
   });
   if (!activeClientId) return <EmptyState title="No workspace selected" description="Select a client before managing access." />;
@@ -1138,11 +1340,17 @@ export function TeamPage() {
                   : <span className="capitalize">{member.role}</span>}
                 <Badge tone="success">Active</Badge>
                 {canAdminister && member.role !== "owner" && member.email !== actor?.email && <Button variant="ghost" onClick={() => { if (window.confirm(`Transfer workspace ownership to ${member.email}? Your role will become manager.`)) transfer.mutate(member.id); }} disabled={transfer.isPending}>Make owner</Button>}
-                {canAdminister && <button className="icon-button danger-icon" aria-label={`Remove ${member.email}`} onClick={() => remove.mutate(member.id)} disabled={remove.isPending}><Trash2 /></button>}
+                {canAdminister && member.role !== "owner" && <button className="icon-button danger-icon" aria-label={`Remove ${member.email}`} onClick={() => { if (window.confirm(`Remove ${member.email} from this workspace?`)) remove.mutate(member.id); }} disabled={remove.isPending}><Trash2 /></button>}
               </div>
             ))}
           </div>
         ) : <EmptyState icon={Users} title="No salon users yet" description="Robinexis operators still have platform access. Add the first salon owner above to enable their workspace login." />}
+      </Card>
+      <Card className="panel">
+        <SectionHeading title="Security and audit" description="Recent tenant-scoped access, publishing and lifecycle events. Actor identifiers and event details are not exposed." />
+        {audit.isLoading ? <SkeletonRows count={3} /> : audit.error ? <ErrorState error={audit.error} onRetry={() => audit.refetch()} /> : audit.data?.length ? (
+          <div className="team-list">{audit.data.slice(0, 20).map((record) => <div className="team-row" key={record.id}><ShieldCheck /><div><strong className="capitalize">{record.action.replaceAll(".", " ").replaceAll("_", " ")}</strong><small>{formatDate(record.createdAt)}</small></div></div>)}</div>
+        ) : <EmptyState icon={ShieldCheck} title="No security events yet" description="Access and publishing actions will appear here." />}
       </Card>
     </>
   );
@@ -1228,15 +1436,16 @@ function BillingContent({ clientId }: { clientId: string }) {
 export function SupportPage() {
   const queryClient = useQueryClient();
   const { push } = useToast();
+  const { activeClientId } = useClient();
   const [subject, setSubject] = useState("");
   const [message, setMessage] = useState("");
-  const requests = useQuery({ queryKey: ["tenant-requests"], queryFn: api.requests, retry: false });
+  const requests = useQuery({ queryKey: ["tenant-requests", activeClientId], queryFn: () => api.requests(activeClientId!), enabled: Boolean(activeClientId), retry: false });
   const create = useMutation({
     mutationFn: () => api.createRequest({ type: "support", subject: subject.trim(), message: message.trim() }),
     onSuccess: async () => {
       setSubject("");
       setMessage("");
-      await queryClient.invalidateQueries({ queryKey: ["tenant-requests"] });
+      await queryClient.invalidateQueries({ queryKey: ["tenant-requests", activeClientId] });
       push({ title: "Support request received", message: "Your request is now tracked in the workspace.", tone: "success" });
     },
     onError: (error) => push({ title: "Could not send request", message: error.message, tone: "error" }),
@@ -1256,7 +1465,7 @@ export function SupportPage() {
         </Card>
         <Card className="panel">
           <SectionHeading title="Request history" description="Updates remain visible to your workspace." />
-          {requests.isLoading ? <SkeletonRows count={3} /> : supportRequests.length ? (
+          {requests.isLoading ? <SkeletonRows count={3} /> : requests.error ? <ErrorState error={requests.error} onRetry={() => requests.refetch()} /> : supportRequests.length ? (
             <div className="team-list">{supportRequests.map((request) => (
               <div className="team-row" key={request.id}><MessageCircleMore /><div><strong>{String(request.payload.subject || "Support request")}</strong><small>{formatDate(request.createdAt, { dateStyle: "medium", timeStyle: "short" })}</small></div><Badge tone={request.status === "completed" ? "success" : "warning"}>{request.status.replaceAll("_", " ")}</Badge></div>
             ))}</div>

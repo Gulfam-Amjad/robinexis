@@ -1,3 +1,6 @@
+-- REFERENCE SNAPSHOT ONLY. This file is not a fresh-install entry point.
+-- The ordered files in src/migrations are the sole executable schema source.
+-- Use `npm run db:migrate`; never apply this snapshot directly.
 CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE IF NOT EXISTS clients (
@@ -201,8 +204,14 @@ CREATE TABLE IF NOT EXISTS calendar_connections (
   location_id TEXT,
   provider TEXT NOT NULL CHECK (provider IN ('calcom', 'google', 'outlook', 'fresha')),
   external_account_id TEXT,
-  credential_ref TEXT NOT NULL CHECK (credential_ref ~ '^[A-Z][A-Z0-9_]*$'),
+  credential_ref TEXT CHECK (credential_ref ~ '^[A-Z][A-Z0-9_]*$'),
+  connection_mode TEXT CHECK (connection_mode IS NULL OR connection_mode IN ('oauth', 'managed', 'legacy')),
+  encrypted_access_token TEXT,
+  encrypted_refresh_token TEXT,
+  access_token_expires_at TIMESTAMPTZ,
+  scopes TEXT[] NOT NULL DEFAULT '{}',
   calendar_id TEXT,
+  destination_provider TEXT,
   status TEXT NOT NULL CHECK (status IN ('pending', 'active', 'disabled', 'failed')),
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -298,13 +307,14 @@ CREATE TABLE IF NOT EXISTS provisioning_runs (
   id TEXT PRIMARY KEY,
   client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
   idempotency_key TEXT NOT NULL,
-  status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'succeeded', 'failed', 'cancelled')),
+  status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'paused', 'succeeded', 'activation_pending', 'activating', 'failed', 'cancelled')),
   step TEXT,
   input JSONB NOT NULL DEFAULT '{}'::jsonb,
   output JSONB,
   error TEXT,
   started_at TIMESTAMPTZ,
   finished_at TIMESTAMPTZ,
+  claim_token TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (client_id, id), UNIQUE (client_id, idempotency_key),

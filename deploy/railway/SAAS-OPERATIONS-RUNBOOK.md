@@ -2,8 +2,9 @@
 
 ## Current runtime constraints
 
-- API rate limits use Redis when `REDIS_URL` is configured and fall back to process-local limits if Redis
-  is unavailable. Keep exactly one API replica until the shared limiter passes a multi-instance load test.
+- Production API rate limits require Railway Redis (`REDIS_URL`, `RATE_LIMIT_REDIS_REQUIRED=true`).
+  `/health` returns 503 when the shared limiter is unavailable. Keep exactly one API replica until the
+  shared limiter passes a multi-instance load test.
 - `SAAS_PROVISIONING_ENABLED=false` is a release lock, not a normal configuration toggle.
 - Customer onboarding queues work for an operator; they do not create Twilio, ElevenLabs or calendar resources.
 
@@ -21,8 +22,14 @@ Railway:
 
 - API health or database health is non-200 for 2 minutes.
 - API 5xx rate exceeds 2% for 5 minutes.
-- `stripe_webhook_failed`, `worker_iteration_failed` or `schema_migration_failed` appears once.
-- Worker has no successful reconciliation log for 10 minutes.
+- `stripe_reconcile_error` or `worker_tick_error` appears once.
+- `notification_dead_lettered` appears once, or `notification_provider_call_failed` repeats for one
+  `tenantId` + `operationId`; inspect queue age and provider failure totals in `/api/v1/admin/control-plane`.
+- `retention_deleted_lifecycle_data` is absent for longer than the configured retention interval while
+  terminal website facts, provider resources, jobs, or notifications exist.
+- Worker `/health` is non-200 or its `lastSuccessAgeMs` exceeds `WORKER_HEALTH_STALE_MS`.
+- Sentry reports a new API/worker error, elevated error rate, or provider-call regression.
+- The newest verified encrypted offsite backup is older than 24 hours.
 - API replica count differs from one while the local limiter is in use.
 
 Vercel:
@@ -75,6 +82,15 @@ Stripe:
 - Target RPO: 24 hours until Supabase PITR is purchased and verified; target RTO: 4 hours.
 - Enable daily Supabase backups now. Before production scale, enable PITR and set the final RPO from the
   purchased retention window.
+- Until Supabase Pro is enabled, run `npm run backup:postgres` from a locked-down scheduler with `pg_dump`
+  and `age` installed. Set `BACKUP_ENVIRONMENT`, an absolute `BACKUP_OUTPUT_PATH` outside the repository
+  ending in `.dump.age`, and a `BACKUP_AGE_RECIPIENT` whose private key is held separately. Production
+  additionally requires `BACKUP_CONFIRM_PRODUCTION=I_UNDERSTAND_THIS_READS_PRODUCTION`.
+- The script streams `pg_dump --format=custom` directly through `age`; it never writes a plaintext dump
+  and never overwrites an existing artifact. Transfer the encrypted artifact to approved offsite storage,
+  apply retention controls, record its checksum/timestamp, and alert if upload or freshness verification fails.
+- Test decryption and restore only in isolated staging. Never place the age private key, database URL, dump,
+  or decrypted output in this repository or CI artifacts.
 - Quarterly staging drill: create an isolated restore project, restore the latest backup, use staging-only
   provider credentials, run migrations, tenant-isolation tests, and synthetic smoke tests, then destroy it.
 - Never restore over production and never copy Blades provider credentials into a drill.

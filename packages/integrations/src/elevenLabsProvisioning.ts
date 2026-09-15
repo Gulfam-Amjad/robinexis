@@ -235,6 +235,7 @@ export interface ImportTwilioNumberInput {
   label: string;
   accountSid: string;
   authToken: string;
+  accountAuthToken?: string;
   agentId?: string;
   enableSms?: boolean;
 }
@@ -330,6 +331,7 @@ export class ElevenLabsManagementClient {
         label: input.label,
         sid: input.accountSid,
         token: input.authToken,
+        ...(input.accountAuthToken ? { account_auth_token: input.accountAuthToken } : {}),
         ...(input.agentId ? { agent_id: input.agentId } : {}),
         enable_sms: input.enableSms ?? false,
       },
@@ -350,9 +352,30 @@ export class ElevenLabsManagementClient {
     );
   }
 
+  unassignAgentFromPhoneNumber(
+    phoneNumberId: string,
+    operationKey: string,
+  ): Promise<ImportedPhoneNumber> {
+    return this.request(
+      `/v1/convai/phone-numbers/${encodeURIComponent(phoneNumberId)}`,
+      "PATCH",
+      { agent_id: null },
+      operationKey,
+    );
+  }
+
+  deletePhoneNumber(phoneNumberId: string, operationKey: string): Promise<Record<string, unknown>> {
+    return this.request(
+      `/v1/convai/phone-numbers/${encodeURIComponent(phoneNumberId)}`,
+      "DELETE",
+      undefined,
+      operationKey,
+    );
+  }
+
   private async request<T>(
     path: string,
-    method: "POST" | "PATCH",
+    method: "POST" | "PATCH" | "DELETE",
     body: unknown,
     operationKey: string,
   ): Promise<T> {
@@ -368,7 +391,7 @@ export class ElevenLabsManagementClient {
           "xi-api-key": this.options.apiKey,
           "Idempotency-Key": operationKey,
         },
-        body: JSON.stringify(body),
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         signal: controller.signal,
       });
       const responseBody = await parseResponseBody(response);

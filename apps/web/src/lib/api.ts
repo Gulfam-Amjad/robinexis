@@ -1,4 +1,5 @@
 import type {
+  AdminControlPlane,
   AnalyticsSummary,
   ApiErrorBody,
   Booking,
@@ -11,7 +12,12 @@ import type {
   Job,
   KnowledgeDocument,
   ListResponse,
-  PromptVersion,
+  OnboardingWizardData,
+  OnboardingWizardResponse,
+  OnboardingWizardState,
+  OnboardingWizardStep,
+  PublicPromptVersion,
+  PublicCalendarConnection,
   PublicTwilioConnection,
   SessionActor,
   TimeseriesPoint,
@@ -104,7 +110,9 @@ export const api = {
     request<{ acceptedAt: string }>("/api/v1/account/legal-consent", { method: "POST" }, accessKey),
   acceptInvitations: (accessKey?: string) =>
     request<{ clientIds: string[] }>("/api/v1/invitations/accept", { method: "POST" }, accessKey),
-  requests: () => request<{ items: Array<{ id: string; type: string; status: string; email?: string; payload: Record<string, unknown>; createdAt: string }> }>("/api/v1/requests").then((result) => result.items),
+  requests: (clientId?: string) => request<{ items: Array<{ id: string; type: string; status: string; email?: string; payload: Record<string, unknown>; createdAt: string }> }>(
+    `/api/v1/requests${query({ clientId })}`,
+  ).then((result) => result.items),
   createRequest: (input: { type: "team_invite" | "data_export" | "workspace_deletion" | "support"; email?: string; role?: string; subject?: string; message?: string }) =>
     request<{ request: { id: string; type: string; status: string } }>("/api/v1/requests", {
       method: "POST",
@@ -140,6 +148,11 @@ export const api = {
       failedCalls: number;
     }>;
   }>("/api/v1/admin/summary"),
+  adminControlPlane: () => request<AdminControlPlane>("/api/v1/admin/control-plane"),
+  notificationStatus: (clientId: string) =>
+    request<{ pending: number; failed: number; lastDeliveryAt?: string }>(
+      `/api/v1/clients/${encodeURIComponent(clientId)}/notifications/status`,
+    ),
   replayBillingEvent: (eventId: string) =>
     request<{ ok: boolean; status?: string }>(
       `/api/v1/admin/billing-events/${encodeURIComponent(eventId)}/replay`,
@@ -148,6 +161,10 @@ export const api = {
   adminAudit: (clientId?: string) =>
     request<{ items: Array<{ id: string; clientId?: string; actorId: string; action: string; detail: Record<string, unknown>; createdAt: string }> }>(
       `/api/v1/admin/audit${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ""}`,
+    ).then((result) => result.items),
+  workspaceAudit: (clientId: string) =>
+    request<{ items: Array<{ id: string; action: string; createdAt: string }> }>(
+      `/api/v1/audit?clientId=${encodeURIComponent(clientId)}`,
     ).then((result) => result.items),
   transitionSetup: (
     clientId: string,
@@ -169,7 +186,7 @@ export const api = {
       body: JSON.stringify(input),
     }),
   publishClient: (id: string) =>
-    request<{ client?: Client; promptVersion?: PromptVersion }>(`/api/v1/clients/${encodeURIComponent(id)}/publish`, {
+    request<{ client?: Client; promptVersion?: PublicPromptVersion }>(`/api/v1/clients/${encodeURIComponent(id)}/publish`, {
       method: "POST",
     }),
   provisionClient: (id: string, operationKey: string, twilioNumber?: string) =>
@@ -184,11 +201,22 @@ export const api = {
   provisioningRuns: (id: string) =>
     request<{ items: Array<{
       id: string;
-      status: "pending" | "running" | "succeeded" | "failed" | "cancelled";
+      status: "pending" | "running" | "paused" | "succeeded" | "failed" | "cancelled";
       step?: string;
       error?: string;
       updatedAt: string;
+      output?: { readinessReport?: import("@robinexis/api-contracts").ProvisioningReadinessReport };
     }> }>(`/api/v1/clients/${encodeURIComponent(id)}/provisioning`),
+  approveProvisioning: (id: string, runId: string) =>
+    request<{ client: Client; runId: string; activated: true }>(
+      `/api/v1/clients/${encodeURIComponent(id)}/provisioning/${encodeURIComponent(runId)}/approve`,
+      { method: "POST" },
+    ),
+  provisioningAction: (id: string, runId: string, action: "pause" | "retry" | "review", note?: string) =>
+    request<{ run: import("@robinexis/api-contracts").ProvisioningStatus }>(
+      `/api/v1/clients/${encodeURIComponent(id)}/provisioning/${encodeURIComponent(runId)}/action`,
+      { method: "POST", body: JSON.stringify({ action, note }) },
+    ),
   twilioConnection: (id: string) =>
     request<PublicTwilioConnection>(`/api/v1/clients/${encodeURIComponent(id)}/twilio-connection`),
   startTwilioConnection: (id: string) =>
@@ -198,28 +226,66 @@ export const api = {
   saveTwilioCredentials: (id: string, input: {
     apiKeySid: string;
     apiKeySecret: string;
+    accountAuthToken: string;
     twilioNumber: string;
   }) =>
     request<PublicTwilioConnection>(`/api/v1/clients/${encodeURIComponent(id)}/twilio-connection/credentials`, {
       method: "POST",
       body: JSON.stringify(input),
     }),
+  twilioOwnedNumbers: (id: string) =>
+    request<{ items: Array<{ phoneNumber: string; selected: boolean }> }>(
+      `/api/v1/clients/${encodeURIComponent(id)}/twilio-connection/numbers`,
+    ).then((result) => result.items),
   disconnectTwilio: (id: string) =>
-    request<{ ok: boolean }>(`/api/v1/clients/${encodeURIComponent(id)}/twilio-connection`, {
+    request<{ ok: boolean; status: "revoked" }>(`/api/v1/clients/${encodeURIComponent(id)}/twilio-connection`, {
       method: "DELETE",
     }),
   onboarding: (id: string) =>
-    request<{ client: Client; provisioning: {
-      status: string;
-      step?: string;
-      error?: string;
-      updatedAt: string;
-    } | null }>(`/api/v1/clients/${encodeURIComponent(id)}/onboarding`),
+    request<{ client: Client; provisioning: import("@robinexis/api-contracts").ProvisioningStatus | null }>(
+      `/api/v1/clients/${encodeURIComponent(id)}/onboarding`,
+    ),
   saveOnboarding: (id: string, input: Partial<Client>) =>
     request<{ client: Client }>(`/api/v1/clients/${encodeURIComponent(id)}/onboarding`, {
       method: "PATCH",
       body: JSON.stringify(input),
     }),
+  onboardingWizard: (id: string) =>
+    request<OnboardingWizardResponse>(`/api/v1/clients/${encodeURIComponent(id)}/onboarding/wizard`),
+  saveOnboardingWizard: (id: string, input: {
+    currentStep?: OnboardingWizardStep;
+    completedStep?: OnboardingWizardStep;
+    data?: Partial<OnboardingWizardData>;
+    expectedVersion?: number;
+  }) =>
+    request<{ wizard: OnboardingWizardState; readiness: OnboardingWizardResponse["readiness"] }>(
+      `/api/v1/clients/${encodeURIComponent(id)}/onboarding/wizard`,
+      { method: "PATCH", body: JSON.stringify(input) },
+    ),
+  submitOnboardingWizard: (id: string) =>
+    request<{ wizard: OnboardingWizardState; onboardingStatus: "ready_to_provision"; automationEnabled: boolean; message: string }>(
+      `/api/v1/clients/${encodeURIComponent(id)}/onboarding/wizard/submit`,
+      { method: "POST" },
+    ),
+  websiteIntelligence: (id: string, runId?: string) =>
+    request<import("@robinexis/api-contracts").WebsiteIntelligenceState>(
+      `/api/v1/clients/${encodeURIComponent(id)}/website-intelligence${query({ runId })}`,
+    ),
+  scanWebsite: (id: string, url: string) =>
+    request<import("@robinexis/api-contracts").WebsiteIntelligenceState>(
+      `/api/v1/clients/${encodeURIComponent(id)}/website-intelligence`,
+      { method: "POST", body: JSON.stringify({ url }) },
+    ),
+  reviewWebsiteFact: (id: string, runId: string, factId: string, input: { action: "confirm" | "edit"; value?: unknown }) =>
+    request<{ fact: import("@robinexis/api-contracts").WebsiteIntelligenceFact }>(
+      `/api/v1/clients/${encodeURIComponent(id)}/website-intelligence/runs/${encodeURIComponent(runId)}/facts/${encodeURIComponent(factId)}`,
+      { method: "PATCH", body: JSON.stringify(input) },
+    ),
+  approveWebsiteFacts: (id: string, runId: string) =>
+    request<{ approved: true; published: false }>(
+      `/api/v1/clients/${encodeURIComponent(id)}/website-intelligence/runs/${encodeURIComponent(runId)}/approve-indexing`,
+      { method: "POST", body: JSON.stringify({ indexKnowledge: false }) },
+    ),
   finalizeOnboarding: (id: string, input: {
     businessName: string;
     greeting?: string;
@@ -250,7 +316,7 @@ export const api = {
       { method: "POST", body: JSON.stringify({ minutes, reason, idempotencyKey }) },
     ),
   promptVersions: async (id: string) =>
-    list(await request<PromptVersion[] | ListResponse<PromptVersion>>(`/api/v1/clients/${encodeURIComponent(id)}/prompt-versions`)),
+    list(await request<PublicPromptVersion[] | ListResponse<PublicPromptVersion>>(`/api/v1/clients/${encodeURIComponent(id)}/prompt-versions`)),
   calls: async (clientId: string, filters: Record<string, string | undefined> = {}) =>
     list(await request<Call[] | ListResponse<Call>>(`/api/v1/calls${query({ clientId, ...filters })}`)),
   call: (id: string, clientId: string) =>
@@ -323,6 +389,25 @@ export const api = {
     }),
   integrations: async (clientId: string) =>
     list(await request<IntegrationStatus[] | ListResponse<IntegrationStatus>>(`/api/v1/integrations/status${query({ clientId })}`)),
+  calendarConnection: (clientId: string) =>
+    request<PublicCalendarConnection>(`/api/v1/clients/${encodeURIComponent(clientId)}/calendar-connection`),
+  startCalcomOAuth: (clientId: string) =>
+    request<{ url: string }>(`/api/v1/clients/${encodeURIComponent(clientId)}/calendar-connection/oauth/start`, { method: "POST" }),
+  createManagedCalcom: (clientId: string) =>
+    request<{ status: string; mode: "managed"; idempotent?: boolean }>(
+      `/api/v1/clients/${encodeURIComponent(clientId)}/calendar-connection/managed`,
+      { method: "POST" },
+    ),
+  selectCalendarDestination: (clientId: string, calendarId: string, provider?: string) =>
+    request<PublicCalendarConnection>(`/api/v1/clients/${encodeURIComponent(clientId)}/calendar-connection/destination`, {
+      method: "PATCH",
+      body: JSON.stringify({ calendarId, provider }),
+    }),
+  disconnectCalcom: (clientId: string) =>
+    request<{ status: "disabled"; providerRevoked: boolean }>(
+      `/api/v1/clients/${encodeURIComponent(clientId)}/calendar-connection`,
+      { method: "DELETE" },
+    ),
   documents: async (clientId: string) =>
     list(await request<KnowledgeDocument[] | ListResponse<KnowledgeDocument>>(`/api/v1/knowledge/documents${query({ clientId })}`)),
   createDocument: async (input: { clientId: string; title: string; source?: string; content?: string; file?: File }) => {

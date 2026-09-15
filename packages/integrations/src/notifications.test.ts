@@ -23,7 +23,11 @@ describe("customer email delivery", () => {
     vi.stubGlobal("fetch", fetchMock);
     await expect(sendNotification({
       channel: "email", to: "owner@example.test", template: "Payment needs attention\nUpdate your card securely.",
+      idempotencyKey: "invoice:event_1",
     })).resolves.toEqual({ providerId: "email_1" });
-    expect(fetchMock).toHaveBeenCalledWith("https://api.resend.com/emails", expect.objectContaining({ method: "POST" }));
+    expect(fetchMock).toHaveBeenCalledWith("https://api.resend.com/emails", expect.objectContaining({
+      method: "POST",
+      headers: expect.objectContaining({ "Idempotency-Key": "invoice:event_1" }),
+    }));
   });
 });

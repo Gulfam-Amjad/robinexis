@@ -48,6 +48,10 @@ jobs:
           node-version: "24"
           cache: npm
       - run: npm ci
+      - run: npm run test:csp-api-origin
+      - run: npm run check:csp-api-origin
+        env:
+          VITE_API_BASE_URL: https://api.robinexis.com
       - run: npm run typecheck
       - run: npm run build:web
       - run: npm run build:backend

@@ -1,37 +1,67 @@
 import type http from "node:http";
+import { createHash } from "node:crypto";
 import { compilePrompt } from "@robinexis/brain";
 import {
+  BLADES_HAIR_ID,
+  canTransitionOnboarding,
   isAiServiceEnabled,
   newId,
   structuredLog,
   type CallSession,
   type ClientConfig,
+  type ExtractedFact,
   type OutboundJob,
+  type OnboardingStatus,
+  type OnboardingWizardData,
+  type OnboardingWizardState,
+  type OnboardingWizardStep,
   type PlatformStore,
   type TenantRequest,
+  type WebsiteExtractionRun,
+  type WebsiteSource,
 } from "@robinexis/database";
 import {
   calcom,
-  calcomTenantFromClient,
+  CALCOM_SCOPES,
+  calcomOAuthAuthorizeUrl,
   checkoutConfigurationError,
   createBillingPortalSession,
   createTwilioOAuthState,
+  createCalcomOAuthState,
+  createManagedCalcomUser,
   createCheckoutSession,
+  decryptTwilioCredential,
   discoverTwilioAccountSid,
   encryptTwilioCredential,
   ElevenLabsManagementClient,
   exchangeTwilioOAuthCode,
+  encryptCalcomCredential,
+  exchangeCalcomOAuthCode,
+  fetchCalcomIdentity,
   featureOperationallyAvailable,
+  FirecrawlWebsiteClient,
   findOwnedTwilioNumber,
+  listOwnedTwilioNumbers,
+  listCalcomDestinationCalendars,
   isPlanTier,
   planCatalog,
   planDefinition,
-  probeCalcomForClient,
+  provisionManagedTwilioNumber,
   publicClientView,
   replayStripeEvent,
-  sendNotification,
+  enqueueLifecycleEmail,
   twilioOAuthAuthorizeUrl,
   verifyTwilioOAuthState,
+  resolveCalcomTenantConnection,
+  revokeCalcomOAuthToken,
+  verifyCalcomOAuthState,
+  TwilioHttpManagementAdapter,
+  TwilioManagedNeedsAttentionError,
+  WEBSITE_EXTRACTOR_VERSION,
+  analyzeReceptionistGaps,
+  approvedWebsiteMarkdown,
+  validatePublicWebsiteUrl,
+  type NormalizedWebsiteFact,
 } from "@robinexis/integrations";
 import { GeminiEmbeddingProvider, KnowledgeService } from "@robinexis/knowledge";
 import {
@@ -50,6 +80,19 @@ export type ProductSend = (
   type?: string,
 ) => void;
 
+export function publicPlansResponse() {
+  return {
+    items: Object.values(planCatalog()).map((plan) => ({
+      ...plan,
+      features: plan.features.map((feature) => ({
+        id: feature,
+        operational: featureOperationallyAvailable(feature),
+      })),
+    })),
+    currency: "GBP",
+  };
+}
+
 function primaryWebOrigin(): string {
   return (process.env.WEB_ORIGIN || "https://app.robinexis.com").split(",")[0].trim();
 }
@@ -57,6 +100,71 @@ function primaryWebOrigin(): string {
 type ExtendedStore = PlatformStore & {
   listPromptVersions?: (clientId: string) => Promise<unknown[]>;
 };
+
+function provisioningProfileChecksum(client: ClientConfig, compiledPrompt: string) {
+  const {
+    onboardingStatus: _onboardingStatus,
+    onboardingNotes: _onboardingNotes,
+    onboardingEta: _onboardingEta,
+    elevenlabsAgentId: _elevenlabsAgentId,
+    inboundNumbers: _inboundNumbers,
+    published: _published,
+    promptVersionId: _promptVersionId,
+    ...profile
+  } = client;
+  return createHash("sha256")
+    .update(JSON.stringify({ client: profile, compiledPrompt }))
+    .digest("hex");
+}
+
+function publicProvisioningOutput(output: Record<string, unknown> | undefined) {
+  if (!output) return undefined;
+  const allowed = new Set([
+    "runId",
+    "clientId",
+    "agentInstanceId",
+    "elevenlabsAgentId",
+    "toolIds",
+    "phoneNumber",
+    "calendarEventTypes",
+    "readinessReport",
+  ]);
+  const safe: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(output)) {
+    if (allowed.has(key)) safe[key] = value;
+  }
+  return safe;
+}
+
+function protectedAutomationTarget(client: ClientConfig) {
+  return client.id === BLADES_HAIR_ID || client.slug === "blades-hair";
+}
+
+async function twilioActivationCredentials(
+  store: PlatformStore,
+  client: ClientConfig,
+): Promise<{ accountSid: string; authToken: string; accountAuthToken?: string }> {
+  const connection = await store.getTwilioConnection(client.id);
+  if (connection?.mode === "customer_oauth") {
+    if (
+      connection.status !== "active" ||
+      !connection.apiKeySid ||
+      !connection.encryptedApiKeySecret ||
+      !connection.encryptedAccountAuthToken
+    ) {
+      throw new Error("customer_twilio_connection_required");
+    }
+    return {
+      accountSid: connection.apiKeySid,
+      authToken: decryptTwilioCredential(connection.encryptedApiKeySecret),
+      accountAuthToken: decryptTwilioCredential(connection.encryptedAccountAuthToken),
+    };
+  }
+  const accountSid = connection?.accountSid || process.env.TWILIO_ACCOUNT_SID || "";
+  const authToken = process.env.TWILIO_AUTH_TOKEN || "";
+  if (!accountSid || !authToken) throw new Error("twilio_credentials_required");
+  return { accountSid, authToken };
+}
 
 function knowledgeService(store: PlatformStore): KnowledgeService | undefined {
   const apiKey = process.env.GEMINI_API_KEY || "";
@@ -89,15 +197,85 @@ export async function completeTwilioOAuthCallback(
     encryptedAccessToken: encryptTwilioCredential(tokens.accessToken),
     encryptedRefreshToken: encryptTwilioCredential(tokens.refreshToken),
     accessTokenExpiresAt: new Date(now.getTime() + tokens.expiresIn * 1000).toISOString(),
-    status: "credentials_required",
-    metadata: { oauthConnectedAt: now.toISOString() },
+    apiKeySid: existing?.apiKeySid,
+    encryptedApiKeySecret: existing?.encryptedApiKeySecret,
+    encryptedAccountAuthToken: existing?.encryptedAccountAuthToken,
+    selectedPhoneNumber: existing?.selectedPhoneNumber,
+    status: existing?.status === "active" &&
+      existing.encryptedApiKeySecret &&
+      existing.encryptedAccountAuthToken
+      ? "active"
+      : "credentials_required",
+    metadata: { ...existing?.metadata, oauthConnectedAt: now.toISOString(), reconnectPendingAt: undefined },
     createdAt: existing?.createdAt || now.toISOString(),
     updatedAt: now.toISOString(),
+  });
+  await store.appendOperatorAudit({
+    id: newId("audit_"), clientId: client.id, actorId: "twilio_oauth",
+    action: "twilio.customer_oauth_connected",
+    detail: { connectionId: existing?.id || undefined, accountSidMasked: `${accountSid.slice(0, 4)}…${accountSid.slice(-4)}` },
+    createdAt: now.toISOString(),
+  });
+  await store.saveOnboardingOutbox({
+    id: newId("outbox_"), clientId: client.id, topic: "twilio.customer_oauth_connected",
+    idempotencyKey: `twilio-oauth:${client.id}:${accountSid}`,
+    payload: { accountSidMasked: `${accountSid.slice(0, 4)}…${accountSid.slice(-4)}` },
+    attemptCount: 0, createdAt: now.toISOString(), updatedAt: now.toISOString(),
   });
   const returnTo = new URL(verified.returnTo);
   const allowedOrigin = new URL(primaryWebOrigin()).origin;
   if (returnTo.origin !== allowedOrigin) throw new Error("invalid_twilio_oauth_return_url");
   returnTo.searchParams.set("twilio", "connected");
+  return returnTo.toString();
+}
+
+export async function completeCalcomOAuthCallback(
+  store: PlatformStore,
+  input: { code: string; state: string },
+): Promise<string> {
+  const verified = verifyCalcomOAuthState(input.state);
+  const client = await store.getClient(verified.clientId);
+  if (!client) throw new Error("client_not_found");
+  const tokens = await exchangeCalcomOAuthCode(input.code);
+  const identity = await fetchCalcomIdentity(tokens.accessToken);
+  const existing = (await store.listCalendarConnections(client.id))
+    .find((item) => item.provider === "calcom");
+  const now = new Date();
+  const connectionId = existing?.id || `calendar_${client.id}_primary`;
+  await store.upsertCalendarConnection({
+    id: connectionId,
+    clientId: client.id,
+    locationId: existing?.locationId,
+    provider: "calcom",
+    externalAccountId: identity.username,
+    mode: "oauth",
+    encryptedAccessToken: encryptCalcomCredential(tokens.accessToken),
+    encryptedRefreshToken: tokens.refreshToken
+      ? encryptCalcomCredential(tokens.refreshToken)
+      : existing?.encryptedRefreshToken,
+    accessTokenExpiresAt: new Date(now.getTime() + tokens.expiresIn * 1000).toISOString(),
+    scopes: (tokens.scope?.split(/\s+/).filter(Boolean) || [...CALCOM_SCOPES]),
+    calendarId: existing?.calendarId,
+    destinationProvider: existing?.destinationProvider,
+    status: "active",
+    metadata: { ...existing?.metadata, oauthConnectedAt: now.toISOString(), externalUserId: identity.id },
+    createdAt: existing?.createdAt || now.toISOString(),
+    updatedAt: now.toISOString(),
+  });
+  await store.upsertProviderResource({
+    id: `provider_calcom_user_${client.id}`,
+    clientId: client.id,
+    provider: "calcom",
+    resourceType: "oauth_user",
+    providerResourceId: identity.id,
+    lifecycleStatus: "active",
+    metadata: { connectionId },
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString(),
+  });
+  const returnTo = new URL(verified.returnTo);
+  if (returnTo.origin !== new URL(primaryWebOrigin()).origin) throw new Error("invalid_calcom_oauth_return_url");
+  returnTo.searchParams.set("calcom", "connected");
   return returnTo.toString();
 }
 
@@ -166,6 +344,125 @@ function parseLimit(url: URL, fallback = 50, max = 250): number {
   return Math.min(max, Math.max(1, Number(url.searchParams.get("limit") || fallback) || fallback));
 }
 
+const onboardingWizardSteps: OnboardingWizardStep[] = [
+  "website", "facts", "behavior", "operations", "phone", "calendar", "review",
+];
+
+function initialOnboardingWizard(client: ClientConfig): OnboardingWizardState {
+  const now = new Date().toISOString();
+  return {
+    clientId: client.id,
+    currentStep: "website",
+    completedSteps: [],
+    data: {
+      businessName: client.businessName,
+      location: client.location,
+      greeting: client.greeting || `Hello, you've reached ${client.businessName}. How can I help?`,
+      tone: client.tone,
+      transferNumber: client.transferNumber,
+      services: client.services,
+      hours: client.hours,
+      timezone: client.callingWindow?.tz || "Europe/London",
+      phoneMode: client.phoneAcquisitionMode === "customer_oauth" ? "customer_twilio" : "managed",
+      customerPhoneNumber: client.requestedPhoneNumber,
+      calendarMode: client.calendar?.credentialRef ? "connect_existing" : "managed_calcom",
+      existingCalendarProvider: client.calendar?.provider,
+      calendarSchedule: client.calendar.schedule || {
+        timezone: client.callingWindow?.tz || "Europe/London",
+        weeklyHours: {},
+        overrides: [],
+        bufferBeforeMinutes: 0,
+        bufferAfterMinutes: 0,
+        minimumNoticeMinutes: 60,
+        cancellationAllowed: true,
+        rescheduleAllowed: true,
+      },
+    },
+    version: 1,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function dataReadinessBlockers(data: OnboardingWizardData) {
+  const blockers: Array<{ key: string; step: OnboardingWizardStep; message: string }> = [];
+  const add = (key: string, step: OnboardingWizardStep, message: string) => blockers.push({ key, step, message });
+  if (!data.businessName?.trim()) add("business_name", "facts", "Confirm your business name.");
+  if (!data.greeting?.trim() || data.greeting.trim().length < 8) add("greeting", "behavior", "Add a caller greeting.");
+  if (!data.tone?.trim()) add("tone", "behavior", "Choose how the receptionist should sound.");
+  if (!data.transferNumber?.match(/^\+[1-9]\d{7,14}$/)) add("transfer_number", "behavior", "Add a transfer number in international format.");
+  if (!data.recordingConsent) add("recording_consent", "behavior", "Choose how recording consent is handled.");
+  if (!data.services?.length || data.services.some((service) =>
+    !service.title?.trim() || !/^[a-z0-9-]{2,80}$/.test(service.slug) ||
+    !Number.isFinite(service.durationMinutes) || service.durationMinutes <= 0
+  )) add("services", "operations", "Add at least one service with a valid duration.");
+  if (!data.hours?.trim()) add("hours", "operations", "Add your opening hours.");
+  if (!data.timezone?.trim()) add("timezone", "operations", "Choose your business timezone.");
+  if (!data.bookingRules?.trim()) add("booking_rules", "operations", "Add the rules callers should know before booking.");
+  if (!data.phoneMode) add("phone_mode", "phone", "Choose a phone setup route.");
+  if (data.phoneMode === "customer_twilio" && !data.customerPhoneNumber?.match(/^\+[1-9]\d{7,14}$/)) {
+    add("customer_phone_number", "phone", "Add the Twilio number you want Robinexis to assess.");
+  }
+  if (!data.calendarMode) add("calendar_mode", "calendar", "Choose a calendar setup route.");
+  if (data.calendarMode === "connect_existing" && !data.existingCalendarProvider) {
+    add("calendar_provider", "calendar", "Choose the calendar you want to connect.");
+  }
+  return blockers;
+}
+
+async function onboardingReadiness(store: PlatformStore, state: OnboardingWizardState) {
+  const blockers = dataReadinessBlockers(state.data);
+  for (const gap of (await store.listOnboardingGaps(state.clientId)).filter((item) => item.status === "open")) {
+    blockers.push({
+      key: `hard_gap_${gap.key}`,
+      step: ["calendar_connection", "timezone"].includes(gap.key) ? "calendar" : "operations",
+      message: gap.detail || `Resolve the required ${gap.key.replaceAll("_", " ")} mapping.`,
+    });
+  }
+  if (state.data.phoneMode === "customer_twilio") {
+    const connection = await store.getTwilioConnection(state.clientId);
+    if (
+      connection?.status !== "active" ||
+      connection.selectedPhoneNumber !== state.data.customerPhoneNumber
+    ) {
+      blockers.push({
+        key: "twilio_connection",
+        step: "phone",
+        message: "Connect Twilio and verify the selected owned number.",
+      });
+    }
+  }
+  if (state.data.calendarMode) {
+    const calendarConnected = (await store.listCalendarConnections(state.clientId))
+      .some((connection) => connection.provider === "calcom" && connection.status === "active");
+    if (!calendarConnected) {
+      blockers.push({
+        key: "calendar_connection",
+        step: "calendar",
+        message: state.data.calendarMode === "managed_calcom"
+          ? "Create the managed Cal.com connection."
+          : "Connect the existing Cal.com account.",
+      });
+    }
+  }
+  const run = state.data.websiteRunId
+    ? await store.getWebsiteExtractionRun(state.clientId, state.data.websiteRunId)
+    : undefined;
+  if (!state.data.websiteUrl?.trim() || !run || run.status !== "succeeded") {
+    blockers.unshift({ key: "website_scan", step: "website", message: "Scan your public business website." });
+  } else {
+    const facts = await store.listExtractedFacts(state.clientId, run.id);
+    const source = await store.getWebsiteSource(state.clientId, run.sourceId);
+    if (!facts.length || facts.some((fact) => fact.reviewStatus === "extracted")) {
+      blockers.push({ key: "website_facts", step: "facts", message: "Confirm or edit every website fact." });
+    }
+    if (source?.metadata.approvedRunId !== run.id) {
+      blockers.push({ key: "website_approval", step: "facts", message: "Approve the reviewed facts for setup." });
+    }
+  }
+  return { ready: blockers.length === 0, blockers };
+}
+
 function filterCalls(calls: CallSession[], url: URL): CallSession[] {
   const search = (url.searchParams.get("search") || "").trim().toLowerCase();
   const direction = url.searchParams.get("direction");
@@ -231,8 +528,8 @@ function createClient(body: Partial<ClientConfig>): ClientConfig {
   if (!body.transferNumber || !/^\+[1-9]\d{7,14}$/.test(body.transferNumber)) {
     throw new Error("valid_transfer_number_required");
   }
-  if (!body.calendar.credentialRef || !/^[A-Z][A-Z0-9_]*$/.test(body.calendar.credentialRef)) {
-    throw new Error("calendar_credential_reference_required");
+  if (body.calendar.credentialRef) {
+    throw new Error("shared_calendar_credentials_forbidden_for_new_tenants");
   }
   return {
     id: body.id || newId("client_"),
@@ -257,7 +554,9 @@ function createClient(body: Partial<ClientConfig>): ClientConfig {
     calendar: {
       provider: body.calendar.provider,
       username: body.calendar.username,
-      credentialRef: body.calendar.credentialRef,
+      destinationCalendarId: body.calendar.destinationCalendarId,
+      destinationProvider: body.calendar.destinationProvider,
+      schedule: body.calendar.schedule,
     },
     calendarNotes: body.calendarNotes,
     calendarNoteMode: body.calendarNoteMode || "summary",
@@ -297,14 +596,122 @@ async function requireManageClient(ctx: ProductRouteContext, id: string): Promis
   return client;
 }
 
-async function notifyCustomer(to: string | undefined, template: string) {
-  if (!to || (!process.env.RESEND_API_KEY && process.env.EMAIL_DELIVERY_MODE !== "log")) return undefined;
+async function notifyCustomer(
+  store: PlatformStore,
+  clientId: string,
+  operationId: string,
+  idempotencyKey: string,
+  to: string | undefined,
+  template: string,
+) {
+  return enqueueLifecycleEmail({ store, clientId, operationId, idempotencyKey, to, template });
+}
+
+function publicWebsiteFact(fact: ExtractedFact) {
+  let evidence: unknown = fact.sourceEvidence;
   try {
-    return (await sendNotification({ channel: "email", to, template })).providerId;
-  } catch (error) {
-    structuredLog("customer_email_failed", { to, reason: String(error) });
-    return undefined;
+    evidence = fact.sourceEvidence ? JSON.parse(fact.sourceEvidence) : undefined;
+  } catch {
+    // Preserve legacy string evidence.
   }
+  return {
+    id: fact.id,
+    key: fact.key,
+    value: fact.value,
+    confidence: fact.confidence,
+    evidence,
+    reviewStatus: fact.reviewStatus,
+    reviewedAt: fact.reviewedAt,
+  };
+}
+
+function normalizedReviewedFacts(facts: ExtractedFact[]): NormalizedWebsiteFact[] {
+  return facts
+    .filter((fact) => fact.reviewStatus !== "extracted")
+    .map((fact) => {
+      let evidence: { url: string; excerpt?: string } = { url: "" };
+      try {
+        evidence = JSON.parse(fact.sourceEvidence || "{}") as typeof evidence;
+      } catch {
+        evidence.excerpt = fact.sourceEvidence;
+      }
+      return {
+        key: fact.key as NormalizedWebsiteFact["key"],
+        value: fact.value,
+        confidence: fact.confidence ?? 0.5,
+        evidence,
+      };
+    });
+}
+
+function applyApprovedWebsiteFacts(client: ClientConfig, facts: NormalizedWebsiteFact[]): ClientConfig {
+  const draft = structuredClone(client);
+  const byKey = new Map(facts.map((fact) => [fact.key, fact.value]));
+  const text = (key: NormalizedWebsiteFact["key"]) => {
+    const value = byKey.get(key);
+    return typeof value === "string" ? value.trim() : "";
+  };
+  if (text("businessName")) draft.businessName = text("businessName");
+  if (text("hours")) draft.hours = text("hours");
+  if (text("tone")) draft.tone = text("tone");
+  if (text("transferDestination").match(/^\+[1-9]\d{7,14}$/)) {
+    draft.transferNumber = text("transferDestination");
+  }
+  const locations = byKey.get("locations");
+  if (Array.isArray(locations) && typeof locations[0] === "string") draft.location = locations.join("; ");
+  const contacts = byKey.get("contacts");
+  if (contacts && typeof contacts === "object") {
+    const record = contacts as { phones?: unknown[]; emails?: unknown[] };
+    if (typeof record.phones?.[0] === "string") draft.phone = record.phones[0];
+    if (typeof record.emails?.[0] === "string") draft.email = record.emails[0];
+  }
+  const services = byKey.get("services");
+  if (Array.isArray(services)) {
+    draft.services = services.flatMap((item) => {
+      if (!item || typeof item !== "object") return [];
+      const service = item as { name?: unknown; durationMinutes?: unknown };
+      if (typeof service.name !== "string" || typeof service.durationMinutes !== "number" || service.durationMinutes <= 0) return [];
+      const slug = service.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 80);
+      return slug.length >= 2 ? [{ title: service.name, slug, durationMinutes: service.durationMinutes }] : [];
+    });
+  }
+  const policies = [
+    ...(Array.isArray(byKey.get("bookingRules")) ? byKey.get("bookingRules") as unknown[] : []),
+    ...(Array.isArray(byKey.get("cancellationRules")) ? byKey.get("cancellationRules") as unknown[] : []),
+    ...(Array.isArray(byKey.get("transferEscalation")) ? byKey.get("transferEscalation") as unknown[] : []),
+  ].filter((value): value is string => typeof value === "string");
+  if (policies.length) draft.policies = [...new Set(policies)];
+  draft.published = false;
+  return draft;
+}
+
+async function refreshWebsiteGaps(
+  store: PlatformStore,
+  clientId: string,
+  facts: ReadonlyArray<Pick<NormalizedWebsiteFact, "key" | "value">>,
+  now: string,
+) {
+  const calendarConnected = (await store.listCalendarConnections(clientId))
+    .some((connection) => connection.status === "active");
+  const gaps = analyzeReceptionistGaps(facts, { calendarConnected });
+  const allGapKeys = [
+    "hours", "timezone", "service_duration", "calendar_connection",
+    "transfer_destination", "recording_consent",
+  ] as const;
+  for (const key of allGapKeys) {
+    const gap = gaps.find((item) => item.key === key);
+    await store.upsertOnboardingGap({
+      id: `website_gap_${clientId}_${key}`,
+      clientId,
+      key,
+      status: gap ? "open" : "resolved",
+      detail: gap?.detail,
+      resolvedAt: gap ? undefined : now,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+  return gaps;
 }
 
 export async function handleProductRoute(ctx: ProductRouteContext): Promise<boolean> {
@@ -331,14 +738,7 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
   }
 
   if (route === "/plans" && req.method === "GET") {
-    const plans = Object.values(planCatalog()).map((plan) => ({
-      ...plan,
-      features: plan.features.map((feature) => ({
-        id: feature,
-        operational: featureOperationallyAvailable(feature),
-      })),
-    }));
-    send(res, 200, { items: plans, currency: "GBP" });
+    send(res, 200, publicPlansResponse());
     return true;
   }
 
@@ -390,6 +790,118 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
     });
     return true;
   }
+  if (route === "/admin/control-plane" && req.method === "GET") {
+    if (!canAdministerPlatform(actor)) {
+      send(res, 403, { error: "platform_admin_required" });
+      return true;
+    }
+    const clients = await store.listClients();
+    const clientNames = new Map(clients.map((client) => [client.id, client.businessName]));
+    const now = new Date();
+    const [tenantRequests, perClient, notificationHealth] = await Promise.all([
+      store.listTenantRequests(),
+      Promise.all(clients.map(async (client) => {
+        const [runs, resources, twilio] = await Promise.all([
+          store.listProvisioningRuns(client.id),
+          store.listProviderResources(client.id),
+          store.getTwilioConnection(client.id),
+        ]);
+        return { client, run: runs[0], resources, twilio };
+      })),
+      store.notificationHealth(now.toISOString()),
+    ]);
+    const blades = clients.find((client) => client.slug === "blades-hair");
+    const configuredCaps = perClient.filter(({ twilio }) => typeof twilio?.monthlySpendCapPence === "number").length;
+    const uncappedConnections = perClient.filter(({ twilio }) =>
+      Boolean(twilio && typeof twilio.monthlySpendCapPence !== "number")).length;
+    send(res, 200, {
+      generatedAt: now.toISOString(),
+      health: {
+        status: notificationHealth.deadLetter || notificationHealth.providerFailures24h ||
+          uncappedConnections || !process.env.BACKUP_OUTPUT_PATH ? "degraded" : "ok",
+        notificationQueue: {
+          ...notificationHealth,
+          oldestPendingAt: undefined,
+          oldestPendingAgeSeconds: notificationHealth.oldestPendingAt
+            ? Math.max(0, Math.floor((now.getTime() - Date.parse(notificationHealth.oldestPendingAt)) / 1000))
+            : undefined,
+        },
+        spend: {
+          status: uncappedConnections ? "needs_attention" : "configured",
+          configuredCapCount: configuredCaps,
+          uncappedConnectionCount: uncappedConnections,
+        },
+        backup: {
+          status: process.env.BACKUP_OUTPUT_PATH ? "configured" : "not_configured",
+          freshness: "unknown",
+        },
+      },
+      provisioning: perClient
+        .filter(({ client, run }) => Boolean(run) ||
+          ["setup_queued", "setup_in_progress", "needs_attention", "provisioning", "testing", "awaiting_approval", "failed"]
+            .includes(client.onboardingStatus || ""))
+        .map(({ client, run }) => {
+          const readiness = run?.output?.readinessReport as
+            | { passed?: boolean; hardGaps?: string[] }
+            | undefined;
+          return ({
+          clientId: client.id,
+          businessName: client.businessName,
+          onboardingStatus: client.onboardingStatus,
+          runId: run?.id,
+          runStatus: run?.status,
+          step: run?.step,
+          readinessPassed: readiness?.passed,
+          blockers: readiness?.hardGaps || (run?.error ? [run.error] : []),
+          updatedAt: run?.updatedAt,
+          });
+        }),
+      resources: perClient.flatMap(({ client, resources }) => resources.map((resource) => ({
+        clientId: client.id,
+        businessName: client.businessName,
+        provider: resource.provider,
+        resourceType: resource.resourceType,
+        lifecycleStatus: resource.lifecycleStatus,
+        healthy: resource.lifecycleStatus === "active",
+        updatedAt: resource.updatedAt,
+      }))),
+      requests: tenantRequests.map((request) => ({
+        id: request.id,
+        clientId: request.clientId,
+        businessName: clientNames.get(request.clientId) || "Unknown workspace",
+        type: request.type,
+        status: request.status,
+        createdAt: request.createdAt,
+      })),
+      spendAlarms: perClient
+        .filter(({ twilio }) => typeof twilio?.monthlySpendCapPence === "number")
+        .map(({ client, twilio }) => ({
+          clientId: client.id,
+          businessName: client.businessName,
+          monthlySpendCapPence: twilio!.monthlySpendCapPence!,
+          status: "configured",
+        })),
+      blades: {
+        present: Boolean(blades),
+        published: Boolean(blades?.published),
+        serviceStatus: blades?.serviceStatus,
+        inboundActive: Boolean(blades?.published && blades?.serviceStatus === "active" && blades.inboundNumbers.length),
+      },
+    });
+    return true;
+  }
+  const notificationStatusMatch = route.match(/^\/clients\/([^/]+)\/notifications\/status$/);
+  if (notificationStatusMatch && req.method === "GET") {
+    const client = await requireClient(ctx, notificationStatusMatch[1]);
+    if (!client) return true;
+    const deliveries = await store.listNotifications(client.id, 20);
+    send(res, 200, {
+      pending: deliveries.filter((item) => ["pending", "leased"].includes(item.status)).length,
+      failed: deliveries.filter((item) => item.status === "dead_letter").length,
+      lastDeliveryAt: deliveries.find((item) => item.status === "delivered")?.deliveredAt,
+    });
+    return true;
+  }
   if (route === "/admin/audit" && req.method === "GET") {
     if (!canAdministerPlatform(actor)) {
       send(res, 403, { error: "platform_admin_required" });
@@ -397,6 +909,19 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
     }
     const clientId = url.searchParams.get("clientId") || undefined;
     send(res, 200, { items: await store.listOperatorAudit(clientId, 100) });
+    return true;
+  }
+  if (route === "/audit" && req.method === "GET") {
+    const id = url.searchParams.get("clientId") || "";
+    if (!(await requireClient(ctx, id))) return true;
+    const items = await store.listOperatorAudit(id, 100);
+    send(res, 200, {
+      items: items.map((item) => ({
+        id: item.id,
+        action: item.action,
+        createdAt: item.createdAt,
+      })),
+    });
     return true;
   }
   const billingReplayMatch = route.match(/^\/admin\/billing-events\/([^/]+)\/replay$/);
@@ -432,26 +957,16 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
     const client = await requireClient(ctx, setupTransitionMatch[1]);
     if (!client) return true;
     const body = await readJson<{
-      status?: "setup_queued" | "setup_in_progress" | "needs_attention" | "active";
+      status?: OnboardingStatus;
       note?: string;
       eta?: string;
     }>(ctx);
-    const transitions: Record<string, string[]> = {
-      setup_queued: ["setup_in_progress", "needs_attention"],
-      setup_in_progress: ["needs_attention", "active"],
-      needs_attention: ["setup_queued", "setup_in_progress"],
-    };
-    if (!body.status || !transitions[client.onboardingStatus || ""]?.includes(body.status)) {
+    if (!body.status || !canTransitionOnboarding(client.onboardingStatus, body.status)) {
       send(res, 409, { error: "invalid_setup_transition" });
       return true;
     }
-    if (body.status === "active" && (
-      process.env.SAAS_PROVISIONING_ENABLED !== "true" ||
-      !client.published ||
-      !client.elevenlabsAgentId ||
-      !client.inboundNumbers.length
-    )) {
-      send(res, 409, { error: "activation_requirements_not_met" });
+    if (body.status === "active") {
+      send(res, 403, { error: "customer_owner_approval_required" });
       return true;
     }
     if (body.eta && !Number.isFinite(Date.parse(body.eta))) {
@@ -472,10 +987,7 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       createdAt: new Date().toISOString(),
     });
     if (body.status === "needs_attention") {
-      await notifyCustomer(client.email, `Robinexis setup needs your input\n${client.onboardingNotes || "Open your workspace to review the information we need."}`);
-    }
-    if (body.status === "active") {
-      await notifyCustomer(client.email, "Your Robinexis receptionist is active\nYour specialist-tested setup has been approved and activated.");
+      await notifyCustomer(store, client.id, `onboarding:${client.id}:${body.status}`, `status:${client.id}:${body.status}:${client.onboardingNotes || ""}`, client.email, `Robinexis setup needs your input\n${client.onboardingNotes || "Open your workspace to review the information we need."}`);
     }
     send(res, 200, { client: safeEditableClient(client) });
     return true;
@@ -598,18 +1110,23 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
         subject: body.subject?.trim(),
         message: body.message?.trim(),
         delivery: body.type === "team_invite" ? "queued_provider_required" : undefined,
+        exportScope: body.type === "data_export"
+          ? ["website_facts", "provider_resources", "jobs", "notifications"]
+          : undefined,
+        reviewOnly: body.type === "workspace_deletion" ? true : undefined,
+        automaticProviderDeletion: body.type === "workspace_deletion" ? false : undefined,
       },
       createdAt: now,
       updatedAt: now,
     };
     await store.saveTenantRequest(request);
-    const providerId = body.type === "team_invite"
-      ? await notifyCustomer(request.email, `You are invited to Robinexis\n${actor.email} invited you to join their workspace as ${body.role || "viewer"}. Sign in securely at ${process.env.WEB_ORIGIN || "https://app.robinexis.com"}/login.`)
+    const delivery = body.type === "team_invite"
+      ? await notifyCustomer(store, clientId, `request:${request.id}`, `request:${request.id}`, request.email, `You are invited to Robinexis\n${actor.email} invited you to join their workspace as ${body.role || "viewer"}. Sign in securely at ${process.env.WEB_ORIGIN || "https://app.robinexis.com"}/login.`)
       : body.type === "support"
-        ? await notifyCustomer(process.env.SUPPORT_EMAIL, `New Robinexis support request\nTenant: ${clientId}\nSubject: ${body.subject}\n\n${body.message}`)
+        ? await notifyCustomer(store, clientId, `request:${request.id}`, `request:${request.id}`, process.env.SUPPORT_EMAIL, `New Robinexis support request\nTenant: ${clientId}\nSubject: ${body.subject}\n\n${body.message}`)
         : undefined;
-    if (providerId) {
-      request.payload = { ...request.payload, delivery: "sent", providerId };
+    if (delivery?.queued) {
+      request.payload = { ...request.payload, delivery: "queued", notificationId: delivery.id };
       await store.saveTenantRequest(request);
     }
     await store.appendOperatorAudit({
@@ -642,10 +1159,20 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
     request.updatedAt = new Date().toISOString();
     if (body.action === "revoke") request.status = "revoked";
     if (body.action === "resend") {
+      const resendCount = Number(request.payload.resendCount || 0) + 1;
+      const delivery = await notifyCustomer(
+        store,
+        request.clientId,
+        `request:${request.id}:resend:${resendCount}`,
+        `request:${request.id}:resend:${resendCount}`,
+        request.email,
+        `You are invited to Robinexis\nSign in securely at ${primaryWebOrigin()}/login.`,
+      );
       request.payload = {
         ...request.payload,
-        delivery: "queued_provider_required",
-        resendCount: Number(request.payload.resendCount || 0) + 1,
+        delivery: delivery.queued ? "queued" : "duplicate",
+        notificationId: delivery.id,
+        resendCount,
       };
     }
     await store.saveTenantRequest(request);
@@ -696,7 +1223,10 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
     const periodSummary = selected
       ? await store.getAnalyticsSummary(selected.id, { from, to })
       : undefined;
-    const calendar = selected ? await probeCalcomForClient({ client: selected }) : {};
+    const activeCalendar = selected
+      ? (await store.listCalendarConnections(selected.id)).some((item) => item.provider === "calcom" && item.status === "active")
+      : false;
+    const calendar = activeCalendar ? { ok: true, slotCount: 0 } : { ok: false, error: "Not connected" };
     send(res, 200, {
       clients: clients.map((item) => safeEditableClient(item)),
       client: selected ? safeEditableClient(selected) : null,
@@ -764,7 +1294,7 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
         locationId: `loc_${created.id}_primary`,
         provider: created.calendar.provider,
         externalAccountId: created.calendar.username,
-        credentialRef: created.calendar.credentialRef!,
+        credentialRef: created.calendar.credentialRef,
         status: "pending",
         metadata: {},
         createdAt: nowIso,
@@ -944,6 +1474,481 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
     return true;
   }
 
+  const websiteIntelligenceMatch = route.match(/^\/clients\/([^/]+)\/website-intelligence$/);
+  if (websiteIntelligenceMatch && req.method === "POST") {
+    const client = await requireManageClient(ctx, websiteIntelligenceMatch[1]);
+    if (!client) return true;
+    const body = await readJson<{ url?: string }>(ctx);
+    let verifiedUrl: URL;
+    try {
+      verifiedUrl = validatePublicWebsiteUrl(String(body.url || ""));
+    } catch (error) {
+      send(res, 400, { error: error instanceof Error ? error.message : "invalid_website_url" });
+      return true;
+    }
+    const now = new Date().toISOString();
+    const existingSource = (await store.listWebsiteSources(client.id))
+      .find((source) => source.url === verifiedUrl.toString());
+    const source: WebsiteSource = existingSource || {
+      id: newId("website_source_"),
+      clientId: client.id,
+      url: verifiedUrl.toString(),
+      status: "pending" as const,
+      metadata: {},
+      createdAt: now,
+      updatedAt: now,
+    };
+    source.status = "pending";
+    source.updatedAt = now;
+    await store.saveWebsiteSource(source);
+    const run: WebsiteExtractionRun = {
+      id: newId("website_run_"),
+      clientId: client.id,
+      sourceId: source.id,
+      status: "running" as const,
+      extractorVersion: WEBSITE_EXTRACTOR_VERSION,
+      startedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await store.saveWebsiteExtractionRun(run);
+    await store.appendOperatorAudit({
+      id: newId("audit_"), clientId: client.id, actorId: actor.subject,
+      action: "website_intelligence.scan_started",
+      detail: { runId: run.id, sourceId: source.id, url: source.url },
+      createdAt: now,
+    });
+    try {
+      const result = await new FirecrawlWebsiteClient().extract(source.url);
+      const completedAt = new Date().toISOString();
+      const facts: ExtractedFact[] = result.facts.map((fact) => ({
+        id: `website_fact_${run.id}_${fact.key}`,
+        clientId: client.id,
+        extractionRunId: run.id,
+        key: fact.key,
+        value: fact.value,
+        confidence: fact.confidence,
+        sourceEvidence: JSON.stringify(fact.evidence),
+        reviewStatus: "extracted",
+        createdAt: completedAt,
+      }));
+      await store.replaceExtractedFacts(client.id, run.id, facts);
+      const gaps = await refreshWebsiteGaps(store, client.id, result.facts, completedAt);
+      Object.assign(run, {
+        status: "succeeded" as const,
+        finishedAt: completedAt,
+        updatedAt: completedAt,
+      });
+      source.status = "active";
+      source.lastFetchedAt = completedAt;
+      source.metadata = {
+        ...source.metadata,
+        pageCount: result.pages,
+        contentChecksum: createHash("sha256").update(result.markdown).digest("hex"),
+        contentChars: result.markdown.length,
+        latestRunId: run.id,
+        indexingStatus: "awaiting_approval",
+      };
+      source.updatedAt = completedAt;
+      await store.saveWebsiteSource(source);
+      await store.saveWebsiteExtractionRun(run);
+      await store.saveOnboardingOutbox({
+        id: newId("outbox_"),
+        clientId: client.id,
+        topic: "website_intelligence.extracted",
+        idempotencyKey: `website-extracted:${run.id}`,
+        payload: { runId: run.id, sourceId: source.id, factCount: facts.length, gapCount: gaps.length },
+        attemptCount: 0,
+        createdAt: completedAt,
+        updatedAt: completedAt,
+      });
+      await store.appendOperatorAudit({
+        id: newId("audit_"), clientId: client.id, actorId: actor.subject,
+        action: "website_intelligence.scan_completed",
+        detail: { runId: run.id, factCount: facts.length, gapCount: gaps.length, pages: result.pages },
+        createdAt: completedAt,
+      });
+      await notifyCustomer(
+        store, client.id, run.id, `website-scan-complete:${client.id}:${run.id}`,
+        client.email,
+        "Your website scan is ready\nReview and confirm the extracted business facts in your Robinexis workspace.",
+      );
+      send(res, 201, {
+        run,
+        source: { id: source.id, url: source.url, status: source.status },
+        facts: facts.map(publicWebsiteFact),
+        gaps: await store.listOnboardingGaps(client.id),
+      });
+    } catch (error) {
+      const failedAt = new Date().toISOString();
+      const message = error instanceof Error ? error.message : "website_scan_failed";
+      run.status = "failed";
+      run.error = message.slice(0, 500);
+      run.finishedAt = failedAt;
+      run.updatedAt = failedAt;
+      source.status = "failed";
+      source.updatedAt = failedAt;
+      source.metadata = { ...source.metadata, latestRunId: run.id };
+      await store.saveWebsiteSource(source);
+      await store.saveWebsiteExtractionRun(run);
+      await store.appendOperatorAudit({
+        id: newId("audit_"), clientId: client.id, actorId: actor.subject,
+        action: "website_intelligence.scan_failed",
+        detail: { runId: run.id, error: run.error }, createdAt: failedAt,
+      });
+      send(res, message === "firecrawl_not_configured" ? 503 : 502, { error: message, run });
+    }
+    return true;
+  }
+  if (websiteIntelligenceMatch && req.method === "GET") {
+    const client = await requireClient(ctx, websiteIntelligenceMatch[1]);
+    if (!client) return true;
+    const sources = await store.listWebsiteSources(client.id);
+    const runs = await store.listWebsiteExtractionRuns(client.id);
+    const requestedRunId = url.searchParams.get("runId");
+    const run = requestedRunId
+      ? await store.getWebsiteExtractionRun(client.id, requestedRunId)
+      : [...runs].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+    if (requestedRunId && !run) {
+      send(res, 404, { error: "website_scan_not_found" });
+      return true;
+    }
+    send(res, 200, {
+      sources: sources.map((source) => ({
+        id: source.id,
+        url: source.url,
+        status: source.status,
+        lastFetchedAt: source.lastFetchedAt,
+        indexingStatus: source.metadata.indexingStatus,
+      })),
+      run: run || null,
+      facts: run ? (await store.listExtractedFacts(client.id, run.id)).map(publicWebsiteFact) : [],
+      gaps: await store.listOnboardingGaps(client.id),
+    });
+    return true;
+  }
+
+  const websiteFactMatch = route.match(/^\/clients\/([^/]+)\/website-intelligence\/runs\/([^/]+)\/facts\/([^/]+)$/);
+  if (websiteFactMatch && req.method === "PATCH") {
+    const client = await requireManageClient(ctx, websiteFactMatch[1]);
+    if (!client) return true;
+    const run = await store.getWebsiteExtractionRun(client.id, websiteFactMatch[2]);
+    const fact = run
+      ? (await store.listExtractedFacts(client.id, run.id)).find((item) => item.id === websiteFactMatch[3])
+      : undefined;
+    if (!run || !fact) {
+      send(res, 404, { error: "website_fact_not_found" });
+      return true;
+    }
+    const body = await readJson<{ action?: "confirm" | "edit"; value?: unknown }>(ctx);
+    if (!body.action || (body.action === "edit" && body.value === undefined)) {
+      send(res, 400, { error: "confirm_or_edit_action_required" });
+      return true;
+    }
+    if (body.action === "edit") {
+      const size = Buffer.byteLength(JSON.stringify(body.value));
+      if (size > 100_000) {
+        send(res, 413, { error: "fact_value_too_large" });
+        return true;
+      }
+      fact.value = body.value;
+      fact.confidence = 1;
+    }
+    fact.reviewStatus = body.action === "edit" ? "edited" : "confirmed";
+    fact.reviewedBy = actor.subject;
+    fact.reviewedAt = new Date().toISOString();
+    await store.saveExtractedFact(fact);
+    const reviewedRunFacts = await store.listExtractedFacts(client.id, run.id);
+    await refreshWebsiteGaps(
+      store,
+      client.id,
+      reviewedRunFacts.map((item) => ({
+        key: item.key as NormalizedWebsiteFact["key"],
+        value: item.value,
+      })),
+      fact.reviewedAt,
+    );
+    await store.appendOperatorAudit({
+      id: newId("audit_"), clientId: client.id, actorId: actor.subject,
+      action: `website_intelligence.fact_${body.action === "edit" ? "edited" : "confirmed"}`,
+      detail: { runId: run.id, factId: fact.id, key: fact.key },
+      createdAt: fact.reviewedAt,
+    });
+    send(res, 200, { fact: publicWebsiteFact(fact) });
+    return true;
+  }
+
+  const websiteApproveMatch = route.match(/^\/clients\/([^/]+)\/website-intelligence\/runs\/([^/]+)\/approve-indexing$/);
+  if (websiteApproveMatch && req.method === "POST") {
+    const client = await requireManageClient(ctx, websiteApproveMatch[1]);
+    if (!client) return true;
+    const run = await store.getWebsiteExtractionRun(client.id, websiteApproveMatch[2]);
+    if (!run || run.status !== "succeeded") {
+      send(res, 404, { error: "successful_website_scan_not_found" });
+      return true;
+    }
+    const allFacts = await store.listExtractedFacts(client.id, run.id);
+    const reviewedFacts = normalizedReviewedFacts(allFacts);
+    if (!reviewedFacts.length || allFacts.some((fact) => fact.reviewStatus === "extracted")) {
+      send(res, 409, { error: "all_website_facts_require_review" });
+      return true;
+    }
+    const source = await store.getWebsiteSource(client.id, run.sourceId);
+    if (!source) {
+      send(res, 404, { error: "website_source_not_found" });
+      return true;
+    }
+    const body = await readJson<{ indexKnowledge?: boolean }>(ctx);
+    const existingDraft = await store.getDraftClient(client.id);
+    const draft = applyApprovedWebsiteFacts(existingDraft?.config || client, reviewedFacts);
+    const now = new Date().toISOString();
+    await store.saveDraftClient({
+      id: existingDraft?.id || newId("client_revision_"),
+      clientId: client.id,
+      status: "draft",
+      config: draft,
+      createdBy: actor.subject,
+      createdAt: existingDraft?.createdAt || now,
+      updatedAt: now,
+    });
+    const markdown = approvedWebsiteMarkdown(source.url, reviewedFacts);
+    let knowledgeDocument;
+    let indexingStatus = "not_requested";
+    let indexingError: string | undefined;
+    if (body.indexKnowledge !== false) {
+      const service = knowledgeService(store);
+      if (service) {
+        try {
+          knowledgeDocument = await service.index({
+            clientId: client.id,
+            title: `Approved website facts — ${draft.businessName}`,
+            sourceType: "markdown",
+            sourceUri: source.url,
+            content: markdown,
+            metadata: { websiteSourceId: source.id, extractionRunId: run.id, approvedBy: actor.subject },
+          });
+          indexingStatus = knowledgeDocument.status;
+        } catch (error) {
+          indexingStatus = "failed";
+          indexingError = error instanceof Error ? error.message.slice(0, 500) : "knowledge_index_failed";
+        }
+      } else {
+        indexingStatus = "approved_pending_gemini";
+      }
+    }
+    source.metadata = {
+      ...source.metadata,
+      indexingStatus,
+      approvedRunId: run.id,
+      approvedAt: now,
+      approvedBy: actor.subject,
+      knowledgeDocumentId: knowledgeDocument?.id,
+      indexingError,
+    };
+    source.updatedAt = now;
+    await store.saveWebsiteSource(source);
+    await store.saveOnboardingOutbox({
+      id: newId("outbox_"), clientId: client.id, topic: "website_intelligence.approved",
+      idempotencyKey: `website-approved:${run.id}`,
+      payload: { runId: run.id, sourceId: source.id, knowledgeDocumentId: knowledgeDocument?.id },
+      attemptCount: 0, createdAt: now, updatedAt: now,
+    });
+    await store.appendOperatorAudit({
+      id: newId("audit_"), clientId: client.id, actorId: actor.subject,
+      action: "website_intelligence.indexing_approved",
+      detail: { runId: run.id, sourceId: source.id, factCount: reviewedFacts.length, indexingStatus, indexingError },
+      createdAt: now,
+    });
+    send(res, 200, {
+      approved: true,
+      published: false,
+      draft: safeEditableClient(draft),
+      indexingStatus,
+      indexingError,
+      knowledgeDocument: publicKnowledgeDocument(knowledgeDocument),
+    });
+    return true;
+  }
+
+  const onboardingWizardMatch = route.match(/^\/clients\/([^/]+)\/onboarding\/wizard$/);
+  if (onboardingWizardMatch && req.method === "GET") {
+    const client = await requireManageClient(ctx, onboardingWizardMatch[1]);
+    if (!client) return true;
+    const draft = await store.getDraftClient(client.id);
+    const effectiveClient = draft?.config || client;
+    const wizard = await store.getOnboardingWizard(client.id) || initialOnboardingWizard(effectiveClient);
+    if (!(await store.getOnboardingWizard(client.id))) await store.saveOnboardingWizard(wizard);
+    const runs = await store.listProvisioningRuns(client.id);
+    send(res, 200, {
+      client: safeEditableClient(effectiveClient),
+      wizard,
+      readiness: await onboardingReadiness(store, wizard),
+      provisioning: runs[0] ? {
+        ...runs[0],
+        claimToken: undefined,
+        output: publicProvisioningOutput(runs[0].output),
+      } : null,
+    });
+    return true;
+  }
+  if (onboardingWizardMatch && req.method === "PATCH") {
+    const client = await requireManageClient(ctx, onboardingWizardMatch[1]);
+    if (!client) return true;
+    const body = await readJson<{
+      currentStep?: OnboardingWizardStep;
+      completedStep?: OnboardingWizardStep;
+      data?: Partial<OnboardingWizardData>;
+      expectedVersion?: number;
+    }>(ctx);
+    if ((body.currentStep && !onboardingWizardSteps.includes(body.currentStep)) ||
+        (body.completedStep && !onboardingWizardSteps.includes(body.completedStep))) {
+      send(res, 400, { error: "invalid_onboarding_step" });
+      return true;
+    }
+    const existing = await store.getOnboardingWizard(client.id) || initialOnboardingWizard(client);
+    if (body.expectedVersion !== undefined && body.expectedVersion !== existing.version) {
+      send(res, 409, { error: "onboarding_wizard_changed", wizard: existing });
+      return true;
+    }
+    const allowedData = new Set([
+      "websiteUrl", "websiteRunId", "businessName", "location", "greeting", "tone",
+      "transferNumber", "recordingConsent", "services", "hours", "timezone",
+      "bookingRules", "phoneMode", "customerPhoneNumber", "calendarMode",
+      "existingCalendarProvider", "calendarSchedule",
+    ]);
+    const data = { ...existing.data };
+    for (const [key, value] of Object.entries(body.data || {})) {
+      if (allowedData.has(key) && value !== undefined) (data as Record<string, unknown>)[key] = value;
+    }
+    const updated: OnboardingWizardState = {
+      ...existing,
+      data,
+      currentStep: body.currentStep || existing.currentStep,
+      completedSteps: [...existing.completedSteps],
+      version: existing.version + 1,
+      updatedAt: new Date().toISOString(),
+    };
+    if (body.completedStep) {
+      const readiness = await onboardingReadiness(store, updated);
+      const stepBlockers = readiness.blockers.filter((blocker) => blocker.step === body.completedStep);
+      if (stepBlockers.length) {
+        send(res, 400, { error: "onboarding_step_incomplete", blockers: stepBlockers, wizard: updated });
+        return true;
+      }
+      if (!updated.completedSteps.includes(body.completedStep)) updated.completedSteps.push(body.completedStep);
+    }
+    await store.saveOnboardingWizard(updated);
+    send(res, 200, { wizard: updated, readiness: await onboardingReadiness(store, updated) });
+    return true;
+  }
+
+  const onboardingWizardSubmitMatch = route.match(/^\/clients\/([^/]+)\/onboarding\/wizard\/submit$/);
+  if (onboardingWizardSubmitMatch && req.method === "POST") {
+    const liveClient = await requireManageClient(ctx, onboardingWizardSubmitMatch[1]);
+    if (!liveClient) return true;
+    if (protectedAutomationTarget(liveClient)) {
+      send(res, 409, { error: "protected_blades_automation_target" });
+      return true;
+    }
+    const subscription = await store.getCurrentSubscription(liveClient.id);
+    if (!subscription || !["active", "trialing"].includes(subscription.status)) {
+      send(res, 402, { error: "active_subscription_required" });
+      return true;
+    }
+    const wizard = await store.getOnboardingWizard(liveClient.id);
+    if (!wizard) {
+      send(res, 409, { error: "onboarding_wizard_not_started" });
+      return true;
+    }
+    const readiness = await onboardingReadiness(store, wizard);
+    if (!readiness.ready) {
+      send(res, 409, { error: "onboarding_not_ready", readiness });
+      return true;
+    }
+    const transitionFrom = liveClient.onboardingStatus ?? "integrations_required";
+    if (!canTransitionOnboarding(transitionFrom, "ready_to_provision")) {
+      send(res, 409, {
+        error: `invalid_onboarding_transition:${transitionFrom}:ready_to_provision`,
+      });
+      return true;
+    }
+    const existingDraft = await store.getDraftClient(liveClient.id);
+    const client = structuredClone(existingDraft?.config || liveClient);
+    const data = wizard.data;
+    Object.assign(client, {
+      businessName: data.businessName!.trim(),
+      location: data.location?.trim() || "",
+      greeting: data.greeting!.trim(),
+      tone: data.tone!.trim(),
+      transferNumber: data.transferNumber!,
+      services: data.services!,
+      hours: data.hours!.trim(),
+      policies: [data.bookingRules!.trim(), `Recording consent: ${data.recordingConsent}`],
+      phoneAcquisitionMode: data.phoneMode === "customer_twilio" ? "customer_oauth" : "robinexis_account",
+      requestedPhoneNumber: data.phoneMode === "customer_twilio" ? data.customerPhoneNumber : undefined,
+      callingWindow: { ...client.callingWindow, tz: data.timezone! },
+      calendar: {
+        ...client.calendar,
+        provider: data.calendarMode === "managed_calcom" ? "calcom" : data.existingCalendarProvider!,
+        schedule: data.calendarSchedule,
+      },
+      onboardingStatus: "ready_to_provision",
+      published: false,
+    });
+    const now = new Date().toISOString();
+    await store.saveDraftClient({
+      id: existingDraft?.id || newId("client_revision_"),
+      clientId: client.id,
+      status: "draft",
+      config: client,
+      createdBy: actor.subject,
+      createdAt: existingDraft?.createdAt || now,
+      updatedAt: now,
+    });
+    await store.upsertClient(client);
+    wizard.currentStep = "review";
+    wizard.completedSteps = [...new Set([...wizard.completedSteps, ...onboardingWizardSteps])];
+    wizard.submittedAt = now;
+    wizard.updatedAt = now;
+    wizard.version += 1;
+    await store.saveOnboardingWizard(wizard);
+    await store.appendOperatorAudit({
+      id: newId("audit_"), clientId: client.id, actorId: actor.subject,
+      action: "onboarding.completed",
+      detail: { source: "onboarding_wizard", phoneMode: data.phoneMode, calendarMode: data.calendarMode },
+      createdAt: now,
+    });
+    const operationKey = `onboarding-${wizard.version}`;
+    const automationEnabled =
+      process.env.SAAS_PROVISIONING_ENABLED === "true" && client.id !== BLADES_HAIR_ID;
+    if (automationEnabled) {
+      await store.enqueueOnboardingJob({
+        id: newId("job_"),
+        clientId: client.id,
+        kind: "provision_client",
+        idempotencyKey: `provision:${operationKey}`,
+        status: "pending",
+        payload: { operationKey },
+        attemptCount: 0,
+        maxAttempts: 5,
+        availableAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    await notifyCustomer(store, client.id, `wizard:${wizard.version}`, `wizard-submit:${client.id}:${wizard.version}`, client.email, "Robinexis setup received\nYour readiness report is available. We will test the staged receptionist and ask for owner approval before activation.");
+    send(res, 202, {
+      client: safeEditableClient(client),
+      wizard,
+      onboardingStatus: "ready_to_provision",
+      automationEnabled,
+      message: automationEnabled
+        ? "Your setup passed prechecks and provisioning is queued."
+        : "Your setup is ready. Provider automation is disabled, so no provider changes were made.",
+    });
+    return true;
+  }
+
   const onboardingMatch = route.match(/^\/clients\/([^/]+)\/onboarding$/);
   if (onboardingMatch && req.method === "GET") {
     const client = await requireManageClient(ctx, onboardingMatch[1]);
@@ -952,7 +1957,11 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
     const runs = await store.listProvisioningRuns(client.id);
     send(res, 200, {
       client: safeEditableClient(draft?.config || client),
-      provisioning: runs[0] || null,
+      provisioning: runs[0] ? {
+        ...runs[0],
+        claimToken: undefined,
+        output: publicProvisioningOutput(runs[0].output),
+      } : null,
     });
     return true;
   }
@@ -1002,6 +2011,11 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       accountSidMasked: connection?.accountSid
         ? `${connection.accountSid.slice(0, 4)}…${connection.accountSid.slice(-4)}`
         : undefined,
+      selectedPhoneNumber: connection?.selectedPhoneNumber,
+      verifiedPhoneNumber: typeof connection?.metadata.verifiedPhoneNumber === "string"
+        ? connection.metadata.verifiedPhoneNumber
+        : undefined,
+      canReconnect: !connection || ["expired", "revoked", "failed"].includes(connection.status),
     });
     return true;
   }
@@ -1018,8 +2032,16 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
         id: existing?.id || newId("twilio_connection_"),
         clientId: client.id,
         mode: "customer_oauth",
-        status: "pending",
-        metadata: {},
+        accountSid: existing?.accountSid,
+        encryptedAccessToken: existing?.encryptedAccessToken,
+        encryptedRefreshToken: existing?.encryptedRefreshToken,
+        accessTokenExpiresAt: existing?.accessTokenExpiresAt,
+        apiKeySid: existing?.apiKeySid,
+        encryptedApiKeySecret: existing?.encryptedApiKeySecret,
+        encryptedAccountAuthToken: existing?.encryptedAccountAuthToken,
+        selectedPhoneNumber: existing?.selectedPhoneNumber,
+        status: existing?.status || "pending",
+        metadata: { ...existing?.metadata, reconnectPendingAt: now },
         createdAt: existing?.createdAt || now,
         updatedAt: now,
       });
@@ -1034,12 +2056,18 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
     const client = await requireManageClient(ctx, twilioCredentialsMatch[1]);
     if (!client) return true;
     const connection = await store.getTwilioConnection(client.id);
-    const body = await readJson<{ apiKeySid?: string; apiKeySecret?: string; twilioNumber?: string }>(ctx);
+    const body = await readJson<{
+      apiKeySid?: string;
+      apiKeySecret?: string;
+      accountAuthToken?: string;
+      twilioNumber?: string;
+    }>(ctx);
     if (
       !connection?.accountSid ||
       connection.mode !== "customer_oauth" ||
       !body.apiKeySid?.match(/^SK[0-9a-f]{32}$/i) ||
       !body.apiKeySecret ||
+      !body.accountAuthToken ||
       !body.twilioNumber?.match(/^\+[1-9]\d{7,14}$/)
     ) {
       send(res, 400, { error: "connected_account_api_key_and_number_required" });
@@ -1055,27 +2083,350 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
         send(res, 409, { error: "twilio_number_transfer_or_connect_required" });
         return true;
       }
+      const claimed = await store.findPhoneEndpointByE164(body.twilioNumber);
+      if (claimed && claimed.clientId !== client.id) {
+        send(res, 409, { error: "phone_number_claimed_by_another_tenant" });
+        return true;
+      }
+      const now = new Date().toISOString();
       connection.apiKeySid = body.apiKeySid;
       connection.encryptedApiKeySecret = encryptTwilioCredential(body.apiKeySecret);
+      connection.encryptedAccountAuthToken = encryptTwilioCredential(body.accountAuthToken);
+      connection.selectedPhoneNumber = body.twilioNumber;
       connection.status = "active";
-      connection.metadata = { ...connection.metadata, verifiedPhoneSid: owned.sid };
-      connection.updatedAt = new Date().toISOString();
+      connection.metadata = {
+        ...connection.metadata,
+        verifiedPhoneSid: owned.sid,
+        verifiedPhoneNumber: owned.phoneNumber,
+        verifiedAt: now,
+      };
+      connection.updatedAt = now;
       await store.upsertTwilioConnection(connection);
+      await store.upsertPhoneEndpoint({
+        id: `phone_twilio_${client.id}`,
+        clientId: client.id,
+        provider: "twilio",
+        e164: owned.phoneNumber,
+        providerEndpointId: owned.sid,
+        direction: "inbound",
+        status: "pending",
+        metadata: { acquisitionMode: "customer_oauth", connectionId: connection.id },
+        createdAt: now,
+        updatedAt: now,
+      });
+      await store.upsertProviderResource({
+        id: `provider_twilio_number_${client.id}`,
+        clientId: client.id,
+        provider: "twilio",
+        resourceType: "phone_number",
+        providerResourceId: owned.sid,
+        lifecycleStatus: "active",
+        metadata: { e164: owned.phoneNumber, acquisitionMode: "customer_oauth" },
+        createdAt: now,
+        updatedAt: now,
+      });
+      await store.appendOperatorAudit({
+        id: newId("audit_"), clientId: client.id, actorId: actor.subject,
+        action: "twilio.customer_number_verified",
+        detail: { phoneNumber: owned.phoneNumber, connectionId: connection.id },
+        createdAt: now,
+      });
+      await store.saveOnboardingOutbox({
+        id: newId("outbox_"), clientId: client.id, topic: "twilio.customer_number_verified",
+        idempotencyKey: `twilio-customer-number:${connection.id}:${owned.sid || owned.phoneNumber}`,
+        payload: { phoneNumber: owned.phoneNumber, connectionId: connection.id },
+        attemptCount: 0, createdAt: now, updatedAt: now,
+      });
       send(res, 200, {
         mode: connection.mode,
         status: connection.status,
         accountSidMasked: `${connection.accountSid.slice(0, 4)}…${connection.accountSid.slice(-4)}`,
+        selectedPhoneNumber: connection.selectedPhoneNumber,
+        verifiedPhoneNumber: owned.phoneNumber,
+        canReconnect: false,
       });
     } catch (error) {
       send(res, 400, { error: error instanceof Error ? error.message : "twilio_credentials_invalid" });
     }
     return true;
   }
+  const twilioNumbersMatch = route.match(/^\/clients\/([^/]+)\/twilio-connection\/numbers$/);
+  if (twilioNumbersMatch && req.method === "GET") {
+    const client = await requireManageClient(ctx, twilioNumbersMatch[1]);
+    if (!client) return true;
+    const connection = await store.getTwilioConnection(client.id);
+    if (
+      !connection?.accountSid ||
+      !connection.apiKeySid ||
+      !connection.encryptedApiKeySecret ||
+      connection.status !== "active"
+    ) {
+      send(res, 409, { error: "active_customer_twilio_connection_required" });
+      return true;
+    }
+    try {
+      const numbers = await listOwnedTwilioNumbers({
+        accountSid: connection.accountSid,
+        apiKeySid: connection.apiKeySid,
+        apiKeySecret: decryptTwilioCredential(connection.encryptedApiKeySecret),
+      });
+      send(res, 200, {
+        items: numbers.map((number) => ({
+          phoneNumber: number.phoneNumber,
+          selected: number.phoneNumber === connection.selectedPhoneNumber,
+        })),
+      });
+    } catch (error) {
+      connection.status = "expired";
+      connection.updatedAt = new Date().toISOString();
+      await store.upsertTwilioConnection(connection);
+      send(res, 401, { error: "twilio_customer_connection_reconnect_required" });
+    }
+    return true;
+  }
+  const twilioManagedMatch = route.match(/^\/clients\/([^/]+)\/twilio-connection\/managed$/);
+  if (twilioManagedMatch && req.method === "POST") {
+    const client = await requireManageClient(ctx, twilioManagedMatch[1]);
+    if (!client) return true;
+    const isOwnerOrOperator =
+      actor.role === "operator" || actor.clientRoles[client.id] === "owner";
+    if (!isOwnerOrOperator) {
+      send(res, 403, { error: "twilio_managed_owner_confirmation_required" });
+      return true;
+    }
+    if (process.env.TWILIO_MANAGED_PROVISIONING_ENABLED !== "true") {
+      send(res, 503, { error: "twilio_managed_provisioning_disabled" });
+      return true;
+    }
+    const subscription = await store.getCurrentSubscription(client.id);
+    const tier = subscription?.planTier || "starter";
+    const entitlement = planDefinition(tier).phoneProvisioning;
+    if (!entitlement.managed) {
+      send(res, 403, { error: "twilio_managed_plan_required" });
+      return true;
+    }
+    const body = await readJson<{
+      operationKey?: string;
+      countryCode?: string;
+      numberType?: "local" | "tollFree";
+      areaCode?: string;
+      contains?: string;
+      selectedPhoneNumber?: string;
+      confirmsPurchaseCost?: boolean;
+      confirmsRegulatoryRequirements?: boolean;
+      regulatoryBundleSid?: string;
+      emergencyAddressSid?: string;
+      estimatedMonthlyCostPence?: number;
+      monthlySpendCapPence?: number;
+    }>(ctx);
+    const operationKey = body.operationKey?.trim() || "";
+    const resources = await store.listProviderResources(client.id);
+    const existingNumber = resources.find((resource) =>
+      resource.provider === "twilio" &&
+      resource.resourceType === "phone_number" &&
+      resource.metadata.operationKey === operationKey &&
+      resource.lifecycleStatus !== "deleted");
+    if (existingNumber) {
+      send(res, existingNumber.lifecycleStatus === "failed" ? 409 : 200, {
+        idempotent: true,
+        status: existingNumber.lifecycleStatus === "failed" ? "needs_attention" : existingNumber.lifecycleStatus,
+        phoneNumber: existingNumber.metadata.e164,
+      });
+      return true;
+    }
+    const requestedCap = Number(body.monthlySpendCapPence ?? entitlement.monthlySpendCapPence);
+    if (requestedCap > entitlement.monthlySpendCapPence) {
+      send(res, 409, { error: "twilio_managed_plan_spend_cap_exceeded" });
+      return true;
+    }
+    const request = {
+      clientId: client.id,
+      tenantSlug: client.slug,
+      operationKey,
+      countryCode: (body.countryCode || "GB").toUpperCase(),
+      numberType: body.numberType || "local",
+      areaCode: body.areaCode,
+      contains: body.contains,
+      selectedPhoneNumber: body.selectedPhoneNumber,
+      friendlyName: `${client.businessName} main line`,
+      voiceUrl: process.env.TWILIO_MANAGED_VOICE_URL || "",
+      statusCallbackUrl: `${process.env.API_PUBLIC_BASE_URL || ""}/webhooks/twilio/number-status?clientId=${encodeURIComponent(client.id)}`,
+      confirmedBy: actor.subject,
+      confirmsPurchaseCost: body.confirmsPurchaseCost === true,
+      confirmsRegulatoryRequirements: body.confirmsRegulatoryRequirements === true,
+      regulatoryBundleSid: body.regulatoryBundleSid,
+      emergencyAddressSid: body.emergencyAddressSid,
+      monthlySpendCapPence: requestedCap,
+      estimatedMonthlyCostPence: Number(body.estimatedMonthlyCostPence ?? 0),
+    };
+    const now = new Date().toISOString();
+    try {
+      const result = await provisionManagedTwilioNumber(
+        request,
+        new TwilioHttpManagementAdapter(
+          process.env.TWILIO_ACCOUNT_SID || "",
+          process.env.TWILIO_AUTH_TOKEN || "",
+        ),
+      );
+      await store.upsertProviderResource({
+        id: `provider_twilio_subaccount_${client.id}`,
+        clientId: client.id,
+        provider: "twilio",
+        resourceType: "subaccount",
+        providerResourceId: result.subaccount.sid,
+        lifecycleStatus: "active",
+        metadata: { operationKey, friendlyName: result.subaccount.friendlyName },
+        createdAt: now,
+        updatedAt: now,
+      });
+      if (result.purchasedNumber) {
+        const claimed = await store.findPhoneEndpointByE164(result.purchasedNumber.phoneNumber);
+        if (claimed && claimed.clientId !== client.id) throw new Error("phone_number_claimed_by_another_tenant");
+        await store.upsertProviderResource({
+          id: `provider_twilio_number_${client.id}`,
+          clientId: client.id,
+          provider: "twilio",
+          resourceType: "phone_number",
+          providerResourceId: result.purchasedNumber.sid,
+          lifecycleStatus: "active",
+          metadata: {
+            operationKey, e164: result.purchasedNumber.phoneNumber,
+            acquisitionMode: "robinexis_account", neverAutoRelease: true,
+          },
+          createdAt: now,
+          updatedAt: now,
+        });
+        await store.upsertPhoneEndpoint({
+          id: `phone_twilio_${client.id}`,
+          clientId: client.id,
+          provider: "twilio",
+          e164: result.purchasedNumber.phoneNumber,
+          providerEndpointId: result.purchasedNumber.sid,
+          direction: "inbound",
+          status: "pending",
+          metadata: { acquisitionMode: "robinexis_account", operationKey },
+          createdAt: now,
+          updatedAt: now,
+        });
+        const existingConnection = await store.getTwilioConnection(client.id);
+        await store.upsertTwilioConnection({
+          id: existingConnection?.id || newId("twilio_connection_"),
+          clientId: client.id,
+          mode: "robinexis_account",
+          accountSid: result.subaccount.sid,
+          selectedPhoneNumber: result.purchasedNumber.phoneNumber,
+          regulatoryBundleSid: body.regulatoryBundleSid,
+          emergencyAddressSid: body.emergencyAddressSid,
+          monthlySpendCapPence: requestedCap,
+          purchaseConfirmedBy: actor.subject,
+          purchaseConfirmedAt: now,
+          status: "active",
+          metadata: { operationKey, providerPhoneSid: result.purchasedNumber.sid },
+          createdAt: existingConnection?.createdAt || now,
+          updatedAt: now,
+        });
+        await store.appendOperatorAudit({
+          id: newId("audit_"), clientId: client.id, actorId: actor.subject,
+          action: "twilio.managed_number_purchased",
+          detail: {
+            operationKey, phoneNumber: result.purchasedNumber.phoneNumber,
+            estimatedMonthlyCostPence: request.estimatedMonthlyCostPence,
+            monthlySpendCapPence: requestedCap,
+            regulatoryConfirmed: true,
+          },
+          createdAt: now,
+        });
+        await store.saveOnboardingOutbox({
+          id: newId("outbox_"), clientId: client.id, topic: "twilio.managed_number_purchased",
+          idempotencyKey: `twilio-managed:${operationKey}`,
+          payload: { phoneNumber: result.purchasedNumber.phoneNumber, providerPhoneSid: result.purchasedNumber.sid },
+          attemptCount: 0, createdAt: now, updatedAt: now,
+        });
+      }
+      send(res, 200, {
+        status: result.purchasedNumber ? "active" : "available",
+        availableNumbers: result.availableNumbers,
+        phoneNumber: result.purchasedNumber?.phoneNumber,
+      });
+    } catch (error) {
+      if (error instanceof TwilioManagedNeedsAttentionError && error.result.purchasedNumber) {
+        const purchased = error.result.purchasedNumber;
+        await store.upsertProviderResource({
+          id: `provider_twilio_subaccount_${client.id}`,
+          clientId: client.id,
+          provider: "twilio",
+          resourceType: "subaccount",
+          providerResourceId: error.result.subaccount.sid,
+          lifecycleStatus: "active",
+          metadata: { operationKey, friendlyName: error.result.subaccount.friendlyName },
+          createdAt: now,
+          updatedAt: now,
+        });
+        await store.upsertProviderResource({
+          id: `provider_twilio_number_${client.id}`,
+          clientId: client.id,
+          provider: "twilio",
+          resourceType: "phone_number",
+          providerResourceId: purchased.sid,
+          lifecycleStatus: "failed",
+          metadata: {
+            operationKey, e164: purchased.phoneNumber, acquisitionMode: "robinexis_account",
+            neverAutoRelease: true, needsAttention: true, compensation: "manual_callback_configuration",
+          },
+          lastError: String(error.cause),
+          createdAt: now,
+          updatedAt: now,
+        });
+        client.onboardingStatus = "needs_attention";
+        client.onboardingNotes = "A Twilio number was purchased but callback configuration needs manual attention. Do not release it automatically.";
+        await store.upsertClient(client);
+        await store.appendOperatorAudit({
+          id: newId("audit_"), clientId: client.id, actorId: actor.subject,
+          action: "twilio.managed_number_needs_attention",
+          detail: { operationKey, phoneNumber: purchased.phoneNumber, neverAutoRelease: true },
+          createdAt: now,
+        });
+        send(res, 502, { error: error.message, status: "needs_attention" });
+        return true;
+      }
+      const message = error instanceof Error ? error.message : "twilio_managed_provisioning_failed";
+      const status = message === "twilio_managed_provisioning_disabled" ? 503 : 400;
+      send(res, status, { error: message });
+    }
+    return true;
+  }
   if (twilioConnectionMatch && req.method === "DELETE") {
     const client = await requireManageClient(ctx, twilioConnectionMatch[1]);
     if (!client) return true;
-    await store.deleteTwilioConnection(client.id);
-    send(res, 200, { ok: true });
+    const connection = await store.getTwilioConnection(client.id);
+    if (connection) {
+      const now = new Date().toISOString();
+      connection.status = "revoked";
+      connection.encryptedAccessToken = undefined;
+      connection.encryptedRefreshToken = undefined;
+      connection.encryptedApiKeySecret = undefined;
+      connection.encryptedAccountAuthToken = undefined;
+      connection.accessTokenExpiresAt = undefined;
+      connection.metadata = { ...connection.metadata, disconnectedAt: now, disconnectedBy: actor.subject };
+      connection.updatedAt = now;
+      await store.upsertTwilioConnection(connection);
+      for (const endpoint of await store.listPhoneEndpoints(client.id)) {
+        if (endpoint.provider !== "twilio") continue;
+        endpoint.status = "disabled";
+        endpoint.updatedAt = now;
+        await store.upsertPhoneEndpoint(endpoint);
+      }
+      await store.appendOperatorAudit({
+        id: newId("audit_"), clientId: client.id, actorId: actor.subject,
+        action: "twilio.customer_connection_revoked", detail: { connectionId: connection.id }, createdAt: now,
+      });
+      await store.saveOnboardingOutbox({
+        id: newId("outbox_"), clientId: client.id, topic: "twilio.customer_connection_revoked",
+        idempotencyKey: `twilio-revoked:${connection.id}:${now}`,
+        payload: { connectionId: connection.id }, attemptCount: 0, createdAt: now, updatedAt: now,
+      });
+    }
+    send(res, 200, { ok: true, status: "revoked" });
     return true;
   }
 
@@ -1157,7 +2508,7 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       detail: { phoneMode: body.phoneMode, serviceCount: body.services.length },
       createdAt: now,
     });
-    await notifyCustomer(client.email, "Robinexis setup received\nYour receptionist brief is safely in our specialist queue. We will show progress and any questions in your workspace.");
+    await notifyCustomer(store, client.id, `onboarding-submit:${now}`, `onboarding-submit:${client.id}:${now}`, client.email, "Robinexis setup received\nYour receptionist brief is safely in our specialist queue. We will show progress and any questions in your workspace.");
     structuredLog("onboarding_setup_queued", { clientId: client.id, actorId: actor.subject });
     send(res, 202, {
       client: safeEditableClient(client),
@@ -1185,6 +2536,32 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       }),
       createdAt: new Date().toISOString(),
     };
+    const automaticPreActivation =
+      process.env.SAAS_PROVISIONING_ENABLED === "true" &&
+      Boolean(liveClient.onboardingStatus) &&
+      liveClient.onboardingStatus !== "active";
+    if (automaticPreActivation) {
+      client.promptVersionId = prompt.id;
+      client.published = false;
+      const now = new Date().toISOString();
+      await store.savePromptVersion(prompt);
+      await store.saveDraftClient({
+        id: existingDraft?.id || newId("client_revision_"),
+        clientId: liveClient.id,
+        status: "draft",
+        config: client,
+        createdBy: actor.subject,
+        createdAt: existingDraft?.createdAt || now,
+        updatedAt: now,
+      });
+      send(res, 202, {
+        client: safeEditableClient(client),
+        draftPublished: true,
+        activationRequired: true,
+        promptVersion: { id: prompt.id, clientId: prompt.clientId, version: prompt.version, createdAt: prompt.createdAt },
+      });
+      return true;
+    }
     client.promptVersionId = prompt.id;
     client.published = true;
     const now = new Date().toISOString();
@@ -1211,7 +2588,10 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
         updatedAt: now,
       });
     }
-    send(res, 200, { client: safeEditableClient(client), promptVersion: prompt });
+    send(res, 200, {
+      client: safeEditableClient(client),
+      promptVersion: { id: prompt.id, clientId: prompt.clientId, version: prompt.version, createdAt: prompt.createdAt },
+    });
     return true;
   }
 
@@ -1227,6 +2607,10 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
     }
     const client = await requireClient(ctx, provisioningMatch[1]);
     if (!client) return true;
+    if (protectedAutomationTarget(client)) {
+      send(res, 409, { error: "protected_blades_automation_target" });
+      return true;
+    }
     if (!process.env.ELEVENLABS_API_KEY) {
       send(res, 503, { error: "elevenlabs_not_configured" });
       return true;
@@ -1279,7 +2663,18 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
         detail: { operationKey: body.operationKey, runId: result.runId },
         createdAt: new Date().toISOString(),
       });
-      send(res, 200, result);
+      structuredLog("lifecycle_transition_completed", {
+        tenantId: client.id, operationId: body.operationKey,
+        transition: "provisioning_to_awaiting_approval", runId: result.runId,
+      });
+      await notifyCustomer(
+        store, client.id, body.operationKey, `test-ready:${client.id}:${result.runId}`,
+        client.email,
+        "Your Robinexis receptionist is ready to test\nOpen your workspace to review readiness and approve activation.",
+      );
+      send(res, 200, publicProvisioningOutput(
+        result as unknown as Record<string, unknown>,
+      ));
     } catch (error) {
       const message = error instanceof Error ? error.message : "provisioning_failed";
       await store.appendOperatorAudit({
@@ -1290,6 +2685,15 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
         detail: { operationKey: body.operationKey, error: message.slice(0, 300) },
         createdAt: new Date().toISOString(),
       });
+      structuredLog("lifecycle_transition_failed", {
+        tenantId: client.id, operationId: body.operationKey,
+        transition: "provisioning", error: message,
+      });
+      await notifyCustomer(
+        store, client.id, body.operationKey, `provisioning-failed:${client.id}:${body.operationKey}`,
+        client.email,
+        "Robinexis setup needs attention\nWe could not complete staged setup. No live routing was changed; our team will review it.",
+      );
       send(res, message === "provisioning_already_running" ? 409 : 502, { error: message });
     }
     return true;
@@ -1306,6 +2710,7 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
         status: run.status,
         step: run.step,
         error: run.error,
+        output: publicProvisioningOutput(run.output),
         createdAt: run.createdAt,
         updatedAt: run.updatedAt,
         finishedAt: run.finishedAt,
@@ -1314,14 +2719,243 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
     return true;
   }
 
+  const provisioningApprovalMatch =
+    route.match(/^\/clients\/([^/]+)\/provisioning\/([^/]+)\/approve$/);
+  if (provisioningApprovalMatch && req.method === "POST") {
+    const client = await requireClient(ctx, provisioningApprovalMatch[1]);
+    if (!client) return true;
+    if (actor.clientRoles[client.id] !== "owner") {
+      send(res, 403, { error: "workspace_owner_required" });
+      return true;
+    }
+    const runId = decodeURIComponent(provisioningApprovalMatch[2]);
+    const run = await store.getProvisioningRun(client.id, runId);
+    if (!run) {
+      send(res, 404, { error: "provisioning_run_not_found" });
+      return true;
+    }
+    if (
+      client.onboardingStatus === "active" &&
+      (await store.listOperatorAudit(client.id)).some((item) =>
+        item.id === `activation_${runId}` && item.action === "provisioning.owner_activated")
+    ) {
+      send(res, 200, { client: safeEditableClient(client), runId, activated: true, idempotent: true });
+      return true;
+    }
+    const draft = await store.getDraftClient(client.id);
+    const effective = draft?.config || client;
+    const latest = await store.latestPrompt(client.id);
+    const now = new Date().toISOString();
+    const compiledPrompt = compilePrompt({
+      client: effective,
+      direction: "inbound",
+      objective: "Answer, book, reschedule, cancel, capture a callback, or transfer safely.",
+    });
+    const profileChecksum = provisioningProfileChecksum(effective, compiledPrompt);
+    const prompt = {
+      id: newId("prompt_"),
+      clientId: client.id,
+      version: (latest?.version || 0) + 1,
+      compiled: String(run.output?.compiledPrompt || ""),
+      createdAt: now,
+    };
+    if (!prompt.compiled || run.output?.profileChecksum !== profileChecksum ||
+        prompt.compiled !== compiledPrompt) {
+      send(res, 409, {
+        error: "activation_requirements_not_met",
+        blockers: ["provisioning_profile_changed"],
+      });
+      return true;
+    }
+    const prepared = await store.prepareProvisionedClientActivation({
+      clientId: client.id,
+      runId,
+      actorId: actor.subject,
+      actorEmail: actor.email,
+      prompt,
+      profileChecksum,
+      now,
+    });
+    if (!prepared.intent) {
+      const status = prepared.error === "client_not_found"
+        ? 404
+        : prepared.error === "workspace_owner_required" ? 403 : 409;
+      send(res, status, {
+        error: prepared.error,
+        blockers: prepared.blockers,
+      });
+      return true;
+    }
+    const intent = prepared.intent;
+    let providerPhoneNumberId = intent.providerPhoneNumberId;
+    try {
+      if (intent.phoneNumber) {
+        if (!process.env.ELEVENLABS_API_KEY) {
+          throw new Error("elevenlabs_not_configured");
+        }
+        const management = new ElevenLabsManagementClient({ apiKey: process.env.ELEVENLABS_API_KEY });
+        if (!providerPhoneNumberId) {
+          const credentials = await twilioActivationCredentials(store, client);
+          const imported = await management.importTwilioNumber({
+            phoneNumber: intent.phoneNumber,
+            label: `${effective.businessName} main line`,
+            accountSid: credentials.accountSid,
+            authToken: credentials.authToken,
+            accountAuthToken: credentials.accountAuthToken,
+            enableSms: false,
+          }, `${intent.operationKey}:import`);
+          providerPhoneNumberId = imported.phone_number_id;
+          if (!providerPhoneNumberId) throw new Error("elevenlabs_phone_id_missing");
+          const importedProgress = await store.recordProvisioningActivationProgress(
+            client.id,
+            runId,
+            "imported",
+            providerPhoneNumberId,
+            new Date().toISOString(),
+          );
+          if (importedProgress.error) throw new Error(importedProgress.error);
+        }
+        await management.assignAgentToPhoneNumber(
+          providerPhoneNumberId,
+          intent.providerAgentId,
+          `${intent.operationKey}:assign`,
+        );
+        const assignedProgress = await store.recordProvisioningActivationProgress(
+          client.id,
+          runId,
+          "assigned",
+          providerPhoneNumberId,
+          new Date().toISOString(),
+        );
+        if (assignedProgress.error) throw new Error(assignedProgress.error);
+      }
+      const stablePrompt = {
+        ...prompt,
+        id: intent.promptId,
+        version: intent.promptVersion,
+      };
+      const result = await store.finalizeProvisionedClientActivation({
+        clientId: client.id,
+        runId,
+        actorId: actor.subject,
+        actorEmail: actor.email,
+        prompt: stablePrompt,
+        profileChecksum,
+        now,
+      });
+      if (!result.activated) {
+        throw new Error(`${result.error}:${(result.blockers || []).join(",")}`);
+      }
+      await notifyCustomer(store, client.id, `activation:${runId}`, `activation:${client.id}:${runId}`, client.email, "Your Robinexis receptionist is active\nYour approved configuration is now published and the staged phone routing is active.");
+      send(res, 200, { client: safeEditableClient(result.client!), runId, activated: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "activation_failed";
+      let rollback: { status: "deleted" | "failed"; error?: string } | undefined;
+      if (providerPhoneNumberId && process.env.ELEVENLABS_API_KEY) {
+        try {
+          await new ElevenLabsManagementClient({ apiKey: process.env.ELEVENLABS_API_KEY })
+            .deletePhoneNumber(providerPhoneNumberId, `${intent.operationKey}:delete-compensation`);
+          rollback = { status: "deleted" };
+        } catch (rollbackError) {
+          rollback = { status: "failed", error: String(rollbackError) };
+          structuredLog("activation_compensation_failed", {
+            clientId: client.id,
+            runId,
+            error: String(rollbackError),
+          });
+        }
+      }
+      await store.failProvisionedClientActivation(
+        client.id,
+        runId,
+        message,
+        new Date().toISOString(),
+        rollback,
+      );
+      const responseError = rollback?.status === "failed"
+        ? `activation_rollback_incomplete:${message}`
+        : message;
+      send(res, message === "elevenlabs_not_configured" ? 503 : 502, { error: responseError });
+    }
+    return true;
+  }
+
+  const provisioningActionMatch =
+    route.match(/^\/clients\/([^/]+)\/provisioning\/([^/]+)\/action$/);
+  if (provisioningActionMatch && req.method === "POST") {
+    if (!canAdministerPlatform(actor)) {
+      send(res, 403, { error: "platform_admin_required" });
+      return true;
+    }
+    const client = await requireClient(ctx, provisioningActionMatch[1]);
+    if (!client) return true;
+    const run = await store.getProvisioningRun(client.id, decodeURIComponent(provisioningActionMatch[2]));
+    if (!run) {
+      send(res, 404, { error: "provisioning_run_not_found" });
+      return true;
+    }
+    const body = await readJson<{ action?: "pause" | "retry" | "review"; note?: string }>(ctx);
+    if (!body.action || !["pause", "retry", "review"].includes(body.action)) {
+      send(res, 400, { error: "valid_provisioning_action_required" });
+      return true;
+    }
+    const now = new Date().toISOString();
+    if (body.action === "pause") {
+      run.status = "paused";
+      run.updatedAt = now;
+      await store.saveProvisioningRun(run);
+    } else if (body.action === "retry") {
+      if (run.status === "succeeded") {
+        send(res, 409, { error: "completed_provisioning_cannot_retry" });
+        return true;
+      }
+      run.status = "pending";
+      run.error = undefined;
+      run.finishedAt = undefined;
+      run.updatedAt = now;
+      await store.saveProvisioningRun(run);
+      await store.enqueueOnboardingJob({
+        id: newId("job_"), clientId: client.id, kind: "provision_client",
+        idempotencyKey: `manual-retry:${run.id}:${now}`, status: "pending",
+        payload: { operationKey: run.idempotencyKey }, attemptCount: 0, maxAttempts: 5,
+        availableAt: now, createdAt: now, updatedAt: now,
+      });
+    }
+    await store.appendOperatorAudit({
+      id: newId("audit_"), clientId: client.id, actorId: actor.subject,
+      action: `provisioning.${body.action}`,
+      detail: { runId: run.id, note: body.note?.trim().slice(0, 1_000) },
+      createdAt: now,
+    });
+    send(res, 200, {
+      run: {
+        ...run,
+        claimToken: undefined,
+        output: publicProvisioningOutput(run.output),
+      },
+    });
+    return true;
+  }
+
   const versionsMatch = route.match(/^\/clients\/([^/]+)\/prompt-versions$/);
   if (versionsMatch && req.method === "GET") {
     if (!(await requireClient(ctx, versionsMatch[1]))) return true;
     const extended = store as ExtendedStore;
-    const versions = extended.listPromptVersions
+    const rawVersions: unknown[] = extended.listPromptVersions
       ? await extended.listPromptVersions(versionsMatch[1])
-      : [await store.latestPrompt(versionsMatch[1])].filter(Boolean);
-    send(res, 200, { items: versions });
+      : [await store.latestPrompt(versionsMatch[1])];
+    const versions = rawVersions
+      .filter((version): version is { id: string; clientId: string; version: number; createdAt: string } =>
+        Boolean(version && typeof version === "object" && "id" in version && "clientId" in version &&
+          "version" in version && "createdAt" in version));
+    send(res, 200, {
+      items: versions.map((version) => ({
+        id: version.id,
+        clientId: version.clientId,
+        version: version.version,
+        createdAt: version.createdAt,
+      })),
+    });
     return true;
   }
 
@@ -1522,14 +3156,19 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
   if (route === "/calendar/slots" && req.method === "GET") {
     const client = await requireClient(ctx, clientId(url));
     if (!client) return true;
-    const probe = await probeCalcomForClient({
-      client,
-      eventTypeSlug: url.searchParams.get("eventTypeSlug") || undefined,
-    });
-    send(res, 200, {
-      ...probe,
-      items: probe.nextSlots.map((start) => ({ start })),
-    });
+    try {
+      const { tenant } = await resolveCalcomTenantConnection(store, client);
+      const start = new Date();
+      const end = new Date(start.getTime() + 7 * 86_400_000);
+      const result = await calcom.checkAvailability(tenant, {
+        eventTypeSlug: url.searchParams.get("eventTypeSlug") || client.services[0]?.slug || "15min",
+        start: start.toISOString(),
+        end: end.toISOString(),
+      });
+      send(res, 200, { configured: true, items: result.slots.map((slot) => ({ start: slot })) });
+    } catch (error) {
+      send(res, 503, { error: error instanceof Error ? error.message : "calendar_unavailable" });
+    }
     return true;
   }
 
@@ -1546,10 +3185,14 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       attendeeEmail: booking.attendeeEmail,
       sourceCallId: booking.callId,
     }));
-    const tenant = calcomTenantFromClient(client);
-    if (!tenant.apiKey || !tenant.username) {
+    let tenant;
+    try {
+      tenant = (await resolveCalcomTenantConnection(store, client)).tenant;
+    } catch {
       send(res, 200, { items: projected, configured: false, source: "projection" });
-    } else {
+      return true;
+    }
+    {
       try {
         const result = await calcom.listBookings(tenant, { status: "upcoming" });
         const remote = result.bookings.map((booking) => ({
@@ -1588,7 +3231,14 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       send(res, 400, { error: "explicit_confirmation_required" });
       return true;
     }
-    const tenant = calcomTenantFromClient(client);
+    if (
+      (calendarAction[2] === "cancel" && client.calendar.schedule?.cancellationAllowed === false) ||
+      (calendarAction[2] === "reschedule" && client.calendar.schedule?.rescheduleAllowed === false)
+    ) {
+      send(res, 403, { error: `${calendarAction[2]}_not_allowed` });
+      return true;
+    }
+    const tenant = (await resolveCalcomTenantConnection(store, client)).tenant;
     const result = calendarAction[2] === "cancel"
       ? await calcom.cancelBooking(tenant, calendarAction[1])
       : await calcom.rescheduleBooking(tenant, {
@@ -1797,10 +3447,183 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
     return true;
   }
 
+  const calcomConnectionMatch = route.match(/^\/clients\/([^/]+)\/calendar-connection$/);
+  if (calcomConnectionMatch && req.method === "GET") {
+    const client = await requireClient(ctx, calcomConnectionMatch[1]);
+    if (!client) return true;
+    const connection = (await store.listCalendarConnections(client.id))
+      .find((item) => item.provider === "calcom");
+    let availableCalendars: Array<{ id: string; name: string; provider?: string }> = [];
+    if (connection?.status === "active" && canManageClient(actor, client.id)) {
+      try {
+        const resolved = await resolveCalcomTenantConnection(store, client);
+        availableCalendars = await listCalcomDestinationCalendars(resolved.tenant.apiKey);
+      } catch {
+        // Status remains useful when provider discovery is temporarily unavailable.
+      }
+    }
+    send(res, 200, {
+      mode: connection?.mode,
+      status: connection?.status || "not_connected",
+      accountMasked: connection?.externalAccountId
+        ? `${connection.externalAccountId.slice(0, 3)}***`
+        : undefined,
+      destinationCalendarId: connection?.calendarId,
+      destinationProvider: connection?.destinationProvider,
+      availableCalendars,
+      canReconnect: !connection || ["disabled", "failed"].includes(connection.status),
+    });
+    return true;
+  }
+
+  const calcomStartMatch = route.match(/^\/clients\/([^/]+)\/calendar-connection\/oauth\/start$/);
+  if (calcomStartMatch && req.method === "POST") {
+    const client = await requireManageClient(ctx, calcomStartMatch[1]);
+    if (!client) return true;
+    try {
+      const returnTo = new URL("/app/integrations", primaryWebOrigin()).toString();
+      const state = createCalcomOAuthState({ clientId: client.id, returnTo });
+      const existing = (await store.listCalendarConnections(client.id)).find((item) => item.provider === "calcom");
+      const now = new Date().toISOString();
+      await store.upsertCalendarConnection({
+        id: existing?.id || `calendar_${client.id}_primary`,
+        clientId: client.id,
+        locationId: existing?.locationId,
+        provider: "calcom",
+        externalAccountId: existing?.externalAccountId,
+        credentialRef: existing?.credentialRef,
+        calendarId: existing?.calendarId,
+        destinationProvider: existing?.destinationProvider,
+        mode: existing?.mode || "oauth",
+        encryptedAccessToken: existing?.encryptedAccessToken,
+        encryptedRefreshToken: existing?.encryptedRefreshToken,
+        accessTokenExpiresAt: existing?.accessTokenExpiresAt,
+        scopes: existing?.scopes,
+        status: existing?.status || "pending",
+        metadata: { ...existing?.metadata, reconnectPendingAt: now },
+        createdAt: existing?.createdAt || now,
+        updatedAt: now,
+      });
+      send(res, 200, { url: calcomOAuthAuthorizeUrl(state) });
+    } catch (error) {
+      send(res, 503, { error: error instanceof Error ? error.message : "calcom_oauth_not_configured" });
+    }
+    return true;
+  }
+
+  const calcomManagedMatch = route.match(/^\/clients\/([^/]+)\/calendar-connection\/managed$/);
+  if (calcomManagedMatch && req.method === "POST") {
+    const client = await requireManageClient(ctx, calcomManagedMatch[1]);
+    if (!client) return true;
+    const previous = (await store.listCalendarConnections(client.id))
+      .find((item) => item.provider === "calcom");
+    if (previous?.mode === "managed" && previous.status === "active") {
+      send(res, 200, { status: "active", mode: "managed", idempotent: true });
+      return true;
+    }
+    try {
+      const managed = await createManagedCalcomUser({
+        clientId: client.id,
+        email: client.email,
+        name: client.businessName,
+        timeZone: client.calendar.schedule?.timezone || client.callingWindow.tz,
+      });
+      const now = new Date();
+      const connectionId = previous?.id || `calendar_${client.id}_primary`;
+      await store.upsertCalendarConnection({
+        id: connectionId,
+        clientId: client.id,
+        provider: "calcom",
+        externalAccountId: managed.username,
+        mode: "managed",
+        encryptedAccessToken: encryptCalcomCredential(managed.accessToken),
+        encryptedRefreshToken: managed.refreshToken ? encryptCalcomCredential(managed.refreshToken) : undefined,
+        accessTokenExpiresAt: new Date(now.getTime() + managed.expiresIn * 1000).toISOString(),
+        scopes: [...CALCOM_SCOPES],
+        status: "active",
+        metadata: {
+          managedAt: now.toISOString(),
+          externalUserId: managed.externalAccountId,
+          ...(managed.organizationId ? { organizationId: managed.organizationId } : {}),
+        },
+        createdAt: previous?.createdAt || now.toISOString(),
+        updatedAt: now.toISOString(),
+      });
+      await store.upsertProviderResource({
+        id: `provider_calcom_user_${client.id}`,
+        clientId: client.id,
+        provider: "calcom",
+        resourceType: "managed_user",
+        providerResourceId: managed.externalAccountId,
+        lifecycleStatus: "active",
+        metadata: { connectionId },
+        createdAt: now.toISOString(),
+        updatedAt: now.toISOString(),
+      });
+      send(res, 201, { status: "active", mode: "managed" });
+    } catch (error) {
+      send(res, 502, { error: error instanceof Error ? error.message : "calcom_managed_user_failed" });
+    }
+    return true;
+  }
+
+  const calcomDestinationMatch = route.match(/^\/clients\/([^/]+)\/calendar-connection\/destination$/);
+  if (calcomDestinationMatch && req.method === "PATCH") {
+    const client = await requireManageClient(ctx, calcomDestinationMatch[1]);
+    if (!client) return true;
+    const body = await readJson<{ calendarId?: string; provider?: string }>(ctx);
+    const connection = (await store.listCalendarConnections(client.id))
+      .find((item) => item.provider === "calcom" && item.status === "active");
+    if (!connection || !body.calendarId) {
+      send(res, 409, { error: "active_calendar_connection_required" });
+      return true;
+    }
+    const resolved = await resolveCalcomTenantConnection(store, client);
+    const calendars = await listCalcomDestinationCalendars(resolved.tenant.apiKey);
+    const selected = calendars.find((item) => item.id === body.calendarId);
+    if (!selected) {
+      send(res, 400, { error: "calendar_destination_not_available" });
+      return true;
+    }
+    connection.calendarId = selected.id;
+    connection.destinationProvider = selected.provider || body.provider;
+    connection.updatedAt = new Date().toISOString();
+    await store.upsertCalendarConnection(connection);
+    send(res, 200, { status: connection.status, destinationCalendarId: selected.id, destinationProvider: connection.destinationProvider });
+    return true;
+  }
+
+  if (calcomConnectionMatch && req.method === "DELETE") {
+    const client = await requireManageClient(ctx, calcomConnectionMatch[1]);
+    if (!client) return true;
+    const connection = (await store.listCalendarConnections(client.id)).find((item) => item.provider === "calcom");
+    let providerRevoked = false;
+    if (connection) {
+      if (connection.encryptedAccessToken && connection.mode === "oauth") {
+        try {
+          const resolved = await resolveCalcomTenantConnection(store, client);
+          providerRevoked = (await revokeCalcomOAuthToken(resolved.tenant.apiKey)).revoked;
+        } catch (error) {
+          structuredLog("calcom_revoke_skipped", { clientId: client.id, reason: String(error) });
+        }
+      }
+      connection.status = "disabled";
+      connection.encryptedAccessToken = undefined;
+      connection.encryptedRefreshToken = undefined;
+      connection.accessTokenExpiresAt = undefined;
+      connection.updatedAt = new Date().toISOString();
+      await store.upsertCalendarConnection(connection);
+    }
+    send(res, 200, { status: "disabled", providerRevoked });
+    return true;
+  }
+
   if (route === "/integrations/status" && req.method === "GET") {
     const client = await requireClient(ctx, clientId(url));
     if (!client) return true;
-    const calendar = await probeCalcomForClient({ client });
+    const connected = (await store.listCalendarConnections(client.id))
+      .some((item) => item.provider === "calcom" && item.status === "active");
+    const calendar = connected ? { ok: true, slotCount: 0 } : { ok: false, error: "Not connected" };
     send(res, 200, { items: integrationList(client, calendar) });
     return true;
   }

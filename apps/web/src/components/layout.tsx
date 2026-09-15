@@ -14,6 +14,8 @@ import {
   PlugZap,
   Settings,
   Sparkles,
+  Store,
+  ListChecks,
   Users,
   X,
 } from "lucide-react";
@@ -29,8 +31,11 @@ import { Badge } from "./ui";
 
 const navigation = [
   { label: "Overview", to: "/app", icon: LayoutDashboard, end: true },
-  { label: "Agents", to: "/app/agents", icon: Bot },
-  { label: "Playground", to: "/app/playground", icon: MessageSquareText },
+  { label: "Setup", to: "/app/setup", icon: ListChecks },
+  { label: "Business", to: "/app/business", icon: Store },
+  { label: "Receptionist", to: "/app/agents", icon: Bot },
+  { label: "Test receptionist", to: "/app/playground", icon: MessageSquareText },
+  { label: "Phone", to: "/app/phone", icon: PhoneCall },
   { label: "Calls", to: "/app/calls", icon: PhoneCall },
   { label: "Analytics", to: "/app/analytics", icon: BarChart3 },
   { label: "Calendar", to: "/app/calendar", icon: CalendarDays },
@@ -48,6 +53,7 @@ const secondary = [
 
 const adminNavigation = [
   { label: "Operations", to: "/admin", icon: LayoutDashboard, end: true },
+  { label: "Control plane", to: "/admin/control-plane", icon: ListChecks },
   { label: "Add client", to: "/admin/clients/new", icon: Users },
   { label: "Plan & usage", to: "/admin/billing", icon: CircleDollarSign },
 ] as const;

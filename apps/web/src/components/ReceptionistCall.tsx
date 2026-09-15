@@ -103,6 +103,8 @@ function ReceptionistCallExperience({
   });
 
   const connected = conversation.status === "connected";
+  const conversationRef = useRef(conversation);
+  conversationRef.current = conversation;
   const uiStatus = deriveReceptionistStatus({
     connection: conversation.status,
     phase,
@@ -126,7 +128,7 @@ function ReceptionistCallExperience({
 
   useEffect(() => {
     if (!connected) {
-      setLevels({ input: 0, output: 0 });
+      setLevels((current) => current.input || current.output ? { input: 0, output: 0 } : current);
       return;
     }
     let frame = 0;
@@ -134,15 +136,15 @@ function ReceptionistCallExperience({
       if (now - lastLevelUpdate.current > 80) {
         lastLevelUpdate.current = now;
         setLevels({
-          input: conversation.getInputVolume(),
-          output: conversation.getOutputVolume(),
+          input: conversationRef.current.getInputVolume(),
+          output: conversationRef.current.getOutputVolume(),
         });
       }
       frame = requestAnimationFrame(sample);
     };
     frame = requestAnimationFrame(sample);
     return () => cancelAnimationFrame(frame);
-  }, [connected, conversation]);
+  }, [connected]);
 
   const startCall = useCallback(async () => {
     setLocalError("");

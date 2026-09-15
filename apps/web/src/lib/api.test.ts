@@ -54,6 +54,28 @@ describe("Robinexis API client", () => {
       status: 401,
     }));
   });
+
+  it("uses token-free Cal.com connection endpoints", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        status: "active",
+        mode: "oauth",
+        accountMasked: "sal***",
+        availableCalendars: [{ id: "calendar_1", name: "Bookings" }],
+        canReconnect: false,
+      }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        status: "active",
+        destinationCalendarId: "calendar_1",
+        availableCalendars: [],
+        canReconnect: false,
+      }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    const connection = await api.calendarConnection("client_1");
+    expect(connection).toMatchObject({ status: "active", accountMasked: "sal***" });
+    await api.selectCalendarDestination("client_1", "calendar_1", "google_calendar");
+    expect(fetchMock.mock.calls[1]?.[0]).toEqual(expect.stringContaining("/calendar-connection/destination"));
+    expect(String(fetchMock.mock.calls[1]?.[1]?.body)).not.toMatch(/token|secret/i);
+  });
 });
 
 describe("format helpers", () => {

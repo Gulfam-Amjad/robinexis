@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { MemoryStore } from "./memory.js";
+import { canTransitionOnboarding } from "./lifecycle.js";
 import type {
   BookingRecord,
   CallSession,
   CreditLedgerEntry,
   Location,
+  OnboardingJob,
   ProvisioningRun,
   StripeEvent,
   UserProfile,
@@ -134,5 +136,61 @@ describe("MemoryStore SaaS foundation", () => {
     expect(await store.claimProvisioningRun({ ...run, id: "run-duplicate" })).toBe(false);
     await store.saveProvisioningRun({ ...run, status: "succeeded", output: { agentId: "agent-1" } });
     expect((await store.getProvisioningRunByIdempotency("client-a", "signup-1"))?.status).toBe("succeeded");
+  });
+
+  it("reclaims only stale provisioning runs and guards writes by claim token", async () => {
+    const store = new MemoryStore();
+    const started = "2026-09-15T10:00:00.000Z";
+    const run: ProvisioningRun = {
+      id: "run-stale", clientId: "client-a", idempotencyKey: "stale-operation",
+      status: "running", input: {}, claimToken: "first-owner",
+      createdAt: started, updatedAt: started,
+    };
+    expect(await store.claimProvisioningRun(run, "first-owner", 300)).toBe(true);
+    expect(await store.claimProvisioningRun({
+      ...run, id: "run-healthy-attempt", updatedAt: "2026-09-15T10:04:59.000Z",
+    }, "second-owner", 300)).toBe(false);
+    const staleAttempt: ProvisioningRun = {
+      ...run, id: "run-stale-attempt", updatedAt: "2026-09-15T10:05:01.000Z",
+    };
+    expect(await store.claimProvisioningRun(staleAttempt, "second-owner", 300)).toBe(true);
+    expect(await store.saveProvisioningRun(
+      { ...staleAttempt, status: "failed", claimToken: "first-owner" },
+      "first-owner",
+    )).toBe(false);
+    expect((await store.getProvisioningRunByIdempotency("client-a", "stale-operation"))?.claimToken)
+      .toBe("second-owner");
+  });
+
+  it("validates canonical and legacy onboarding transitions", () => {
+    expect(canTransitionOnboarding("details_required", "integrations_required")).toBe(true);
+    expect(canTransitionOnboarding("integrations_required", "provisioning")).toBe(false);
+    expect(canTransitionOnboarding("setup_queued", "provisioning")).toBe(true);
+    expect(canTransitionOnboarding("failed", "ready_to_provision")).toBe(true);
+  });
+
+  it("leases, retries and dead-letters onboarding jobs idempotently", async () => {
+    const store = new MemoryStore();
+    const job: OnboardingJob = {
+      id: "job-1", clientId: "client-a", kind: "provision_client",
+      idempotencyKey: "signup-1", status: "pending", payload: { operationKey: "signup-1" },
+      attemptCount: 0, maxAttempts: 2, availableAt: now, createdAt: now, updatedAt: now,
+    };
+    expect(await store.enqueueOnboardingJob(job)).toBe(true);
+    expect(await store.enqueueOnboardingJob({ ...job, id: "job-2" })).toBe(false);
+    const [leased] = await store.claimOnboardingJobs("worker-a", now, 60, 1);
+    expect(leased).toMatchObject({ status: "leased", attemptCount: 1, leaseOwner: "worker-a" });
+    const heartbeatAt = new Date(Date.parse(now) + 30_000).toISOString();
+    expect(await store.extendOnboardingJobLease("client-a", job.id, "worker-a", heartbeatAt, 600))
+      .toBe(true);
+    expect((await store.getOnboardingJob("client-a", job.id))?.leaseExpiresAt)
+      .toBe(new Date(Date.parse(heartbeatAt) + 600_000).toISOString());
+    expect(await store.completeOnboardingJob("client-a", job.id, "worker-b", now)).toBe(false);
+    expect(await store.retryOnboardingJob("client-a", job.id, "worker-a", "temporary", now)).toBe(true);
+    const [second] = await store.claimOnboardingJobs("worker-b", now, 60, 1);
+    expect(second.attemptCount).toBe(2);
+    expect(await store.retryOnboardingJob("client-a", job.id, "worker-b", "again", now)).toBe(false);
+    expect(await store.deadLetterOnboardingJob("client-a", job.id, "worker-b", "exhausted", now)).toBe(true);
+    expect((await store.getOnboardingJob("client-a", job.id))?.status).toBe("dead_letter");
   });
 });

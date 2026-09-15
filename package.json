@@ -22,7 +22,7 @@
     "test:web": "vitest run --config vitest.web.config.ts",
     "test:e2e": "playwright test",
     "typecheck": "tsc -p tsconfig.json && npm run typecheck -w @robinexis/web",
-    "build:web": "npm run build -w @robinexis/web",
+    "build:web": "npm run check:csp-api-origin && npm run build -w @robinexis/web",
     "build:api": "npm run build -w @robinexis/api",
     "build:worker": "npm run build -w @robinexis/worker",
     "build:migrate": "npm run build:migrate -w @robinexis/database",
@@ -35,7 +35,10 @@
     "db:migrate": "tsx packages/database/src/migrate.cli.ts",
     "db:seed": "tsx packages/database/src/seed.ts",
     "check:calcom": "tsx packages/integrations/src/verifyCalendar.ts",
-    "check:brain": "tsx packages/brain/src/verifyBrain.ts"
+    "check:brain": "tsx packages/brain/src/verifyBrain.ts",
+    "check:csp-api-origin": "node scripts/verify-csp-api-origin.mjs",
+    "test:csp-api-origin": "node --test scripts/verify-csp-api-origin.test.mjs",
+    "backup:postgres": "node scripts/backup-postgres.mjs"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
