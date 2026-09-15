@@ -6,6 +6,7 @@ export async function sendNotification(input: {
   to: string;
   template: string;
   bookingUid?: string;
+  idempotencyKey?: string;
 }): Promise<{ providerId: string }> {
   if (input.channel === "email") {
     if (process.env.EMAIL_DELIVERY_MODE === "log") {
@@ -17,7 +18,11 @@ export async function sendNotification(input: {
     if (!apiKey || !from) throw new Error("email_provider_not_configured");
     const response = await fetch("https://api.resend.com/emails", {
       method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        ...(input.idempotencyKey ? { "Idempotency-Key": input.idempotencyKey } : {}),
+      },
       body: JSON.stringify({
         from,
         to: [input.to],

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { sortClientsForDashboard } from "./clientOrder.js";
+import { assertOnboardingTransition } from "./lifecycle.js";
 import type {
   AgentInstance,
   AnalyticsRange,
@@ -14,6 +15,7 @@ import type {
   ClientConfigRevision,
   ClientConfig,
   CreditLedgerEntry,
+  ExtractedFact,
   KnowledgeChunk,
   KnowledgeDocument,
   KnowledgeDocumentListOptions,
@@ -21,11 +23,21 @@ import type {
   KnowledgeSearchResult,
   Location,
   OperatorAuditRecord,
+  OnboardingGap,
+  OnboardingJob,
+  OnboardingOutboxEvent,
+  OnboardingWizardState,
+  NotificationDelivery,
+  NotificationHealth,
   OutboundJob,
   Page,
   PhoneEndpoint,
   PromptVersion,
   ProvisioningRun,
+  ProvisioningActivationInput,
+  ProvisioningActivationIntent,
+  ProvisioningActivationResult,
+  ProviderResource,
   StripeEvent,
   Subscription,
   Suppression,
@@ -34,6 +46,8 @@ import type {
   TwilioConnection,
   UsageCounters,
   UserProfile,
+  WebsiteExtractionRun,
+  WebsiteSource,
   WorkspaceMembership,
 } from "./types.js";
 
@@ -78,6 +92,7 @@ export interface PlatformStore {
   listAgentInstances(clientId: string): Promise<AgentInstance[]>;
   upsertAgentInstance(agent: AgentInstance): Promise<void>;
   listPhoneEndpoints(clientId: string): Promise<PhoneEndpoint[]>;
+  findPhoneEndpointByE164(e164: string): Promise<PhoneEndpoint | undefined>;
   upsertPhoneEndpoint(endpoint: PhoneEndpoint): Promise<void>;
   getTwilioConnection(clientId: string): Promise<TwilioConnection | undefined>;
   upsertTwilioConnection(connection: TwilioConnection): Promise<void>;
@@ -103,11 +118,59 @@ export interface PlatformStore {
   getCreditBalance(clientId: string): Promise<number>;
   appendOperatorAudit(record: OperatorAuditRecord): Promise<boolean>;
   listOperatorAudit(clientId?: string, limit?: number): Promise<OperatorAuditRecord[]>;
-  claimProvisioningRun(run: ProvisioningRun): Promise<boolean>;
-  saveProvisioningRun(run: ProvisioningRun): Promise<void>;
+  claimProvisioningRun(run: ProvisioningRun, claimToken?: string, staleAfterSeconds?: number): Promise<boolean>;
+  renewProvisioningRunClaim(clientId: string, runId: string, claimToken: string, now: string): Promise<boolean>;
+  saveProvisioningRun(run: ProvisioningRun, claimToken?: string): Promise<boolean>;
   getProvisioningRun(clientId: string, id: string): Promise<ProvisioningRun | undefined>;
   getProvisioningRunByIdempotency(clientId: string, key: string): Promise<ProvisioningRun | undefined>;
   listProvisioningRuns(clientId: string): Promise<ProvisioningRun[]>;
+  prepareProvisionedClientActivation(input: ProvisioningActivationInput): Promise<ProvisioningActivationResult>;
+  recordProvisioningActivationProgress(
+    clientId: string,
+    runId: string,
+    assignmentStatus: "imported" | "assigned",
+    providerPhoneNumberId: string,
+    now: string,
+  ): Promise<ProvisioningActivationResult>;
+  finalizeProvisionedClientActivation(input: ProvisioningActivationInput): Promise<ProvisioningActivationResult>;
+  failProvisionedClientActivation(
+    clientId: string,
+    runId: string,
+    error: string,
+    now: string,
+    rollback?: { status: "deleted" | "failed"; error?: string },
+  ): Promise<void>;
+  enqueueOnboardingJob(job: OnboardingJob): Promise<boolean>;
+  claimOnboardingJobs(workerId: string, nowIso: string, leaseSeconds: number, limit: number): Promise<OnboardingJob[]>;
+  extendOnboardingJobLease(clientId: string, id: string, workerId: string, nowIso: string, leaseSeconds: number): Promise<boolean>;
+  completeOnboardingJob(clientId: string, id: string, workerId: string, completedAt: string): Promise<boolean>;
+  retryOnboardingJob(clientId: string, id: string, workerId: string, error: string, availableAt: string): Promise<boolean>;
+  deadLetterOnboardingJob(clientId: string, id: string, workerId: string, error: string, failedAt: string): Promise<boolean>;
+  getOnboardingJob(clientId: string, id: string): Promise<OnboardingJob | undefined>;
+  saveOnboardingOutbox(event: OnboardingOutboxEvent): Promise<boolean>;
+  listPendingOnboardingOutbox(limit?: number): Promise<OnboardingOutboxEvent[]>;
+  enqueueNotification(delivery: NotificationDelivery): Promise<boolean>;
+  claimNotifications(workerId: string, nowIso: string, leaseSeconds: number, limit: number): Promise<NotificationDelivery[]>;
+  completeNotification(clientId: string, id: string, workerId: string, providerId: string, deliveredAt: string): Promise<boolean>;
+  retryNotification(clientId: string, id: string, workerId: string, error: string, nextAttemptAt: string): Promise<boolean>;
+  deadLetterNotification(clientId: string, id: string, workerId: string, error: string, failedAt: string): Promise<boolean>;
+  listNotifications(clientId: string, limit?: number): Promise<NotificationDelivery[]>;
+  notificationHealth(nowIso: string): Promise<NotificationHealth>;
+  saveWebsiteSource(source: WebsiteSource): Promise<void>;
+  getWebsiteSource(clientId: string, id: string): Promise<WebsiteSource | undefined>;
+  listWebsiteSources(clientId: string): Promise<WebsiteSource[]>;
+  saveWebsiteExtractionRun(run: WebsiteExtractionRun): Promise<void>;
+  getWebsiteExtractionRun(clientId: string, id: string): Promise<WebsiteExtractionRun | undefined>;
+  listWebsiteExtractionRuns(clientId: string, sourceId?: string): Promise<WebsiteExtractionRun[]>;
+  replaceExtractedFacts(clientId: string, runId: string, facts: ExtractedFact[]): Promise<void>;
+  saveExtractedFact(fact: ExtractedFact): Promise<void>;
+  listExtractedFacts(clientId: string, runId: string): Promise<ExtractedFact[]>;
+  upsertOnboardingGap(gap: OnboardingGap): Promise<void>;
+  listOnboardingGaps(clientId: string): Promise<OnboardingGap[]>;
+  getOnboardingWizard(clientId: string): Promise<OnboardingWizardState | undefined>;
+  saveOnboardingWizard(state: OnboardingWizardState): Promise<void>;
+  upsertProviderResource(resource: ProviderResource): Promise<void>;
+  listProviderResources(clientId: string): Promise<ProviderResource[]>;
 
   getPromptVersion(id: string): Promise<PromptVersion | undefined>;
   latestPrompt(clientId: string): Promise<PromptVersion | undefined>;
@@ -151,6 +214,7 @@ export interface PlatformStore {
   searchKnowledge(clientId: string, embedding: number[], options?: KnowledgeSearchOptions): Promise<KnowledgeSearchResult[]>;
 
   deleteCallsOlderThan(isoDate: string): Promise<number>;
+  deleteLifecycleDataOlderThan(isoDate: string): Promise<Record<string, number>>;
 }
 
 function monthKey(d = new Date()) {
@@ -184,6 +248,15 @@ export class MemoryStore implements PlatformStore {
   creditLedger = new Map<string, CreditLedgerEntry>();
   operatorAudit = new Map<string, OperatorAuditRecord>();
   provisioningRuns = new Map<string, ProvisioningRun>();
+  onboardingJobs = new Map<string, OnboardingJob>();
+  onboardingOutbox = new Map<string, OnboardingOutboxEvent>();
+  notifications = new Map<string, NotificationDelivery>();
+  websiteSources = new Map<string, WebsiteSource>();
+  websiteExtractionRuns = new Map<string, WebsiteExtractionRun>();
+  extractedFacts = new Map<string, ExtractedFact>();
+  onboardingGaps = new Map<string, OnboardingGap>();
+  onboardingWizards = new Map<string, OnboardingWizardState>();
+  providerResources = new Map<string, ProviderResource>();
 
   async getClient(id: string) {
     return this.clients.get(id);
@@ -314,7 +387,12 @@ export class MemoryStore implements PlatformStore {
   async listPhoneEndpoints(clientId: string) {
     return [...this.phoneEndpoints.values()].filter((endpoint) => endpoint.clientId === clientId);
   }
+  async findPhoneEndpointByE164(e164: string) {
+    return [...this.phoneEndpoints.values()].find((endpoint) => endpoint.e164 === e164);
+  }
   async upsertPhoneEndpoint(endpoint: PhoneEndpoint) {
+    const claimed = await this.findPhoneEndpointByE164(endpoint.e164);
+    if (claimed && claimed.clientId !== endpoint.clientId) throw new Error("phone_number_claimed_by_another_tenant");
     if (endpoint.locationId && !this.locations.has(`${endpoint.clientId}:${endpoint.locationId}`)) throw new Error("location_not_found");
     if (endpoint.agentInstanceId && !this.agentInstances.has(`${endpoint.clientId}:${endpoint.agentInstanceId}`)) {
       throw new Error("agent_instance_not_found");
@@ -430,13 +508,42 @@ export class MemoryStore implements PlatformStore {
       .slice(0, limit)
       .map((record) => structuredClone(record));
   }
-  async claimProvisioningRun(run: ProvisioningRun) {
-    if (await this.getProvisioningRunByIdempotency(run.clientId, run.idempotencyKey)) return false;
+  async claimProvisioningRun(run: ProvisioningRun, claimToken = run.claimToken || "", staleAfterSeconds = 1800) {
+    const existing = await this.getProvisioningRunByIdempotency(run.clientId, run.idempotencyKey);
+    if (existing) {
+      const staleBefore = new Date(Date.parse(run.updatedAt) - staleAfterSeconds * 1000).toISOString();
+      const reclaimable = ["pending", "failed"].includes(existing.status) ||
+        (existing.status === "running" && existing.updatedAt <= staleBefore);
+      if (!reclaimable) return false;
+      Object.assign(existing, {
+        status: "running",
+        error: undefined,
+        finishedAt: undefined,
+        startedAt: run.startedAt || existing.startedAt || run.updatedAt,
+        updatedAt: run.updatedAt,
+        claimToken,
+      });
+      run.id = existing.id;
+      run.output = structuredClone(existing.output);
+      run.startedAt = existing.startedAt;
+      run.claimToken = claimToken;
+      return true;
+    }
+    run.claimToken = claimToken;
     this.provisioningRuns.set(`${run.clientId}:${run.id}`, { ...run });
     return true;
   }
-  async saveProvisioningRun(run: ProvisioningRun) {
+  async renewProvisioningRunClaim(clientId: string, runId: string, claimToken: string, now: string) {
+    const run = this.provisioningRuns.get(`${clientId}:${runId}`);
+    if (!run || run.status !== "running" || run.claimToken !== claimToken) return false;
+    run.updatedAt = now;
+    return true;
+  }
+  async saveProvisioningRun(run: ProvisioningRun, claimToken?: string) {
+    const existing = this.provisioningRuns.get(`${run.clientId}:${run.id}`);
+    if (claimToken && existing?.claimToken !== claimToken) return false;
     this.provisioningRuns.set(`${run.clientId}:${run.id}`, { ...run });
+    return true;
   }
   async getProvisioningRun(clientId: string, id: string) {
     return this.provisioningRuns.get(`${clientId}:${id}`);
@@ -448,6 +555,445 @@ export class MemoryStore implements PlatformStore {
     return [...this.provisioningRuns.values()]
       .filter((run) => run.clientId === clientId)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+  async prepareProvisionedClientActivation(input: ProvisioningActivationInput): Promise<ProvisioningActivationResult> {
+    const client = this.clients.get(input.clientId);
+    const run = this.provisioningRuns.get(`${input.clientId}:${input.runId}`);
+    const subscription = [...this.subscriptions.values()]
+      .filter((item) => item.clientId === input.clientId)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+    const blockers: string[] = [];
+    if (!client) return { activated: false, error: "client_not_found" };
+    const owner = [...this.memberships.values()].some((membership) =>
+      membership.clientId === input.clientId &&
+      membership.email === input.actorEmail.trim().toLowerCase() &&
+      membership.role === "owner");
+    if (!owner) return { activated: false, error: "workspace_owner_required" };
+    if (client.onboardingStatus === "active" && this.operatorAudit.has(`activation_${input.runId}`)) {
+      return { activated: true, client: structuredClone(client) };
+    }
+    if (!subscription || !["active", "trialing"].includes(subscription.status)) blockers.push("billing_inactive");
+    const wizard = this.onboardingWizards.get(input.clientId);
+    const websiteRun = wizard?.data.websiteRunId
+      ? this.websiteExtractionRuns.get(`${input.clientId}:${wizard.data.websiteRunId}`)
+      : undefined;
+    const source = websiteRun
+      ? this.websiteSources.get(`${input.clientId}:${websiteRun.sourceId}`)
+      : undefined;
+    const facts = websiteRun
+      ? [...this.extractedFacts.values()].filter((item) =>
+        item.clientId === input.clientId && item.extractionRunId === websiteRun.id)
+      : [];
+    if (
+      !wizard?.submittedAt ||
+      !websiteRun ||
+      !facts.length ||
+      facts.some((item) => item.reviewStatus === "extracted") ||
+      source?.metadata.approvedRunId !== websiteRun.id
+    ) blockers.push("required_facts_unconfirmed");
+    if ([...this.onboardingGaps.values()].some((gap) =>
+      gap.clientId === input.clientId && gap.status === "open")) blockers.push("hard_gaps_open");
+    const twilio = this.twilioConnections.get(input.clientId);
+    if (twilio?.status !== "active") blockers.push("twilio_inactive");
+    if (
+      run?.output?.phoneNumber &&
+      twilio?.mode === "customer_oauth" &&
+      !twilio.encryptedAccountAuthToken
+    ) blockers.push("twilio_account_auth_token_missing");
+    if (![...this.calendarConnections.values()].some((item) =>
+      item.clientId === input.clientId && item.status === "active")) blockers.push("calendar_inactive");
+    const report = run?.output?.readinessReport as { passed?: boolean } | undefined;
+    const existingIntent = run?.output?.activationIntent as ProvisioningActivationIntent | undefined;
+    const resumableActivation = Boolean(
+      existingIntent && ["activation_pending", "activating", "paused"].includes(run?.status || ""),
+    );
+    if (!resumableActivation && (run?.status !== "succeeded" || run.step !== "awaiting_approval")) {
+      blockers.push("provisioning_incomplete");
+    }
+    if (!report?.passed) blockers.push("synthetic_tests_failed");
+    if (run?.output?.profileChecksum !== input.profileChecksum ||
+        run?.output?.compiledPrompt !== input.prompt.compiled) blockers.push("provisioning_profile_changed");
+    if (!["awaiting_approval", "needs_attention"].includes(client.onboardingStatus || "")) {
+      blockers.push("not_awaiting_approval");
+    }
+    if (blockers.length) return { activated: false, error: "activation_requirements_not_met", blockers };
+    const providerAgentId = String(run?.output?.elevenlabsAgentId || "");
+    const phoneNumber = String(run?.output?.phoneNumber || "") || undefined;
+    if (!providerAgentId) {
+      return { activated: false, error: "activation_requirements_not_met", blockers: ["provider_agent_missing"] };
+    }
+    if (existingIntent?.rollbackStatus === "failed") {
+      return { activated: false, error: "activation_requirements_not_met", blockers: ["provider_rollback_incomplete"] };
+    }
+    if (client.onboardingStatus === "needs_attention") {
+      assertOnboardingTransition("needs_attention", "awaiting_approval");
+      client.onboardingStatus = "awaiting_approval";
+      await this.upsertClient(client);
+    }
+    const phoneEndpoint = phoneNumber
+      ? [...this.phoneEndpoints.values()].find((endpoint) =>
+        endpoint.clientId === input.clientId &&
+        endpoint.e164 === phoneNumber &&
+        endpoint.direction !== "outbound")
+      : undefined;
+    const intent: ProvisioningActivationIntent = existingIntent || {
+      promptId: input.prompt.id,
+      promptVersion: input.prompt.version,
+      profileChecksum: input.profileChecksum,
+      operationKey: `activate:${input.runId}`,
+      providerAgentId,
+      phoneNumber,
+      phoneEndpointId: phoneEndpoint?.id,
+      assignmentStatus: phoneNumber ? "pending" : "assigned",
+    };
+    if (intent.rollbackStatus === "deleted") {
+      intent.providerPhoneNumberId = undefined;
+      intent.assignmentStatus = intent.phoneNumber ? "pending" : "assigned";
+      intent.rollbackStatus = undefined;
+      intent.rollbackError = undefined;
+    }
+    run!.status = "activation_pending";
+    run!.step = "activation_pending";
+    run!.error = undefined;
+    run!.output = { ...run!.output, activationIntent: intent };
+    run!.updatedAt = input.now;
+    await this.saveProvisioningRun(run!);
+    return { activated: false, client: structuredClone(client), intent: structuredClone(intent) };
+  }
+
+  async recordProvisioningActivationProgress(
+    clientId: string,
+    runId: string,
+    assignmentStatus: "imported" | "assigned",
+    providerPhoneNumberId: string,
+    now: string,
+  ): Promise<ProvisioningActivationResult> {
+    const run = this.provisioningRuns.get(`${clientId}:${runId}`);
+    const intent = run?.output?.activationIntent as ProvisioningActivationIntent | undefined;
+    if (!run || !intent || !["activation_pending", "activating"].includes(run.status)) {
+      return { activated: false, error: "activation_intent_missing" };
+    }
+    intent.providerPhoneNumberId = providerPhoneNumberId;
+    intent.assignmentStatus = assignmentStatus;
+    run.status = "activating";
+    run.step = assignmentStatus === "assigned" ? "provider_assignment_confirmed" : "provider_phone_imported";
+    run.updatedAt = now;
+    await this.saveProvisioningRun(run);
+    return { activated: false, intent: structuredClone(intent) };
+  }
+
+  async finalizeProvisionedClientActivation(input: ProvisioningActivationInput): Promise<ProvisioningActivationResult> {
+    const client = this.clients.get(input.clientId);
+    const run = this.provisioningRuns.get(`${input.clientId}:${input.runId}`);
+    const intent = run?.output?.activationIntent as ProvisioningActivationIntent | undefined;
+    if (!client) return { activated: false, error: "client_not_found" };
+    if (client.onboardingStatus === "active" && this.operatorAudit.has(`activation_${input.runId}`)) {
+      return { activated: true, client: structuredClone(client), intent };
+    }
+    if (
+      !run ||
+      !["activation_pending", "activating"].includes(run.status) ||
+      intent?.assignmentStatus !== "assigned" ||
+      intent.profileChecksum !== input.profileChecksum ||
+      input.prompt.compiled !== run.output?.compiledPrompt
+    ) {
+      return { activated: false, error: "activation_finalize_requirements_not_met" };
+    }
+    assertOnboardingTransition(client.onboardingStatus, "active");
+
+    const draft = [...this.clientRevisions.values()].find((item) =>
+      item.clientId === input.clientId && item.status === "draft");
+    const activated = structuredClone(draft?.config || client);
+    activated.elevenlabsAgentId = client.elevenlabsAgentId;
+    activated.inboundNumbers = [...client.inboundNumbers];
+    activated.published = true;
+    activated.onboardingStatus = "active";
+    activated.promptVersionId = input.prompt.id;
+    this.clients.set(activated.id, activated);
+    if (draft) {
+      draft.status = "published";
+      draft.publishedAt = input.now;
+      draft.updatedAt = input.now;
+    }
+    this.prompts = this.prompts.filter((item) => item.id !== input.prompt.id);
+    this.prompts.push(structuredClone(input.prompt));
+    for (const agent of this.agentInstances.values()) {
+      if (agent.clientId === input.clientId && agent.providerAgentId) agent.status = "active";
+    }
+    for (const endpoint of this.phoneEndpoints.values()) {
+      if (endpoint.clientId === input.clientId && endpoint.id === intent.phoneEndpointId) {
+        endpoint.status = "active";
+        endpoint.providerEndpointId = intent.providerPhoneNumberId;
+        endpoint.metadata = {
+          ...endpoint.metadata,
+          assignmentStatus: "active",
+          activatedRunId: input.runId,
+        };
+      }
+    }
+    this.operatorAudit.set(`activation_${input.runId}`, {
+      id: `activation_${input.runId}`,
+      clientId: input.clientId,
+      actorId: input.actorId,
+      action: "provisioning.owner_activated",
+      detail: { runId: input.runId, promptVersionId: input.prompt.id },
+      createdAt: input.now,
+    });
+    run.status = "succeeded";
+    run.step = "active";
+    run.finishedAt = input.now;
+    run.updatedAt = input.now;
+    await this.saveProvisioningRun(run);
+    return { activated: true, client: structuredClone(activated), intent: structuredClone(intent) };
+  }
+
+  async failProvisionedClientActivation(
+    clientId: string,
+    runId: string,
+    error: string,
+    now: string,
+    rollback?: { status: "deleted" | "failed"; error?: string },
+  ) {
+    const run = this.provisioningRuns.get(`${clientId}:${runId}`);
+    const client = this.clients.get(clientId);
+    const intent = run?.output?.activationIntent as ProvisioningActivationIntent | undefined;
+    if (run && intent) {
+      intent.assignmentStatus = "needs_attention";
+      intent.rollbackStatus = rollback?.status;
+      intent.rollbackError = rollback?.error?.slice(0, 300);
+      run.status = "paused";
+      run.step = "activation_needs_attention";
+      run.error = error.slice(0, 500);
+      run.updatedAt = now;
+      await this.saveProvisioningRun(run);
+    }
+    if (client && client.onboardingStatus !== "active") {
+      client.onboardingStatus = "needs_attention";
+      await this.upsertClient(client);
+    }
+    for (const endpoint of this.phoneEndpoints.values()) {
+      if (endpoint.clientId !== clientId || endpoint.id !== intent?.phoneEndpointId) continue;
+      endpoint.status = "pending";
+      endpoint.metadata = {
+        ...endpoint.metadata,
+        assignmentStatus: "needs_attention",
+        activationError: error.slice(0, 300),
+        rollbackStatus: rollback?.status,
+      };
+      endpoint.updatedAt = now;
+    }
+  }
+  async enqueueOnboardingJob(job: OnboardingJob) {
+    if ([...this.onboardingJobs.values()].some((item) =>
+      item.clientId === job.clientId && item.idempotencyKey === job.idempotencyKey)) return false;
+    this.onboardingJobs.set(`${job.clientId}:${job.id}`, structuredClone(job));
+    return true;
+  }
+  async claimOnboardingJobs(workerId: string, nowIso: string, leaseSeconds: number, limit: number) {
+    const leaseExpiresAt = new Date(Date.parse(nowIso) + Math.max(1, leaseSeconds) * 1000).toISOString();
+    const jobs = [...this.onboardingJobs.values()]
+      .filter((job) => job.attemptCount < job.maxAttempts && job.availableAt <= nowIso)
+      .filter((job) => job.status === "pending" || (
+        job.status === "leased" && Boolean(job.leaseExpiresAt && job.leaseExpiresAt <= nowIso)
+      ))
+      .sort((a, b) => a.availableAt.localeCompare(b.availableAt) || a.createdAt.localeCompare(b.createdAt))
+      .slice(0, Math.max(0, limit));
+    for (const job of jobs) {
+      job.status = "leased";
+      job.leaseOwner = workerId;
+      job.leaseExpiresAt = leaseExpiresAt;
+      job.attemptCount += 1;
+      job.updatedAt = nowIso;
+    }
+    return jobs.map((job) => structuredClone(job));
+  }
+  async extendOnboardingJobLease(
+    clientId: string,
+    id: string,
+    workerId: string,
+    nowIso: string,
+    leaseSeconds: number,
+  ) {
+    const job = this.onboardingJobs.get(`${clientId}:${id}`);
+    if (!job || job.status !== "leased" || job.leaseOwner !== workerId) return false;
+    job.leaseExpiresAt = new Date(Date.parse(nowIso) + Math.max(1, leaseSeconds) * 1000).toISOString();
+    job.updatedAt = nowIso;
+    return true;
+  }
+  async completeOnboardingJob(clientId: string, id: string, workerId: string, completedAt: string) {
+    const job = this.onboardingJobs.get(`${clientId}:${id}`);
+    if (!job || job.status !== "leased" || job.leaseOwner !== workerId) return false;
+    Object.assign(job, { status: "completed", completedAt, updatedAt: completedAt });
+    delete job.leaseOwner;
+    delete job.leaseExpiresAt;
+    return true;
+  }
+  async retryOnboardingJob(clientId: string, id: string, workerId: string, error: string, availableAt: string) {
+    const job = this.onboardingJobs.get(`${clientId}:${id}`);
+    if (!job || job.status !== "leased" || job.leaseOwner !== workerId || job.attemptCount >= job.maxAttempts) return false;
+    Object.assign(job, { status: "pending", lastError: error, availableAt, updatedAt: availableAt });
+    delete job.leaseOwner;
+    delete job.leaseExpiresAt;
+    return true;
+  }
+  async deadLetterOnboardingJob(clientId: string, id: string, workerId: string, error: string, failedAt: string) {
+    const job = this.onboardingJobs.get(`${clientId}:${id}`);
+    if (!job || job.status !== "leased" || job.leaseOwner !== workerId) return false;
+    Object.assign(job, { status: "dead_letter", lastError: error, updatedAt: failedAt });
+    delete job.leaseOwner;
+    delete job.leaseExpiresAt;
+    return true;
+  }
+  async getOnboardingJob(clientId: string, id: string) {
+    const job = this.onboardingJobs.get(`${clientId}:${id}`);
+    return job ? structuredClone(job) : undefined;
+  }
+  async saveOnboardingOutbox(event: OnboardingOutboxEvent) {
+    if ([...this.onboardingOutbox.values()].some((item) =>
+      item.clientId === event.clientId && item.idempotencyKey === event.idempotencyKey)) return false;
+    this.onboardingOutbox.set(`${event.clientId}:${event.id}`, structuredClone(event));
+    return true;
+  }
+  async listPendingOnboardingOutbox(limit = 100) {
+    return [...this.onboardingOutbox.values()].filter((event) => !event.publishedAt)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(0, limit).map((event) => structuredClone(event));
+  }
+  async enqueueNotification(delivery: NotificationDelivery) {
+    if ([...this.notifications.values()].some((item) =>
+      item.clientId === delivery.clientId && item.idempotencyKey === delivery.idempotencyKey)) return false;
+    this.notifications.set(`${delivery.clientId}:${delivery.id}`, structuredClone(delivery));
+    return true;
+  }
+  async claimNotifications(workerId: string, nowIso: string, leaseSeconds: number, limit: number) {
+    const leaseExpiresAt = new Date(Date.parse(nowIso) + Math.max(1, leaseSeconds) * 1000).toISOString();
+    const deliveries = [...this.notifications.values()]
+      .filter((item) => item.attemptCount < item.maxAttempts && item.nextAttemptAt <= nowIso)
+      .filter((item) => item.status === "pending" ||
+        (item.status === "leased" && Boolean(item.leaseExpiresAt && item.leaseExpiresAt <= nowIso)))
+      .sort((a, b) => a.nextAttemptAt.localeCompare(b.nextAttemptAt) || a.createdAt.localeCompare(b.createdAt))
+      .slice(0, Math.max(0, limit));
+    for (const item of deliveries) {
+      Object.assign(item, {
+        status: "leased", leaseOwner: workerId, leaseExpiresAt,
+        attemptCount: item.attemptCount + 1, updatedAt: nowIso,
+      });
+    }
+    return deliveries.map((item) => structuredClone(item));
+  }
+  async completeNotification(clientId: string, id: string, workerId: string, providerId: string, deliveredAt: string) {
+    const item = this.notifications.get(`${clientId}:${id}`);
+    if (!item || item.status !== "leased" || item.leaseOwner !== workerId) return false;
+    Object.assign(item, { status: "delivered", providerId, deliveredAt, updatedAt: deliveredAt });
+    delete item.leaseOwner;
+    delete item.leaseExpiresAt;
+    return true;
+  }
+  async retryNotification(clientId: string, id: string, workerId: string, error: string, nextAttemptAt: string) {
+    const item = this.notifications.get(`${clientId}:${id}`);
+    if (!item || item.status !== "leased" || item.leaseOwner !== workerId || item.attemptCount >= item.maxAttempts) return false;
+    Object.assign(item, { status: "pending", lastError: error, nextAttemptAt, updatedAt: nextAttemptAt });
+    delete item.leaseOwner;
+    delete item.leaseExpiresAt;
+    return true;
+  }
+  async deadLetterNotification(clientId: string, id: string, workerId: string, error: string, failedAt: string) {
+    const item = this.notifications.get(`${clientId}:${id}`);
+    if (!item || item.status !== "leased" || item.leaseOwner !== workerId) return false;
+    Object.assign(item, { status: "dead_letter", lastError: error, deadLetteredAt: failedAt, updatedAt: failedAt });
+    delete item.leaseOwner;
+    delete item.leaseExpiresAt;
+    return true;
+  }
+  async listNotifications(clientId: string, limit = 100) {
+    return [...this.notifications.values()].filter((item) => item.clientId === clientId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit)
+      .map((item) => structuredClone(item));
+  }
+  async notificationHealth(nowIso: string) {
+    const all = [...this.notifications.values()];
+    const pending = all.filter((item) => item.status === "pending");
+    const yesterday = new Date(Date.parse(nowIso) - 86_400_000).toISOString();
+    return {
+      pending: pending.length,
+      leased: all.filter((item) => item.status === "leased").length,
+      deadLetter: all.filter((item) => item.status === "dead_letter").length,
+      oldestPendingAt: pending.sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0]?.createdAt,
+      providerFailures24h: all.filter((item) => item.lastError && item.updatedAt >= yesterday).length,
+    };
+  }
+  async saveWebsiteSource(source: WebsiteSource) {
+    this.websiteSources.set(`${source.clientId}:${source.id}`, structuredClone(source));
+  }
+  async getWebsiteSource(clientId: string, id: string) {
+    const source = this.websiteSources.get(`${clientId}:${id}`);
+    return source ? structuredClone(source) : undefined;
+  }
+  async listWebsiteSources(clientId: string) {
+    return [...this.websiteSources.values()].filter((source) => source.clientId === clientId);
+  }
+  async saveWebsiteExtractionRun(run: WebsiteExtractionRun) {
+    if (!this.websiteSources.has(`${run.clientId}:${run.sourceId}`)) throw new Error("website_source_not_found");
+    this.websiteExtractionRuns.set(`${run.clientId}:${run.id}`, structuredClone(run));
+  }
+  async getWebsiteExtractionRun(clientId: string, id: string) {
+    const run = this.websiteExtractionRuns.get(`${clientId}:${id}`);
+    return run ? structuredClone(run) : undefined;
+  }
+  async listWebsiteExtractionRuns(clientId: string, sourceId?: string) {
+    return [...this.websiteExtractionRuns.values()]
+      .filter((run) => run.clientId === clientId && (!sourceId || run.sourceId === sourceId));
+  }
+  async replaceExtractedFacts(clientId: string, runId: string, facts: ExtractedFact[]) {
+    if (!this.websiteExtractionRuns.has(`${clientId}:${runId}`)) throw new Error("extraction_run_not_found");
+    if (facts.some((fact) => fact.clientId !== clientId || fact.extractionRunId !== runId)) throw new Error("tenant_mismatch");
+    for (const [key, fact] of this.extractedFacts) {
+      if (fact.clientId === clientId && fact.extractionRunId === runId) this.extractedFacts.delete(key);
+    }
+    for (const fact of facts) this.extractedFacts.set(`${clientId}:${fact.id}`, structuredClone(fact));
+  }
+  async saveExtractedFact(fact: ExtractedFact) {
+    const run = this.websiteExtractionRuns.get(`${fact.clientId}:${fact.extractionRunId}`);
+    if (!run) throw new Error("extraction_run_not_found");
+    const existing = this.extractedFacts.get(`${fact.clientId}:${fact.id}`);
+    if (existing && existing.extractionRunId !== fact.extractionRunId) throw new Error("extracted_fact_conflict");
+    this.extractedFacts.set(`${fact.clientId}:${fact.id}`, structuredClone(fact));
+  }
+  async listExtractedFacts(clientId: string, runId: string) {
+    return [...this.extractedFacts.values()].filter((fact) => fact.clientId === clientId && fact.extractionRunId === runId);
+  }
+  async upsertOnboardingGap(gap: OnboardingGap) {
+    this.onboardingGaps.set(`${gap.clientId}:${gap.id}`, structuredClone(gap));
+  }
+  async listOnboardingGaps(clientId: string) {
+    return [...this.onboardingGaps.values()].filter((gap) => gap.clientId === clientId);
+  }
+  async getOnboardingWizard(clientId: string) {
+    const state = this.onboardingWizards.get(clientId);
+    return state ? structuredClone(state) : undefined;
+  }
+  async saveOnboardingWizard(state: OnboardingWizardState) {
+    if (!this.clients.has(state.clientId)) throw new Error("client_not_found");
+    const existing = this.onboardingWizards.get(state.clientId);
+    if (existing && state.version < existing.version) throw new Error("onboarding_wizard_version_conflict");
+    this.onboardingWizards.set(state.clientId, structuredClone(state));
+  }
+  async upsertProviderResource(resource: ProviderResource) {
+    if (resource.providerResourceId) {
+      for (const [key, existing] of this.providerResources) {
+        if (
+          existing.clientId === resource.clientId &&
+          existing.provider === resource.provider &&
+          existing.providerResourceId === resource.providerResourceId &&
+          existing.id !== resource.id
+        ) {
+          this.providerResources.delete(key);
+        }
+      }
+    }
+    this.providerResources.set(`${resource.clientId}:${resource.id}`, structuredClone(resource));
+  }
+  async listProviderResources(clientId: string) {
+    return [...this.providerResources.values()].filter((resource) => resource.clientId === clientId);
   }
   async getPromptVersion(id: string) {
     return this.prompts.find((p) => p.id === id);
@@ -665,6 +1211,32 @@ export class MemoryStore implements PlatformStore {
       }
     }
     return n;
+  }
+  async deleteLifecycleDataOlderThan(isoDate: string) {
+    const counts = { websiteFacts: 0, providerResources: 0, jobs: 0, notifications: 0 };
+    for (const [key, fact] of this.extractedFacts) {
+      const run = this.websiteExtractionRuns.get(`${fact.clientId}:${fact.extractionRunId}`);
+      const source = run && this.websiteSources.get(`${fact.clientId}:${run.sourceId}`);
+      if (fact.createdAt < isoDate && source && ["disabled", "failed"].includes(source.status)) {
+        this.extractedFacts.delete(key); counts.websiteFacts++;
+      }
+    }
+    for (const [key, resource] of this.providerResources) {
+      if (resource.lifecycleStatus === "deleted" && resource.updatedAt < isoDate) {
+        this.providerResources.delete(key); counts.providerResources++;
+      }
+    }
+    for (const [key, job] of this.onboardingJobs) {
+      if (["completed", "dead_letter"].includes(job.status) && job.updatedAt < isoDate) {
+        this.onboardingJobs.delete(key); counts.jobs++;
+      }
+    }
+    for (const [key, delivery] of this.notifications) {
+      if (["delivered", "dead_letter"].includes(delivery.status) && delivery.updatedAt < isoDate) {
+        this.notifications.delete(key); counts.notifications++;
+      }
+    }
+    return counts;
   }
 
   private analyticsCalls(clientId: string, range: AnalyticsRange) {

@@ -4,6 +4,7 @@ import { newId } from "@robinexis/database";
 import { requiredFieldsFor, type CallOutcome, type ToolName } from "@robinexis/tool-contracts";
 import { guestEmailFromPhone, normalizeSpokenPhone } from "./phone.js";
 import * as calcom from "./calcom.js";
+import { resolveCalcomTenantConnection } from "./calcomAuth.js";
 import { appendVerifiedCalendarNote } from "./calendarNotes.js";
 import type { FakeCalendar } from "./fakeCalendar.js";
 
@@ -22,6 +23,9 @@ export function createToolExecutor(opts: {
   calendar?: FakeCalendar;
   confirmations?: { sms?: string[] };
   resolveSecret?: (reference: string) => string | undefined;
+  resolveCalendarTenant?: (
+    client: Parameters<ToolExecutor>[0]["client"],
+  ) => Promise<calcom.CalcomTenant>;
   notify?: (input: {
     channel: "sms" | "email";
     to: string;
@@ -122,7 +126,11 @@ export function createToolExecutor(opts: {
     client: Parameters<ToolExecutor>[0]["client"],
   ): Promise<unknown> {
     const cal = opts.calendar;
-    const live = tenantFromClient(client, resolveSecret);
+    const live = opts.resolveCalendarTenant
+      ? await opts.resolveCalendarTenant(client)
+      : opts.calendar
+        ? tenantFromClient(client, resolveSecret)
+        : (await resolveCalcomTenantConnection(opts.store, client)).tenant;
 
     switch (name) {
       case "get_business_info": {
@@ -214,12 +222,14 @@ export function createToolExecutor(opts: {
       }
       case "reschedule_booking": {
         if (input.callerConfirmed !== true) throw new Error("caller_confirmation_required");
+        if (client.calendar.schedule?.rescheduleAllowed === false) throw new Error("rescheduling_not_allowed");
         if (!cal && (!live.apiKey || !live.username)) throw new Error("calendar_not_configured");
         if (cal) return cal.reschedule(String(input.bookingUid), String(input.newStart));
         return calcom.rescheduleBooking(live, { bookingUid: String(input.bookingUid), start: String(input.newStart) });
       }
       case "cancel_booking": {
         if (input.callerConfirmed !== true) throw new Error("caller_confirmation_required");
+        if (client.calendar.schedule?.cancellationAllowed === false) throw new Error("cancellation_not_allowed");
         if (!cal && (!live.apiKey || !live.username)) throw new Error("calendar_not_configured");
         if (cal) return cal.cancel(String(input.bookingUid));
         return calcom.cancelBooking(live, String(input.bookingUid));

@@ -11,7 +11,7 @@ Caller → Twilio → ElevenLabs → authenticated Railway REST → Cal.com
 | Service | Purpose | Build | Start |
 |---|---|---|---|
 | `@robinexis/api` | `/health`, tenant-bound booking tools, product APIs, signed provider webhooks | `node scripts/railway.mjs api` | `node scripts/railway.mjs migrate && node scripts/railway.mjs start` |
-| `@robinexis/worker` | Stripe reconciliation and data retention only | `node scripts/railway.mjs worker` | `npm run start -w @robinexis/worker` |
+| `@robinexis/worker` | Stripe reconciliation, retention, and gated provisioning retries | `node scripts/railway.mjs worker` | `npm run start -w @robinexis/worker` |
 
 The public API is `https://robinexisapi-production-3836.up.railway.app`.
 
@@ -41,16 +41,27 @@ node scripts/railway-setup.mjs --apply
 
 Review the IaC plan before applying it. `.railway/railway.ts` now describes only the active API and worker. The retired gateway service is intentionally retained outside IaC as a rollback shell; do not let a config apply delete it.
 
+Before applying, create a paid Railway Redis resource and expose its private `REDIS_URL` to both services.
+The API has `RATE_LIMIT_REDIS_REQUIRED=true`: `/health` intentionally returns 503 if Redis is absent or
+unhealthy. Do not add API replicas until a shared-rate-limit load test passes. Paid Railway provisioning,
+Redis creation, variables, alert rules, and replica settings remain manual operations.
+
+Paste secrets through Railway Variables, never into IaC. Required safety contracts are `DATABASE_URL`,
+`REDIS_URL`, `SENTRY_DSN`, Resend (`RESEND_API_KEY`, `NOTIFICATION_FROM_EMAIL`), Firecrawl
+(`FIRECRAWL_API_KEY`), and the Cal.com existing-account and Platform OAuth variables documented in
+`.env.example`. Keep `SAAS_PROVISIONING_ENABLED=false`.
+
 ## Verify
 
 1. `GET /health` returns `status: ok`, `service: api`, a build version and `checks.database: ok`.
-2. An invalid `x-voice-tool-secret` receives `401`.
-3. Availability returns only Cal.com slots.
-4. Booking requires the system conversation ID, explicit confirmation and a still-free slot.
-5. Repeating the same conversation/slot returns the original booking UID.
-6. A signed ElevenLabs transcription webhook creates or updates the call under the tenant mapped by `agent_id`; an unknown agent is ignored.
-7. A salon user can only list workspaces in `workspace_memberships`; operators can switch across all tenants.
-8. Twilio `+447446868067` remains assigned to ElevenLabs, not Railway.
+2. The worker `GET /health` returns `status: ok` after its first successful tick; Railway marks a stale loop unhealthy.
+3. An invalid `x-voice-tool-secret` receives `401`.
+4. Availability returns only Cal.com slots.
+5. Booking requires the system conversation ID, explicit confirmation and a still-free slot.
+6. Repeating the same conversation/slot returns the original booking UID.
+7. A signed ElevenLabs transcription webhook creates or updates the call under the tenant mapped by `agent_id`; an unknown agent is ignored.
+8. A salon user can only list workspaces in `workspace_memberships`; operators can switch across all tenants.
+9. Twilio `+447446868067` remains assigned to ElevenLabs, not Railway.
 
 ## Retired gateway rollback
 

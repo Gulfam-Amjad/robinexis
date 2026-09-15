@@ -1,3 +1,5 @@
+import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { config as loadEnv } from "dotenv";
@@ -7,7 +9,7 @@ import {
   seedStore,
   structuredLog,
 } from "@robinexis/database";
-import { reconcileStripe } from "@robinexis/integrations";
+import { processNotificationDeliveries, reconcileStripe } from "@robinexis/integrations";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 loadEnv({ path: path.resolve(__dirname, "../../../.env") });
@@ -15,7 +17,42 @@ loadDatabaseEnv();
 
 const POLL = Number(process.env.WORKER_POLL_MS) || 15_000;
 const RETENTION_DAYS = Math.max(1, Number(process.env.DATA_RETENTION_DAYS) || 90);
+const HEALTH_PORT = Number(process.env.WORKER_HEALTH_PORT || process.env.PORT) || 8082;
+const WORKER_ID = `${os.hostname()}:${process.pid}`;
+const PROVISIONING_LEASE_SECONDS = 30 * 60;
+const PROVISIONING_HEARTBEAT_MS = 60_000;
+const HEALTH_STALE_MS = Math.max(
+  POLL * 4,
+  Number(process.env.WORKER_HEALTH_STALE_MS) || 120_000,
+);
 let lastReconcile = 0;
+let lastTickSucceededAt = 0;
+let lastTickFailedAt = 0;
+let tickRunning = false;
+
+const healthServer = http.createServer((req, res) => {
+  if (req.url !== "/health") {
+    res.writeHead(404, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    res.end(JSON.stringify({ error: "not_found" }));
+    return;
+  }
+  const now = Date.now();
+  const healthy = lastTickSucceededAt > 0 && now - lastTickSucceededAt <= HEALTH_STALE_MS;
+  res.writeHead(healthy ? 200 : 503, {
+    "Content-Type": "application/json",
+    "Cache-Control": "no-store",
+  });
+  res.end(JSON.stringify({
+    status: healthy ? "ok" : "degraded",
+    service: "worker",
+    checks: {
+      loop: healthy ? "ok" : lastTickSucceededAt ? "stale" : "starting",
+      running: tickRunning,
+    },
+    lastSuccessAgeMs: lastTickSucceededAt ? now - lastTickSucceededAt : null,
+    lastFailureAgeMs: lastTickFailedAt ? now - lastTickFailedAt : null,
+  }));
+});
 
 async function retryProvisioningRuns(store: Awaited<ReturnType<typeof getStore>>) {
   if (process.env.SAAS_PROVISIONING_ENABLED !== "true") return;
@@ -25,21 +62,37 @@ async function retryProvisioningRuns(store: Awaited<ReturnType<typeof getStore>>
     structuredLog("provisioning_retry_skipped", { reason: "api_base_or_worker_secret_missing" });
     return;
   }
-  for (const client of await store.listClients()) {
-    if (!["provisioning", "failed"].includes(client.onboardingStatus || "")) continue;
-    const run = (await store.listProvisioningRuns(client.id))[0];
-    if (!run || run.status === "succeeded" || run.status === "cancelled") continue;
-    const age = Date.now() - Date.parse(run.updatedAt);
-    if (run.status === "running" && age < 5 * 60_000) continue;
-    const attempts = Number(run.input.workerAttempts || 0);
-    if (attempts >= 5) continue;
-    if (run.status === "running") {
-      run.status = "failed";
-      run.error = "stale_provisioning_run_recovered";
+  const now = new Date();
+  const jobs = await store.claimOnboardingJobs(
+    WORKER_ID,
+    now.toISOString(),
+    PROVISIONING_LEASE_SECONDS,
+    10,
+  );
+  for (const job of jobs) {
+    if (job.kind !== "provision_client") {
+      await store.deadLetterOnboardingJob(job.clientId, job.id, WORKER_ID, "unsupported_job_kind", now.toISOString());
+      continue;
     }
-    run.input.workerAttempts = attempts + 1;
-    run.updatedAt = new Date().toISOString();
-    await store.saveProvisioningRun(run);
+    const client = await store.getClient(job.clientId);
+    const operationKey = String(job.payload.operationKey || "");
+    if (!client || !operationKey) {
+      await store.deadLetterOnboardingJob(job.clientId, job.id, WORKER_ID, "invalid_provisioning_job", now.toISOString());
+      continue;
+    }
+    const heartbeat = setInterval(() => {
+      void store.extendOnboardingJobLease(
+        job.clientId,
+        job.id,
+        WORKER_ID,
+        new Date().toISOString(),
+        PROVISIONING_LEASE_SECONDS,
+      ).catch((error) => structuredLog("provisioning_lease_heartbeat_failed", {
+        clientId: job.clientId,
+        jobId: job.id,
+        error: String(error),
+      }));
+    }, PROVISIONING_HEARTBEAT_MS);
     try {
       const response = await fetch(
         `${apiBaseUrl}/internal/provisioning/retry`,
@@ -51,7 +104,7 @@ async function retryProvisioningRuns(store: Awaited<ReturnType<typeof getStore>>
           },
           body: JSON.stringify({
             clientId: client.id,
-            operationKey: run.idempotencyKey,
+            operationKey,
             phoneMode: client.phoneAcquisitionMode,
             twilioNumber: client.requestedPhoneNumber,
           }),
@@ -59,16 +112,51 @@ async function retryProvisioningRuns(store: Awaited<ReturnType<typeof getStore>>
       );
       structuredLog("provisioning_retry", {
         clientId: client.id,
-        runId: run.id,
-        attempt: attempts + 1,
+        jobId: job.id,
+        attempt: job.attemptCount,
         status: response.status,
       });
+      if (response.ok) {
+        await store.completeOnboardingJob(job.clientId, job.id, WORKER_ID, new Date().toISOString());
+      } else {
+        const body = await response.json().catch(() => ({})) as { error?: string };
+        if (body.error === "provisioning_paused") {
+          await store.completeOnboardingJob(job.clientId, job.id, WORKER_ID, new Date().toISOString());
+          structuredLog("provisioning_job_paused", { clientId: client.id, jobId: job.id });
+          continue;
+        }
+        if (body.error?.startsWith("synthetic_booking_cleanup_failed:")) {
+          await store.deadLetterOnboardingJob(
+            job.clientId,
+            job.id,
+            WORKER_ID,
+            body.error,
+            new Date().toISOString(),
+          );
+          structuredLog("provisioning_cleanup_dead_lettered", {
+            clientId: client.id,
+            jobId: job.id,
+          });
+          continue;
+        }
+        const error = `provisioning_api_${response.status}`;
+        const retryAt = new Date(Date.now() + Math.min(60, 2 ** job.attemptCount) * 60_000).toISOString();
+        const retried = await store.retryOnboardingJob(job.clientId, job.id, WORKER_ID, error, retryAt);
+        if (!retried) await store.deadLetterOnboardingJob(job.clientId, job.id, WORKER_ID, error, new Date().toISOString());
+      }
     } catch (error) {
       structuredLog("provisioning_retry_error", {
         clientId: client.id,
-        runId: run.id,
+        jobId: job.id,
         error: String(error),
       });
+      const retryAt = new Date(Date.now() + Math.min(60, 2 ** job.attemptCount) * 60_000).toISOString();
+      const retried = await store.retryOnboardingJob(job.clientId, job.id, WORKER_ID, String(error), retryAt);
+      if (!retried) {
+        await store.deadLetterOnboardingJob(job.clientId, job.id, WORKER_ID, String(error), new Date().toISOString());
+      }
+    } finally {
+      clearInterval(heartbeat);
     }
   }
 }
@@ -92,6 +180,10 @@ async function tick() {
     const cutoff = new Date(Date.now() - RETENTION_DAYS * 86400000).toISOString();
     const n = await store.deleteCallsOlderThan(cutoff);
     if (n) structuredLog("retention_deleted_calls", { n, cutoff });
+    const lifecycle = await store.deleteLifecycleDataOlderThan(cutoff);
+    if (Object.values(lifecycle).some(Boolean)) {
+      structuredLog("retention_deleted_lifecycle_data", { ...lifecycle, cutoff });
+    }
   }
 
   for (const job of await store.dueJobs(now.toISOString(), 20)) {
@@ -101,22 +193,48 @@ async function tick() {
     await store.saveJob(job);
     structuredLog("outbound_retired", { jobId: job.id, clientId: job.clientId });
   }
+  const notifications = await processNotificationDeliveries({ store, workerId: WORKER_ID, now });
+  if (notifications.delivered || notifications.retried || notifications.deadLettered) {
+    structuredLog("notification_outbox_processed", { ...notifications, workerId: WORKER_ID });
+  }
   await retryProvisioningRuns(store);
 }
 
+async function runTick() {
+  if (tickRunning) return;
+  tickRunning = true;
+  try {
+    await tick();
+    lastTickSucceededAt = Date.now();
+  } catch (error) {
+    lastTickFailedAt = Date.now();
+    throw error;
+  } finally {
+    tickRunning = false;
+  }
+}
+
 async function main() {
+  healthServer.listen(HEALTH_PORT, () => {
+    structuredLog("worker_health_listening", { port: HEALTH_PORT, path: "/health" });
+  });
   const store = await getStore();
   if ((await store.listClients()).length === 0) await seedStore(store);
   structuredLog("worker_start", {
     pollMs: POLL,
+    healthPort: HEALTH_PORT,
+    healthStaleMs: HEALTH_STALE_MS,
     retentionDays: RETENTION_DAYS,
     stripeConfigured: Boolean(process.env.STRIPE_SECRET_KEY),
   });
   if (!process.env.STRIPE_SECRET_KEY) {
     structuredLog("worker_misconfigured", { missing: ["STRIPE_SECRET_KEY"] });
   }
-  await tick();
-  setInterval(() => void tick().catch((err) => structuredLog("worker_tick_error", { err: String(err) })), POLL);
+  await runTick();
+  setInterval(
+    () => void runTick().catch((err) => structuredLog("worker_tick_error", { err: String(err) })),
+    POLL,
+  );
 }
 
 main().catch((e) => {

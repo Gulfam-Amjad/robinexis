@@ -18,14 +18,21 @@ import {
 } from "@robinexis/integrations";
 import { applyCors, authenticateRequest, describeAuthMode } from "./auth.js";
 import { ingestElevenLabsWebhook } from "./elevenLabsWebhook.js";
-import { completeTwilioOAuthCallback, handleProductRoute } from "./productRoutes.js";
+import {
+  completeCalcomOAuthCallback,
+  completeTwilioOAuthCallback,
+  handleProductRoute,
+  publicPlansResponse,
+} from "./productRoutes.js";
 import { checkDistributedRateLimit, checkRateLimit, limitForPath, requestIp } from "./rateLimit.js";
 import { provisionClientAgent } from "./provisioningService.js";
 import { runVoiceTool, voiceToolClientIdForRequest } from "./voiceToolRoutes.js";
+import { initializeBackendTelemetry } from "./telemetry.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 loadEnv({ path: path.resolve(__dirname, "../../../.env") });
 loadEnv({ path: path.join(process.cwd(), ".env") });
+initializeBackendTelemetry();
 
 const PORT = Number(process.env.API_PORT || process.env.PORT) || 8081;
 const BUILD_VERSION = process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 12) || process.env.BUILD_VERSION || "local";
@@ -167,8 +174,32 @@ const server = http.createServer(async (req, res) => {
         });
         send(res, 200, result);
       } catch (error) {
-        send(res, 502, { error: error instanceof Error ? error.message : "provisioning_retry_failed" });
+        const message = error instanceof Error ? error.message : "provisioning_retry_failed";
+        send(res, message === "provisioning_paused" ? 409 : 502, { error: message });
       }
+      return;
+    }
+    if (url.pathname === "/webhooks/twilio/number-status" && req.method === "POST") {
+      const raw = await readRaw(req);
+      const form = new URLSearchParams(raw.toString());
+      const params = Object.fromEntries(form.entries());
+      const signature = String(req.headers["x-twilio-signature"] ?? "");
+      const signedUrl = `${process.env.API_PUBLIC_BASE_URL || `https://${req.headers.host}`}${url.pathname}${url.search}`;
+      if (!validateTwilioWebhook(signature, signedUrl, params)) {
+        send(res, 403, { error: "invalid_signature" });
+        return;
+      }
+      const clientId = url.searchParams.get("clientId") || "";
+      if (!clientId || !(await store.getClient(clientId))) {
+        send(res, 404, { error: "client_not_found" });
+        return;
+      }
+      structuredLog("twilio_managed_number_status", {
+        clientId,
+        phoneNumberSid: form.get("PhoneNumberSid"),
+        status: form.get("Status") || form.get("PhoneNumberStatus") || "unknown",
+      });
+      send(res, 200, { ok: true });
       return;
     }
     if (url.pathname === "/webhooks/twilio/status" && req.method === "POST") {
@@ -230,6 +261,26 @@ const server = http.createServer(async (req, res) => {
       }
       return;
     }
+    if (url.pathname === "/oauth/calcom/callback" && req.method === "GET") {
+      try {
+        const destination = await completeCalcomOAuthCallback(store, {
+          code: url.searchParams.get("code") || "",
+          state: url.searchParams.get("state") || "",
+        });
+        res.writeHead(302, { Location: destination, "Cache-Control": "no-store" });
+        res.end();
+      } catch (error) {
+        structuredLog("calcom_oauth_callback_failed", { error: String(error) });
+        const fallback = new URL(
+          "/app/integrations",
+          (process.env.WEB_ORIGIN || "https://app.robinexis.com").split(",")[0].trim(),
+        );
+        fallback.searchParams.set("calcom", "failed");
+        res.writeHead(302, { Location: fallback.toString(), "Cache-Control": "no-store" });
+        res.end();
+      }
+      return;
+    }
     const voiceToolMatch = url.pathname.match(
       /^\/api\/v1\/voice-tools\/(check-availability|create-booking)$/,
     );
@@ -250,6 +301,10 @@ const server = http.createServer(async (req, res) => {
         { store, clientId: authorizedClientId },
       );
       send(res, result.status, result.body);
+      return;
+    }
+    if (url.pathname === "/api/v1/plans" && req.method === "GET") {
+      send(res, 200, publicPlansResponse());
       return;
     }
     if (url.pathname === "/api/v1" || url.pathname.startsWith("/api/v1/")) {

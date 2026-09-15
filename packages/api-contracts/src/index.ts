@@ -15,11 +15,14 @@ export type WorkspaceRole = "owner" | "manager" | "viewer";
 export type OnboardingStatus =
   | "payment_required"
   | "details_required"
+  | "integrations_required"
   | "setup_queued"
   | "setup_in_progress"
   | "needs_attention"
   | "ready_to_provision"
   | "provisioning"
+  | "testing"
+  | "awaiting_approval"
   | "active"
   | "failed";
 export type PhoneAcquisitionMode = "robinexis_account" | "customer_oauth";
@@ -28,6 +31,9 @@ export interface PublicTwilioConnection {
   mode: PhoneAcquisitionMode;
   status: "not_connected" | "pending" | "credentials_required" | "active" | "expired" | "revoked" | "failed";
   accountSidMasked?: string;
+  selectedPhoneNumber?: string;
+  verifiedPhoneNumber?: string;
+  canReconnect: boolean;
 }
 
 export interface SessionActor {
@@ -69,6 +75,17 @@ export interface ClientService {
   durationMinutes: number;
 }
 
+export interface CalendarScheduleSettings {
+  timezone: string;
+  weeklyHours: Record<string, Array<{ start: string; end: string }>>;
+  overrides: Array<{ date: string; available: boolean; start?: string; end?: string }>;
+  bufferBeforeMinutes: number;
+  bufferAfterMinutes: number;
+  minimumNoticeMinutes: number;
+  cancellationAllowed: boolean;
+  rescheduleAllowed: boolean;
+}
+
 export interface Client extends ClientSummary {
   hasUnpublishedChanges?: boolean;
   role?: string;
@@ -88,7 +105,13 @@ export interface Client extends ClientSummary {
   policies?: string[];
   publishedFacts?: string[];
   unknownTopics?: string[];
-  calendar?: { provider: "calcom" | "google" | "outlook" | "fresha"; username?: string };
+  calendar?: {
+    provider: "calcom" | "google" | "outlook" | "fresha";
+    username?: string;
+    destinationCalendarId?: string;
+    destinationProvider?: string;
+    schedule?: CalendarScheduleSettings;
+  };
   enabledFeatures?: string[];
   inboundNumbers?: string[];
   outboundCallerId?: string;
@@ -106,10 +129,198 @@ export interface Client extends ClientSummary {
 }
 
 export interface ProvisioningStatus {
-  status: "not_started" | "pending" | "running" | "succeeded" | "failed";
+  id?: string;
+  status: "not_started" | "pending" | "running" | "paused" | "succeeded" | "failed";
   step?: string;
   error?: string;
   updatedAt?: string;
+  output?: {
+    readinessReport?: ProvisioningReadinessReport;
+  };
+}
+
+export interface ProvisioningReadinessReport {
+  generatedAt: string;
+  passed: boolean;
+  hardGaps: string[];
+  checks: Array<{ key: string; status: "passed" | "failed"; detail: string }>;
+  syntheticBooking?: { providerBookingId?: string; created: boolean; cancelled: boolean };
+  testCallLink?: string;
+}
+
+export interface AdminControlPlane {
+  generatedAt: string;
+  health: {
+    status: "ok" | "degraded";
+    notificationQueue: {
+      pending: number;
+      leased: number;
+      deadLetter: number;
+      oldestPendingAgeSeconds?: number;
+      providerFailures24h: number;
+    };
+    spend: { status: "configured" | "needs_attention"; configuredCapCount: number; uncappedConnectionCount: number };
+    backup: { status: "configured" | "not_configured"; freshness: "unknown" };
+  };
+  provisioning: Array<{
+    clientId: string;
+    businessName: string;
+    onboardingStatus?: OnboardingStatus;
+    runId?: string;
+    runStatus?: ProvisioningStatus["status"];
+    step?: string;
+    readinessPassed?: boolean;
+    blockers: string[];
+    updatedAt?: string;
+  }>;
+  resources: Array<{
+    clientId: string;
+    businessName: string;
+    provider: string;
+    resourceType: string;
+    lifecycleStatus: string;
+    healthy: boolean;
+    updatedAt: string;
+  }>;
+  requests: Array<{
+    id: string;
+    clientId: string;
+    businessName: string;
+    type: string;
+    status: string;
+    createdAt: string;
+  }>;
+  spendAlarms: Array<{
+    clientId: string;
+    businessName: string;
+    monthlySpendCapPence: number;
+    status: "configured";
+  }>;
+  blades: {
+    present: boolean;
+    published: boolean;
+    serviceStatus?: ServiceStatus;
+    inboundActive: boolean;
+  };
+}
+
+export interface OnboardingJob {
+  id: string;
+  clientId: string;
+  kind: string;
+  idempotencyKey: string;
+  status: "pending" | "leased" | "paused" | "completed" | "dead_letter";
+  attemptCount: number;
+  maxAttempts: number;
+  availableAt: string;
+  leaseExpiresAt?: string;
+  lastError?: string;
+}
+
+export interface WebsiteSource {
+  id: string;
+  clientId: string;
+  url: string;
+  status: "pending" | "active" | "disabled" | "failed";
+  lastFetchedAt?: string;
+}
+
+export interface OnboardingGap {
+  id: string;
+  clientId: string;
+  key: string;
+  status: "open" | "resolved" | "waived";
+  detail?: string;
+}
+
+export type OnboardingWizardStep =
+  | "website"
+  | "facts"
+  | "behavior"
+  | "operations"
+  | "phone"
+  | "calendar"
+  | "review";
+
+export interface OnboardingWizardData {
+  websiteUrl?: string;
+  websiteRunId?: string;
+  websiteApproved?: boolean;
+  businessName?: string;
+  location?: string;
+  greeting?: string;
+  tone?: string;
+  transferNumber?: string;
+  recordingConsent?: "always_ask" | "announcement" | "not_recording";
+  services?: ClientService[];
+  hours?: string;
+  timezone?: string;
+  bookingRules?: string;
+  phoneMode?: "managed" | "customer_twilio";
+  customerPhoneNumber?: string;
+  calendarMode?: "managed_calcom" | "connect_existing";
+  existingCalendarProvider?: "calcom" | "google" | "outlook" | "fresha";
+  calendarSchedule?: CalendarScheduleSettings;
+}
+
+export interface PublicCalendarConnection {
+  mode?: "oauth" | "managed" | "legacy";
+  status: "not_connected" | "pending" | "active" | "disabled" | "failed";
+  accountMasked?: string;
+  destinationCalendarId?: string;
+  destinationProvider?: string;
+  availableCalendars: Array<{ id: string; name: string; provider?: string }>;
+  canReconnect: boolean;
+}
+
+export interface OnboardingReadinessBlocker {
+  key: string;
+  step: OnboardingWizardStep;
+  message: string;
+}
+
+export interface OnboardingWizardState {
+  clientId: string;
+  currentStep: OnboardingWizardStep;
+  completedSteps: OnboardingWizardStep[];
+  data: OnboardingWizardData;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  submittedAt?: string;
+}
+
+export interface WebsiteIntelligenceFact {
+  id: string;
+  key: string;
+  value: unknown;
+  confidence?: number;
+  evidence?: unknown;
+  reviewStatus: "extracted" | "confirmed" | "edited";
+  reviewedAt?: string;
+}
+
+export interface WebsiteIntelligenceState {
+  sources: Array<{ id: string; url: string; status: string; lastFetchedAt?: string; indexingStatus?: string }>;
+  run: { id: string; status: string; error?: string } | null;
+  facts: WebsiteIntelligenceFact[];
+  gaps: OnboardingGap[];
+}
+
+export interface OnboardingWizardResponse {
+  client: Client;
+  wizard: OnboardingWizardState;
+  readiness: { ready: boolean; blockers: OnboardingReadinessBlocker[] };
+  provisioning: ProvisioningStatus | null;
+}
+
+export interface ProviderResource {
+  id: string;
+  clientId: string;
+  provider: "elevenlabs" | "twilio" | "calcom" | "google" | "outlook" | "fresha";
+  resourceType: string;
+  providerResourceId?: string;
+  lifecycleStatus: "pending" | "provisioning" | "active" | "deleting" | "deleted" | "failed";
 }
 
 export interface TranscriptTurn {
@@ -233,6 +444,8 @@ export interface PromptVersion {
   compiled: string;
   createdAt: string;
 }
+
+export type PublicPromptVersion = Omit<PromptVersion, "compiled">;
 
 export interface BootstrapResponse {
   clients: ClientSummary[];

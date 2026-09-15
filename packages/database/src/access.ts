@@ -68,18 +68,28 @@ export function redactSecrets(value: unknown): unknown {
       .replace(/sk_test_[a-zA-Z0-9]+/g, "[redacted]")
       .replace(/Bearer\s+\S+/gi, "Bearer [redacted]")
       .replace(/cal_live_\S+/g, "[redacted]")
-      .replace(/xi-[a-zA-Z0-9]+/g, "[redacted]");
+      .replace(/xi-[a-zA-Z0-9]+/g, "[redacted]")
+      .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[redacted-email]")
+      .replace(/(?:\+\d[\d\s().-]{7,}\d|\b\d{3}[\s().-]\d{3}[\s.-]\d{3,4}\b)/g, "[redacted-phone]");
   }
   if (Array.isArray(value)) return value.map(redactSecrets);
   if (typeof value === "object") {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
       if (/key|token|secret|password|authorization/i.test(k)) out[k] = "[redacted]";
+      else if (/^(email|phone|recipient|template|message|body|content|payload)$/i.test(k)) out[k] = "[redacted-pii]";
       else out[k] = redactSecrets(v);
     }
     return out;
   }
   return value;
+}
+
+export function telemetryEvent(
+  event: string,
+  fields: { tenantId?: string; operationId?: string } & Record<string, unknown>,
+) {
+  structuredLog(event, fields);
 }
 
 export function structuredLog(event: string, fields: Record<string, unknown>) {

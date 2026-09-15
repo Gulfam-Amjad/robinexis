@@ -2,7 +2,7 @@ import Stripe from "stripe";
 import type { ClientConfig, PlatformStore, ServiceStatus } from "@robinexis/database";
 import { stripeStatusToLocal, structuredLog } from "@robinexis/database";
 import { isPlanTier, planDefinition, type PlanTier } from "./plans.js";
-import { sendNotification } from "./notifications.js";
+import { enqueueLifecycleEmail } from "./notificationQueue.js";
 
 export function createStripe(secret = process.env.STRIPE_SECRET_KEY || "") {
   return secret ? new Stripe(secret) : null;
@@ -265,11 +265,14 @@ export async function handleStripeWebhook(opts: {
       const template = event.type === "invoice.payment_failed"
         ? "Payment needs attention\nUpdate your payment method securely from Plan & billing to keep your receptionist available."
         : "Your Robinexis trial is ending\nReview your plan and payment method from Plan & billing before the trial ends.";
-      try {
-        await sendNotification({ channel: "email", to: client.email, template });
-      } catch (error) {
-        structuredLog("customer_email_failed", { clientId: client.id, stripeEventType: event.type, reason: String(error) });
-      }
+      await enqueueLifecycleEmail({
+        store: opts.store,
+        clientId: client.id,
+        operationId: event.id,
+        idempotencyKey: `stripe:${event.id}:${event.type}`,
+        to: client.email,
+        template,
+      });
     }
     structuredLog("stripe_access_updated", { clientId: client.id, serviceStatus: local, event: event.type });
     return { ok: true, status: local };

@@ -1,8 +1,10 @@
-const CALCOM_BASE = "https://api.cal.com/v2";
+import { calcomApiBase } from "./calcomAuth.js";
 
 export interface CalcomTenant {
   apiKey: string;
   username: string;
+  mode?: "oauth" | "managed" | "legacy";
+  clientId?: string;
 }
 
 export interface CalcomEventType {
@@ -34,13 +36,16 @@ async function calcomFetch(tenant: CalcomTenant, path: string, calApiVersion: st
     try {
       const timeout = AbortSignal.timeout(Number(process.env.CALCOM_TIMEOUT_MS) || 8_000);
       const signal = init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
-      const res = await fetch(`${CALCOM_BASE}${path}`, {
+      const res = await fetch(`${calcomApiBase()}${path}`, {
         ...init,
         signal,
         headers: {
           ...init?.headers,
           Authorization: `Bearer ${tenant.apiKey}`,
           "cal-api-version": calApiVersion,
+          ...(tenant.mode === "managed" && tenant.clientId
+            ? { "x-cal-client-id": tenant.clientId, "x-cal-user-mode": "managed" }
+            : {}),
         },
       });
       const text = await res.text();
@@ -85,7 +90,10 @@ export async function listEventTypes(tenant: CalcomTenant): Promise<CalcomEventT
 
 export async function createEventType(
   tenant: CalcomTenant,
-  input: { title: string; slug: string; durationMinutes: number },
+  input: {
+    title: string; slug: string; durationMinutes: number;
+    bufferBeforeMinutes?: number; bufferAfterMinutes?: number; minimumNoticeMinutes?: number;
+  },
 ): Promise<CalcomEventType> {
   const json = (await calcomFetch(tenant, "/event-types", "2024-06-14", {
     method: "POST",
@@ -97,6 +105,9 @@ export async function createEventType(
       length: input.durationMinutes,
       hidden: true,
       locations: [{ type: "phone" }],
+      beforeEventBuffer: input.bufferBeforeMinutes || 0,
+      afterEventBuffer: input.bufferAfterMinutes || 0,
+      minimumBookingNotice: input.minimumNoticeMinutes || 0,
     }),
   })) as { data?: Record<string, unknown> };
   const item = json.data || {};
@@ -111,7 +122,10 @@ export async function createEventType(
 export async function updateEventType(
   tenant: CalcomTenant,
   eventTypeId: string | number,
-  input: { title: string; slug: string; durationMinutes: number },
+  input: {
+    title: string; slug: string; durationMinutes: number;
+    bufferBeforeMinutes?: number; bufferAfterMinutes?: number; minimumNoticeMinutes?: number;
+  },
 ): Promise<CalcomEventType> {
   const json = (await calcomFetch(tenant, `/event-types/${encodeURIComponent(String(eventTypeId))}`, "2024-06-14", {
     method: "PATCH",
@@ -122,6 +136,9 @@ export async function updateEventType(
       lengthInMinutes: input.durationMinutes,
       length: input.durationMinutes,
       hidden: true,
+      beforeEventBuffer: input.bufferBeforeMinutes || 0,
+      afterEventBuffer: input.bufferAfterMinutes || 0,
+      minimumBookingNotice: input.minimumNoticeMinutes || 0,
     }),
   })) as { data?: Record<string, unknown> };
   const item = json.data || {};

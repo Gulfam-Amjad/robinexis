@@ -16,6 +16,8 @@ describe("workspace permissions", () => {
       canAdministerPlatform: true,
       canCreateClients: true,
       canEditWorkspace: true,
+      canPublishWorkspace: true,
+      canActivateWorkspace: false,
       canManageMembers: true,
     });
   });
@@ -31,15 +33,30 @@ describe("workspace permissions", () => {
       role: "salon",
       clientRoles: { client_1: "viewer" },
     };
+    const manager: SessionActor = {
+      email: "manager@salon.test",
+      role: "salon",
+      clientRoles: { client_1: "manager" },
+    };
 
     expect(permissionsFor(owner, "client_1")).toMatchObject({
       isOperator: false,
       canAdministerPlatform: false,
       canEditWorkspace: true,
+      canPublishWorkspace: true,
+      canActivateWorkspace: true,
       canManageMembers: true,
+    });
+    expect(permissionsFor(manager, "client_1")).toMatchObject({
+      canEditWorkspace: true,
+      canPublishWorkspace: true,
+      canActivateWorkspace: false,
+      canManageMembers: false,
     });
     expect(permissionsFor(viewer, "client_1")).toMatchObject({
       canEditWorkspace: false,
+      canPublishWorkspace: false,
+      canActivateWorkspace: false,
       canManageMembers: false,
     });
   });
@@ -64,6 +81,8 @@ describe("workspace permissions", () => {
       canAdministerPlatform: false,
       canCreateClients: false,
       canEditWorkspace: false,
+      canPublishWorkspace: false,
+      canActivateWorkspace: false,
       canManageMembers: false,
     });
   });

@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createEventType, listEventTypes, updateEventType } from "./calcom.js";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
 
 describe("Cal.com event type adapter", () => {
   it("lists and writes event types using the platform credential", async () => {
@@ -16,7 +19,13 @@ describe("Cal.com event type adapter", () => {
         data: { id: 8, slug: "workspace-colour", title: "Colour", lengthInMinutes: 75 },
       }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
-    const tenant = { apiKey: "cal_test_key", username: "robinexis" };
+    vi.stubEnv("CALCOM_API_BASE_URL", "https://cal-api.example.test/v2/");
+    const tenant = {
+      apiKey: "cal_test_key",
+      username: "robinexis",
+      mode: "managed" as const,
+      clientId: "platform-client",
+    };
 
     await expect(listEventTypes(tenant)).resolves.toEqual([
       { id: 7, slug: "workspace-cut", title: "Cut", lengthInMinutes: 45 },
@@ -33,9 +42,14 @@ describe("Cal.com event type adapter", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[0][0]).toBe("https://cal-api.example.test/v2/event-types");
     expect(fetchMock.mock.calls[1][1]).toMatchObject({
       method: "POST",
-      headers: expect.objectContaining({ Authorization: "Bearer cal_test_key" }),
+      headers: expect.objectContaining({
+        Authorization: "Bearer cal_test_key",
+        "x-cal-client-id": "platform-client",
+        "x-cal-user-mode": "managed",
+      }),
     });
     expect(fetchMock.mock.calls[2][0]).toContain("/event-types/8");
   });

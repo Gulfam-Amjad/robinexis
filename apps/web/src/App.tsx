@@ -24,8 +24,13 @@ const EnterpriseContactPage = lazy(() => import("./pages/public").then((m) => ({
 const LegalPage = lazy(() => import("./pages/legal"));
 const BladesReceptionistDemoPage = lazy(() => import("./pages/blades-demo"));
 const appPages = () => import("./pages/app");
+const controlPlanePages = () => import("./pages/app/control-planes");
 
 const OverviewPage = lazy(() => appPages().then((m) => ({ default: m.OverviewPage })));
+const SetupPage = lazy(() => controlPlanePages().then((m) => ({ default: m.SetupPage })));
+const BusinessPage = lazy(() => controlPlanePages().then((m) => ({ default: m.BusinessPage })));
+const PhonePage = lazy(() => controlPlanePages().then((m) => ({ default: m.PhonePage })));
+const CalendarSettingsPage = lazy(() => controlPlanePages().then((m) => ({ default: m.CalendarSettingsPage })));
 const OnboardingPage = lazy(() => appPages().then((m) => ({ default: m.OnboardingPage })));
 const AgentsPage = lazy(() => appPages().then((m) => ({ default: m.AgentsPage })));
 const NewAgentPage = lazy(() => appPages().then((m) => ({ default: m.NewAgentPage })));
@@ -43,6 +48,7 @@ const BillingPage = lazy(() => appPages().then((m) => ({ default: m.BillingPage 
 const SettingsPage = lazy(() => appPages().then((m) => ({ default: m.SettingsPage })));
 const SupportPage = lazy(() => appPages().then((m) => ({ default: m.SupportPage })));
 const AdminOverviewPage = lazy(() => appPages().then((m) => ({ default: m.AdminOverviewPage })));
+const AdminControlPlanePage = lazy(() => controlPlanePages().then((m) => ({ default: m.AdminControlPlanePage })));
 const SetupConsolePage = lazy(() => appPages().then((m) => ({ default: m.SetupConsolePage })));
 
 function RequireSession() {
@@ -136,6 +142,9 @@ export default function App() {
             <Route element={<RequireSubscription />}>
             <Route path="/app" element={<AppShell />}>
               <Route index element={<OverviewPage />} />
+              <Route path="setup" element={<SetupPage />} />
+              <Route path="business" element={<BusinessPage />} />
+              <Route path="phone" element={<PhonePage />} />
               <Route path="agents" element={<AgentsPage />} />
               <Route path="agents/:id" element={<AgentDetailPage />} />
               <Route path="playground" element={<PlaygroundPage />} />
@@ -143,6 +152,7 @@ export default function App() {
               <Route path="calls/:id" element={<CallDetailPage />} />
               <Route path="analytics" element={<AnalyticsPage />} />
               <Route path="calendar" element={<CalendarPage />} />
+              <Route path="calendar/settings" element={<CalendarSettingsPage />} />
               <Route path="usage" element={<UsagePage />} />
               <Route path="knowledge" element={<KnowledgePage />} />
               <Route path="integrations" element={<IntegrationsPage />} />
@@ -159,6 +169,7 @@ export default function App() {
             <Route element={<RequireOperator />}>
               <Route path="/admin" element={<AppShell />}>
                 <Route index element={<AdminOverviewPage />} />
+                <Route path="control-plane" element={<AdminControlPlanePage />} />
                 <Route path="setup/:id" element={<SetupConsolePage />} />
                 <Route path="clients/new" element={<OnboardingPage />} />
                 <Route path="agents/new" element={<NewAgentPage />} />
