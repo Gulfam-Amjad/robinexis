@@ -187,6 +187,11 @@ async function monitorCalendarHealth(store: Awaited<ReturnType<typeof getStore>>
 
   for (const client of await store.listClients()) {
     if (!client.enabledFeatures.includes("booking")) continue;
+    // Only a tenant with a live inbound number can lose real bookings; empty
+    // workspaces would otherwise alert forever before they ever take a call.
+    const live = (await store.listPhoneEndpoints(client.id))
+      .some((item) => item.status === "active" && item.direction !== "outbound");
+    if (!live) continue;
     const connected = (await store.listCalendarConnections(client.id))
       .some((item) => item.provider === "calcom" && item.status === "active");
     if (!connected) continue;
