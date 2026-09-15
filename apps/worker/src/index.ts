@@ -319,7 +319,10 @@ async function main() {
   if (!process.env.STRIPE_SECRET_KEY) {
     structuredLog("worker_misconfigured", { missing: ["STRIPE_SECRET_KEY"] });
   }
-  await runTick();
+  // A failing first tick used to kill the process, so a worker that booted
+  // before the API applied migrations crash-looped instead of recovering on the
+  // next poll. /health still reports degraded until a tick succeeds.
+  await runTick().catch((err) => structuredLog("worker_tick_error", { err: String(err) }));
   setInterval(
     () => void runTick().catch((err) => structuredLog("worker_tick_error", { err: String(err) })),
     POLL,

@@ -3,7 +3,7 @@ import { calcomApiBase } from "./calcomAuth.js";
 export interface CalcomTenant {
   apiKey: string;
   username: string;
-  mode?: "oauth" | "managed" | "legacy";
+  mode?: "oauth" | "managed" | "legacy" | "shared";
   clientId?: string;
 }
 

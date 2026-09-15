@@ -4,7 +4,7 @@ import {
   type PlatformStore,
   type UserProfile,
 } from "@robinexis/database";
-import { planDefinition, type PlanTier } from "@robinexis/integrations";
+import { calcomSharedAccountEnabled, planDefinition, type PlanTier } from "@robinexis/integrations";
 import type { AuthenticatedActor } from "./auth.js";
 
 export function writableClientId(actor: AuthenticatedActor): string | undefined {
@@ -46,14 +46,21 @@ export async function ensureSelfServeWorkspace(
     createdAt: now,
     updatedAt: now,
   });
+  // Without Cal.com Platform there is no per-tenant credential to issue, so a
+  // shared-account connection is opened up front and isolation is carried by the
+  // tenant-prefixed event types provisioning creates.
+  const shared = calcomSharedAccountEnabled();
   await store.upsertCalendarConnection({
     id: `calendar_${client.id}_primary`,
     clientId: client.id,
     locationId: `loc_${client.id}_primary`,
     provider: "calcom",
-    credentialRef: "CONNECTION_REQUIRED",
-    status: "pending",
-    metadata: { isolation: "connection_required" },
+    credentialRef: shared ? "CALCOM_API_KEY" : "CONNECTION_REQUIRED",
+    mode: shared ? "shared" : undefined,
+    status: shared ? "active" : "pending",
+    metadata: shared
+      ? { isolation: "tenant_scoped_event_types" }
+      : { isolation: "connection_required" },
     createdAt: now,
     updatedAt: now,
   });

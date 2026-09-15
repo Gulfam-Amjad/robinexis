@@ -60,7 +60,14 @@ import {
   YAxis,
 } from "recharts";
 import { z } from "zod";
-import type { Booking, Call, Client, Job, TimeseriesPoint } from "@robinexis/api-contracts";
+import type {
+  Booking,
+  Call,
+  Client,
+  Job,
+  PublicCalendarConnection,
+  TimeseriesPoint,
+} from "@robinexis/api-contracts";
 import { api, formatDate } from "../../lib/api";
 import { usePermissions } from "../../lib/permissions";
 import { workspaceReceptionistDemo } from "../../lib/receptionistDemo";
@@ -1066,6 +1073,12 @@ function KnowledgeContent({ clientId }: { clientId: string }) {
   );
 }
 
+function calendarModeLabel(mode: NonNullable<PublicCalendarConnection["mode"]>): string {
+  if (mode === "managed") return "Managed Cal.com";
+  if (mode === "shared") return "Robinexis calendar";
+  return "Existing Cal.com";
+}
+
 export function IntegrationsPage() {
   return <ClientGate>{(clientId) => <IntegrationsContent clientId={clientId} />}</ClientGate>;
 }
@@ -1171,6 +1184,9 @@ function IntegrationsContent({ clientId }: { clientId: string }) {
     },
     onError: (error) => push({ title: "Calendar repair failed", message: error.message, tone: "error" }),
   });
+  // Cal.com only issues OAuth clients and managed users to Platform
+  // organisations, so the server reports which modes actually work.
+  const calendarModes = calcomConnection.data?.availableModes || { oauth: false, managed: false, shared: true };
   const known = [
     { id: "twilio", name: "Twilio", description: "You buy the inbound number. Paste it in the agent editor; Robinexis routes it to ElevenLabs", icon: PhoneCall },
     { id: "calcom", name: "Cal.com", description: "Bookings land on the Robinexis calendar automatically. Each customer gets isolated event types.", icon: CalendarDays },
@@ -1187,22 +1203,27 @@ function IntegrationsContent({ clientId }: { clientId: string }) {
         ? <Button type="button" variant="secondary" size="sm" disabled={repairCalendar.isPending} onClick={() => repairCalendar.mutate()}>{repairCalendar.isPending ? "Repairing…" : "Repair calendar"}</Button>
         : <a className="button button-secondary button-sm" href="mailto:hello@robinexis.com?subject=Robinexis%20integration%20setup">Configure server-side</a>)}</Card>; })}</div>
       {canEditWorkspace && <Card className="form-card">
-        <SectionHeading title="Booking calendar" description="Connect an existing Cal.com account or create a tenant-isolated managed user. Tokens stay encrypted on the server." />
+        <SectionHeading title="Booking calendar" description={calendarModes.oauth || calendarModes.managed
+          ? "Connect an existing Cal.com account or create a tenant-isolated managed user. Tokens stay encrypted on the server."
+          : "Bookings run on the Robinexis Cal.com account with booking types created for this workspace only. Credentials stay server-side."} />
         {calcomConnection.isLoading ? <LoadingState label="Checking calendar connection…" /> : <>
           <div className="form-actions">
             <Badge tone={calcomConnection.data?.status === "active" ? "success" : "neutral"}>
               {calcomConnection.data?.status?.replaceAll("_", " ") || "not connected"}
             </Badge>
-            {calcomConnection.data?.mode && <span>{calcomConnection.data.mode === "managed" ? "Managed Cal.com" : "Existing Cal.com"}</span>}
+            {calcomConnection.data?.mode && <span>{calendarModeLabel(calcomConnection.data.mode)}</span>}
             {calcomConnection.data?.accountMasked && <span>{calcomConnection.data.accountMasked}</span>}
           </div>
           {calcomConnection.data?.status !== "active" ? <div className="form-actions">
-            <Button type="button" variant="secondary" disabled={connectCalcom.isPending} onClick={() => connectCalcom.mutate()}>
+            {calendarModes.oauth && <Button type="button" variant="secondary" disabled={connectCalcom.isPending} onClick={() => connectCalcom.mutate()}>
               <Link2 size={15} /> {calcomConnection.data?.canReconnect ? "Reconnect existing Cal.com" : "Connect existing Cal.com"}
-            </Button>
-            <Button type="button" disabled={createManagedCalcom.isPending} onClick={() => createManagedCalcom.mutate()}>
+            </Button>}
+            {calendarModes.managed && <Button type="button" disabled={createManagedCalcom.isPending} onClick={() => createManagedCalcom.mutate()}>
               <Plus size={15} /> {createManagedCalcom.isPending ? "Creating…" : "Create managed Cal.com"}
-            </Button>
+            </Button>}
+            {!calendarModes.oauth && !calendarModes.managed && <Button type="button" disabled={repairCalendar.isPending} onClick={() => repairCalendar.mutate()}>
+              <Plus size={15} /> {repairCalendar.isPending ? "Setting up…" : "Set up booking types"}
+            </Button>}
           </div> : <>
             {calcomConnection.data.availableCalendars.length > 0 && <div className="form-grid">
               <Field label="Booking destination">
@@ -1216,8 +1237,9 @@ function IntegrationsContent({ clientId }: { clientId: string }) {
               </Button>
             </div>}
             <div className="form-actions">
-              <Button type="button" variant="secondary" onClick={() => connectCalcom.mutate()} disabled={connectCalcom.isPending}><RefreshCw size={15} /> Reconnect</Button>
-              <Button type="button" variant="ghost" onClick={() => disconnectCalcom.mutate()} disabled={disconnectCalcom.isPending}>Disconnect and revoke</Button>
+              <Button type="button" variant="secondary" onClick={() => repairCalendar.mutate()} disabled={repairCalendar.isPending}><RefreshCw size={15} /> {repairCalendar.isPending ? "Repairing…" : "Repair booking types"}</Button>
+              {calendarModes.oauth && <Button type="button" variant="secondary" onClick={() => connectCalcom.mutate()} disabled={connectCalcom.isPending}><Link2 size={15} /> Reconnect</Button>}
+              {calcomConnection.data.mode !== "shared" && <Button type="button" variant="ghost" onClick={() => disconnectCalcom.mutate()} disabled={disconnectCalcom.isPending}>Disconnect and revoke</Button>}
             </div>
           </>}
         </>}

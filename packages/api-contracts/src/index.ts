@@ -264,13 +264,15 @@ export interface OnboardingWizardData {
 }
 
 export interface PublicCalendarConnection {
-  mode?: "oauth" | "managed" | "legacy";
+  mode?: "oauth" | "managed" | "legacy" | "shared";
   status: "not_connected" | "pending" | "active" | "disabled" | "failed";
   accountMasked?: string;
   destinationCalendarId?: string;
   destinationProvider?: string;
   availableCalendars: Array<{ id: string; name: string; provider?: string }>;
   canReconnect: boolean;
+  /** Cal.com gates OAuth and managed users behind its Platform plan. */
+  availableModes?: { oauth: boolean; managed: boolean; shared: boolean };
 }
 
 export interface OnboardingReadinessBlocker {

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { bladesHairSeed, MemoryStore } from "@robinexis/database";
 import {
   CALCOM_SCOPES,
+  calcomConnectionModes,
   calcomOAuthAuthorizeUrl,
   createCalcomOAuthState,
   createManagedCalcomUser,
@@ -261,6 +262,44 @@ describe("legacy shared-key tenant resolution", () => {
 
     const { tenant } = await resolveCalcomTenantConnection(store, client);
     expect(tenant).toMatchObject({ apiKey: "shared-live-key", username: client.calendar.username });
+  });
+
+  /**
+   * Cal.com refuses OAuth clients and managed users off the Platform plan, so a
+   * shared-account connection is the only automatic path for a new tenant.
+   */
+  it("resolves a shared-account connection only when shared mode is enabled", async () => {
+    vi.stubEnv("CALCOM_SHARED_ACCOUNT_ENABLED", "true");
+    const client = { ...bladesHairSeed(), id: "client_new", slug: "new-salon" };
+    const store = new MemoryStore();
+    await store.upsertClient(client);
+    await store.upsertCalendarConnection({
+      id: "calendar_new_primary",
+      clientId: client.id,
+      provider: "calcom",
+      credentialRef: "CALCOM_API_KEY",
+      mode: "shared",
+      status: "active",
+      metadata: {},
+      createdAt: "2026-09-01T00:00:00.000Z",
+      updatedAt: "2026-09-01T00:00:00.000Z",
+    });
+
+    const { tenant } = await resolveCalcomTenantConnection(store, client);
+    expect(tenant.apiKey).toBe("shared-live-key");
+
+    vi.stubEnv("CALCOM_SHARED_ACCOUNT_ENABLED", "false");
+    await expect(resolveCalcomTenantConnection(store, client))
+      .rejects.toThrow("calcom_shared_account_disabled");
+  });
+
+  it("reports which connection modes Cal.com will actually accept", () => {
+    vi.stubEnv("CALCOM_PLATFORM_CLIENT_ID", "");
+    vi.stubEnv("CALCOM_PLATFORM_CLIENT_SECRET", "");
+    vi.stubEnv("CALCOM_OAUTH_CLIENT_ID", "");
+    vi.stubEnv("CALCOM_OAUTH_CLIENT_SECRET", "");
+    vi.stubEnv("CALCOM_SHARED_ACCOUNT_ENABLED", "true");
+    expect(calcomConnectionModes()).toEqual({ oauth: false, managed: false, shared: true });
   });
 
   it("still fails closed for any other tenant without a credential", async () => {

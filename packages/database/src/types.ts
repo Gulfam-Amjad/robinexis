@@ -427,7 +427,7 @@ export interface CalendarConnection {
   provider: CalendarConnectionConfig["provider"];
   externalAccountId?: string;
   credentialRef?: string;
-  mode?: "oauth" | "managed" | "legacy";
+  mode?: "oauth" | "managed" | "legacy" | "shared";
   encryptedAccessToken?: string;
   encryptedRefreshToken?: string;
   accessTokenExpiresAt?: string;

@@ -52,6 +52,7 @@ import {
   enqueueLifecycleEmail,
   twilioOAuthAuthorizeUrl,
   verifyTwilioOAuthState,
+  calcomConnectionModes,
   probeCalcomForClient,
   publicCalcomProbe,
   resolveCalcomTenantConnection,
@@ -3539,6 +3540,7 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       destinationProvider: connection?.destinationProvider,
       availableCalendars,
       canReconnect: !connection || ["disabled", "failed"].includes(connection.status),
+      availableModes: calcomConnectionModes(),
     });
     return true;
   }

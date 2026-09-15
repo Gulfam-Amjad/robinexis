@@ -275,6 +275,41 @@ export async function refreshManagedCalcomUserToken(refreshToken: string): Promi
   };
 }
 
+/**
+ * Cal.com refuses OAuth clients and managed users unless the organisation is on
+ * the Platform plan, so both per-tenant credential modes are unavailable until
+ * that is bought. Reported to the UI so it never offers a button that 403s.
+ */
+export function calcomPlatformConfigured(): boolean {
+  return Boolean(
+    process.env.CALCOM_PLATFORM_CLIENT_ID &&
+    process.env.CALCOM_PLATFORM_CLIENT_SECRET &&
+    (process.env.CALCOM_PLATFORM_ORG_ID || process.env.CALCOM_PLATFORM_ORGANIZATION_ID),
+  );
+}
+
+export function calcomOAuthConfigured(): boolean {
+  return Boolean(process.env.CALCOM_OAUTH_CLIENT_ID && process.env.CALCOM_OAUTH_CLIENT_SECRET);
+}
+
+/**
+ * Shared mode books every tenant through the Robinexis Cal.com account. Tenants
+ * stay separated by prefixed event type slugs and the per-tenant mapping rather
+ * than by credential, so it is opt-in and must be turned off once Platform is
+ * available.
+ */
+export function calcomSharedAccountEnabled(): boolean {
+  return process.env.CALCOM_SHARED_ACCOUNT_ENABLED === "true" && Boolean(process.env.CALCOM_API_KEY);
+}
+
+export function calcomConnectionModes(): { oauth: boolean; managed: boolean; shared: boolean } {
+  return {
+    oauth: calcomOAuthConfigured(),
+    managed: calcomPlatformConfigured(),
+    shared: calcomSharedAccountEnabled(),
+  };
+}
+
 export async function resolveCalcomTenantConnection(
   store: PlatformStore,
   client: ClientConfig,
@@ -300,6 +335,16 @@ export async function resolveCalcomTenantConnection(
     throw new Error("tenant_calendar_connection_required");
   }
   if (!connection.encryptedAccessToken) {
+    if (connection.mode === "shared") {
+      if (!calcomSharedAccountEnabled()) throw new Error("calcom_shared_account_disabled");
+      return {
+        tenant: {
+          apiKey: process.env.CALCOM_API_KEY || "",
+          username: process.env.CALCOM_USERNAME || "",
+        },
+        connection,
+      };
+    }
     if (!sharedKeyTenant) throw new Error("tenant_calendar_credential_required");
     return {
       tenant: {

@@ -80,6 +80,12 @@ export {
 } from "./dashboardStatus.js";
 export type { PublicCalcomProbe } from "./dashboardStatus.js";
 export {
+  calcomConnectionModes,
+  calcomOAuthConfigured,
+  calcomPlatformConfigured,
+  calcomSharedAccountEnabled,
+} from "./calcomAuth.js";
+export {
   guestEmailFromPhone,
   isDialableE164,
   normalizeSpokenPhone,
