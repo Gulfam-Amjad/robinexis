@@ -1159,6 +1159,18 @@ function IntegrationsContent({ clientId }: { clientId: string }) {
     onSuccess: async () => { await refreshCalcom(); push({ title: "Cal.com disconnected", tone: "success" }); },
     onError: (error) => push({ title: "Cal.com disconnect failed", message: error.message, tone: "error" }),
   });
+  const repairCalendar = useMutation({
+    mutationFn: () => api.repairCalendar(clientId),
+    onSuccess: async ({ eventTypes, probe }) => {
+      await refreshCalcom();
+      push({
+        title: probe.ok ? "Calendar repaired" : "Calendar rebuilt, but still unavailable",
+        message: `${eventTypes.length} booking types rebuilt${probe.ok ? `, ${probe.slotCount} slots available` : ` — ${probe.error || "no slots returned"}`}`,
+        tone: probe.ok ? "success" : "error",
+      });
+    },
+    onError: (error) => push({ title: "Calendar repair failed", message: error.message, tone: "error" }),
+  });
   const known = [
     { id: "twilio", name: "Twilio", description: "You buy the inbound number. Paste it in the agent editor; Robinexis routes it to ElevenLabs", icon: PhoneCall },
     { id: "calcom", name: "Cal.com", description: "Bookings land on the Robinexis calendar automatically. Each customer gets isolated event types.", icon: CalendarDays },
@@ -1171,7 +1183,9 @@ function IntegrationsContent({ clientId }: { clientId: string }) {
     <>
       <PageHeader eyebrow="Integrations" title="Connect the tools behind the conversation" description="Robinexis keeps credentials server-side. This page shows connection health, never secret values." />
       {status.error && <div className="notice notice-error"><div><XCircle /><span><strong>Connection status unavailable.</strong> {status.error.message}</span></div><button onClick={() => status.refetch()}>Retry</button></div>}
-      <div className="integration-grid">{known.map(({ id, name, description, icon: Icon }) => { const item = byId.get(id); const connected = item?.connected || false; const needsSetup = !status.isLoading && !connected; return <Card className="integration-card" key={id}><div className={`integration-icon integration-${id}`}><Icon /></div><div><h3>{name}</h3><p>{item?.detail || description}</p></div><Badge tone={connected ? "success" : "neutral"}>{status.isLoading ? "Checking…" : connected ? "Connected" : "Needs setup"}</Badge>{needsSetup && <a className="button button-secondary button-sm" href="mailto:hello@robinexis.com?subject=Robinexis%20integration%20setup">Configure server-side</a>}</Card>; })}</div>
+      <div className="integration-grid">{known.map(({ id, name, description, icon: Icon }) => { const item = byId.get(id); const connected = item?.connected || false; const needsSetup = !status.isLoading && !connected; return <Card className="integration-card" key={id}><div className={`integration-icon integration-${id}`}><Icon /></div><div><h3>{name}</h3><p>{item?.detail || description}</p></div><Badge tone={connected ? "success" : "neutral"}>{status.isLoading ? "Checking…" : connected ? "Connected" : "Needs setup"}</Badge>{needsSetup && (id === "calcom" && canEditWorkspace
+        ? <Button type="button" variant="secondary" size="sm" disabled={repairCalendar.isPending} onClick={() => repairCalendar.mutate()}>{repairCalendar.isPending ? "Repairing…" : "Repair calendar"}</Button>
+        : <a className="button button-secondary button-sm" href="mailto:hello@robinexis.com?subject=Robinexis%20integration%20setup">Configure server-side</a>)}</Card>; })}</div>
       {canEditWorkspace && <Card className="form-card">
         <SectionHeading title="Booking calendar" description="Connect an existing Cal.com account or create a tenant-isolated managed user. Tokens stay encrypted on the server." />
         {calcomConnection.isLoading ? <LoadingState label="Checking calendar connection…" /> : <>

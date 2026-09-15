@@ -282,9 +282,12 @@ export async function resolveCalcomTenantConnection(
 ): Promise<{ tenant: CalcomTenant; connection: CalendarConnection }> {
   const connections = await store.listCalendarConnections(client.id);
   const connection = connections.find((item) => item.provider === "calcom" && item.status === "active");
+  // The shared key is a permanent compatibility exception for Blades only. Their
+  // connection row predates OAuth and holds no encrypted token, so the exception
+  // has to survive both a missing row and a tokenless one.
+  const sharedKeyTenant = client.slug === "blades-hair" && client.calendar.credentialRef === "CALCOM_API_KEY";
   if (!connection) {
-    // The shared key is a permanent compatibility exception for Blades only.
-    if (client.slug === "blades-hair" && client.calendar.credentialRef === "CALCOM_API_KEY") {
+    if (sharedKeyTenant) {
       return {
         tenant: { apiKey: process.env.CALCOM_API_KEY || "", username: client.calendar.username || process.env.CALCOM_USERNAME || "" },
         connection: connections.find((item) => item.provider === "calcom") || {
@@ -296,7 +299,16 @@ export async function resolveCalcomTenantConnection(
     }
     throw new Error("tenant_calendar_connection_required");
   }
-  if (!connection.encryptedAccessToken) throw new Error("tenant_calendar_credential_required");
+  if (!connection.encryptedAccessToken) {
+    if (!sharedKeyTenant) throw new Error("tenant_calendar_credential_required");
+    return {
+      tenant: {
+        apiKey: process.env.CALCOM_API_KEY || "",
+        username: client.calendar.username || process.env.CALCOM_USERNAME || "",
+      },
+      connection,
+    };
+  }
   let accessToken = decryptCalcomCredential(connection.encryptedAccessToken);
   if (connection.accessTokenExpiresAt && Date.parse(connection.accessTokenExpiresAt) <= now.getTime() + 60_000) {
     if (!connection.encryptedRefreshToken) throw new Error("calcom_reconnect_required");

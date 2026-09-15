@@ -150,16 +150,25 @@ export async function updateEventType(
   };
 }
 
+/**
+ * Prefer the numeric event type id. Slug lookups resolve through the public
+ * `username` handle, which silently stops resolving when an account moves into
+ * a Cal.com organisation; ids survive that migration.
+ */
 export async function checkAvailability(
   tenant: CalcomTenant,
-  input: { eventTypeSlug: string; start: string; end: string },
+  input: { eventTypeSlug: string; eventTypeId?: string | number; start: string; end: string },
 ): Promise<{ slots: string[] }> {
-  const params = new URLSearchParams({
-    username: tenant.username,
-    eventTypeSlug: input.eventTypeSlug,
-    start: input.start,
-    end: input.end,
-  });
+  const params = new URLSearchParams(
+    input.eventTypeId
+      ? { eventTypeId: String(input.eventTypeId), start: input.start, end: input.end }
+      : {
+          username: tenant.username,
+          eventTypeSlug: input.eventTypeSlug,
+          start: input.start,
+          end: input.end,
+        },
+  );
   const json = (await calcomFetch(tenant, `/slots?${params.toString()}`, "2024-09-04")) as {
     data?: Record<string, Array<{ start: string }>>;
   };
@@ -174,6 +183,7 @@ export async function createBooking(
   tenant: CalcomTenant,
   input: {
     eventTypeSlug: string;
+    eventTypeId?: string | number;
     start: string;
     attendeeName: string;
     attendeeEmail: string;
@@ -183,8 +193,9 @@ export async function createBooking(
   },
 ): Promise<{ uid?: string; status: string }> {
   const body = {
-    eventTypeSlug: input.eventTypeSlug,
-    username: tenant.username,
+    ...(input.eventTypeId
+      ? { eventTypeId: Number(input.eventTypeId) }
+      : { eventTypeSlug: input.eventTypeSlug, username: tenant.username }),
     start: input.start,
     attendee: {
       name: input.attendeeName,

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { bladesHairSeed, MemoryStore } from "@robinexis/database";
 import {
   CALCOM_SCOPES,
   calcomOAuthAuthorizeUrl,
@@ -9,6 +10,7 @@ import {
   exchangeCalcomOAuthCode,
   refreshCalcomOAuthToken,
   refreshManagedCalcomUserToken,
+  resolveCalcomTenantConnection,
   revokeCalcomOAuthToken,
   verifyCalcomOAuthState,
 } from "./calcomAuth.js";
@@ -229,5 +231,54 @@ describe("Cal.com dual connection security", () => {
       revoked: false,
       reason: "calcom_oauth_revoke_failed:404",
     });
+  });
+});
+
+describe("legacy shared-key tenant resolution", () => {
+  beforeEach(() => {
+    vi.stubEnv("CALCOM_API_KEY", "shared-live-key");
+    vi.stubEnv("CALCOM_USERNAME", "robinexis");
+  });
+
+  /**
+   * Blades' connection row predates OAuth and carries no encrypted token. If the
+   * exception only covered a missing row, their live line would lose the calendar.
+   */
+  it("keeps the shared key working for a tokenless legacy connection row", async () => {
+    const client = bladesHairSeed();
+    const store = new MemoryStore();
+    await store.upsertClient(client);
+    await store.upsertCalendarConnection({
+      id: `calendar_${client.id}_primary`,
+      clientId: client.id,
+      provider: "calcom",
+      credentialRef: "CALCOM_API_KEY",
+      status: "active",
+      metadata: {},
+      createdAt: "2026-09-01T00:00:00.000Z",
+      updatedAt: "2026-09-01T00:00:00.000Z",
+    });
+
+    const { tenant } = await resolveCalcomTenantConnection(store, client);
+    expect(tenant).toMatchObject({ apiKey: "shared-live-key", username: client.calendar.username });
+  });
+
+  it("still fails closed for any other tenant without a credential", async () => {
+    const client = { ...bladesHairSeed(), id: "client_other", slug: "other-salon" };
+    const store = new MemoryStore();
+    await store.upsertClient(client);
+    await store.upsertCalendarConnection({
+      id: "calendar_other_primary",
+      clientId: client.id,
+      provider: "calcom",
+      credentialRef: "CALCOM_API_KEY",
+      status: "active",
+      metadata: {},
+      createdAt: "2026-09-01T00:00:00.000Z",
+      updatedAt: "2026-09-01T00:00:00.000Z",
+    });
+
+    await expect(resolveCalcomTenantConnection(store, client))
+      .rejects.toThrow("tenant_calendar_credential_required");
   });
 });

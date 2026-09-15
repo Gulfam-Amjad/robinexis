@@ -63,12 +63,14 @@ export interface ProvisionClientAgentDependencies {
     checkAvailability: (input: {
       client: ClientConfig;
       providerEventTypeSlug: string;
+      providerEventTypeId?: string;
       start: string;
       end: string;
     }) => Promise<{ slots: string[] }>;
     createBooking: (input: {
       client: ClientConfig;
       providerEventTypeSlug: string;
+      providerEventTypeId?: string;
       start: string;
       conversationId: string;
     }) => Promise<{ uid?: string; status: string }>;
@@ -125,21 +127,27 @@ function readinessAdapter(
       return agent?.voiceCredentialHash === credential.expectedCredentialHash;
     },
     checkAvailability: async (input: {
-      client: ClientConfig; providerEventTypeSlug: string; start: string; end: string;
+      client: ClientConfig; providerEventTypeSlug: string; providerEventTypeId?: string;
+      start: string; end: string;
     }) => {
       const { tenant } = await resolveCalcomTenantConnection(store, input.client);
       return calcom.checkAvailability(tenant, {
-        eventTypeSlug: input.providerEventTypeSlug, start: input.start, end: input.end,
+        eventTypeSlug: input.providerEventTypeSlug,
+        eventTypeId: input.providerEventTypeId,
+        start: input.start,
+        end: input.end,
       });
     },
     createBooking: async (input: {
-      client: ClientConfig; providerEventTypeSlug: string; start: string; conversationId: string;
+      client: ClientConfig; providerEventTypeSlug: string; providerEventTypeId?: string;
+      start: string; conversationId: string;
     }) => {
       const { tenant } = await resolveCalcomTenantConnection(store, input.client);
       const email = await calcom.fetchAccountEmail(tenant);
       if (!email) throw new Error("synthetic_booking_email_unavailable");
       return calcom.createBooking(tenant, {
         eventTypeSlug: input.providerEventTypeSlug,
+        eventTypeId: input.providerEventTypeId,
         start: input.start,
         attendeeName: "Robinexis readiness test",
         attendeeEmail: email,
@@ -179,7 +187,10 @@ async function provisionCalendarEventTypes(
   const existingMappings = await store.listCalendarEventTypes(client.id);
   const remote = await external(() => (adapter || calcom).listEventTypes(tenant));
   const results: CalendarEventType[] = [];
-  for (const service of client.services) {
+  // Several services can share one calendar slug (four 30-minute treatments book
+  // the same 30-minute slot), and one provider event type serves them all.
+  const distinctServices = [...new Map(client.services.map((service) => [service.slug, service])).values()];
+  for (const service of distinctServices) {
     const providerSlug = providerServiceSlug(client.slug, service.slug);
     const mapping = existingMappings.find((item) => item.serviceSlug === service.slug);
     const remoteEvent = remote.find((item) =>
@@ -252,6 +263,21 @@ async function provisionCalendarEventTypes(
   await store.upsertCalendarEventType(readinessRow);
   results.push(readinessRow);
   return results;
+}
+
+/**
+ * Rebuilds a tenant's event types and mappings after they drift out of sync with
+ * Cal.com — a deleted event type, or an account moved into an organisation.
+ */
+export async function repairCalendarEventTypes(
+  store: PlatformStore,
+  client: ClientConfig,
+  now = new Date(),
+): Promise<CalendarEventType[]> {
+  const connection = (await store.listCalendarConnections(client.id))
+    .find((item) => item.provider === "calcom" && item.status === "active");
+  if (!connection) throw new Error("calendar_connection_required");
+  return provisionCalendarEventTypes(store, client, connection.id, undefined, now, (call) => call());
 }
 
 function credentialHash(value: string): string {
@@ -751,6 +777,7 @@ async function provisionClientAgentAttempt(
   const availability = await external(() => tests.checkAvailability({
     client,
     providerEventTypeSlug: eventType.providerSlug,
+    providerEventTypeId: eventType.providerEventTypeId,
     start: startRange,
     end: endRange,
   }));
@@ -773,6 +800,7 @@ async function provisionClientAgentAttempt(
       const booking = await external(() => tests.createBooking({
         client,
         providerEventTypeSlug: eventType.providerSlug,
+        providerEventTypeId: eventType.providerEventTypeId,
         start: availability.slots[0],
         conversationId,
       }));

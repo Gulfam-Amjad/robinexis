@@ -179,6 +179,7 @@ export function createToolExecutor(opts: {
         if (!live.apiKey || !live.username) throw new Error("calendar_not_configured");
         return calcom.checkAvailability(live, {
           eventTypeSlug: String(input.eventTypeSlug),
+          eventTypeId: input.eventTypeId ? String(input.eventTypeId) : undefined,
           start: String(input.start),
           end: String(input.end),
         });
@@ -204,6 +205,7 @@ export function createToolExecutor(opts: {
         ].filter(Boolean);
         const payload = {
           eventTypeSlug: String(input.eventTypeSlug),
+          eventTypeId: input.eventTypeId ? String(input.eventTypeId) : undefined,
           start: String(input.start),
           attendeeName: String(input.attendeeName),
           attendeeEmail,

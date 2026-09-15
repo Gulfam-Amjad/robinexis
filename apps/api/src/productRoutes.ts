@@ -52,6 +52,8 @@ import {
   enqueueLifecycleEmail,
   twilioOAuthAuthorizeUrl,
   verifyTwilioOAuthState,
+  probeCalcomForClient,
+  publicCalcomProbe,
   resolveCalcomTenantConnection,
   revokeCalcomOAuthToken,
   verifyCalcomOAuthState,
@@ -62,6 +64,7 @@ import {
   approvedWebsiteMarkdown,
   validatePublicWebsiteUrl,
   type NormalizedWebsiteFact,
+  type PublicCalcomProbe,
 } from "@robinexis/integrations";
 import { GeminiEmbeddingProvider, KnowledgeService } from "@robinexis/knowledge";
 import {
@@ -71,7 +74,7 @@ import {
   type AuthenticatedActor,
 } from "./auth.js";
 import { ensureSelfServeWorkspace, writableClientId } from "./billingService.js";
-import { provisionClientAgent } from "./provisioningService.js";
+import { provisionClientAgent, repairCalendarEventTypes } from "./provisioningService.js";
 
 export type ProductSend = (
   res: http.ServerResponse,
@@ -493,12 +496,77 @@ function filterCalls(calls: CallSession[], url: URL): CallSession[] {
   });
 }
 
+/**
+ * A calendar_connections row only records that a tenant once connected. It says
+ * nothing about whether the event types the agent books against still exist, so
+ * connection health has to come from a live probe of the mapped event type.
+ * Cached briefly because the dashboard polls far more often than Cal.com changes.
+ */
+const calendarProbeCache = new Map<string, { probe: PublicCalcomProbe; expiresAt: number }>();
+const CALENDAR_PROBE_TTL_MS = 60_000;
+
+export async function probeTenantCalendar(
+  store: PlatformStore,
+  client: ClientConfig,
+  now = Date.now(),
+): Promise<PublicCalcomProbe> {
+  const cached = calendarProbeCache.get(client.id);
+  if (cached && cached.expiresAt > now) return cached.probe;
+
+  const probedAt = new Date(now).toISOString();
+  const shape = (probe: PublicCalcomProbe) => {
+    calendarProbeCache.set(client.id, { probe, expiresAt: now + CALENDAR_PROBE_TTL_MS });
+    return probe;
+  };
+
+  const connected = (await store.listCalendarConnections(client.id))
+    .some((item) => item.provider === "calcom" && item.status === "active");
+  if (!connected) {
+    return shape(publicCalcomProbe({ configured: false, username: "", eventTypeSlug: "", probedAt }));
+  }
+  const mappings = (await store.listCalendarEventTypes(client.id))
+    .filter((item) => item.status === "active" && !item.readinessOnly);
+  const mapping = mappings[0];
+  if (!mapping) {
+    return shape(publicCalcomProbe({
+      configured: true, username: client.calendar.username || "", eventTypeSlug: "",
+      error: "no_booking_types_configured", probedAt,
+    }));
+  }
+  try {
+    const { tenant } = await resolveCalcomTenantConnection(store, client);
+    return shape(await probeCalcomForClient({
+      client,
+      tenant,
+      eventTypeSlug: mapping.providerSlug,
+      eventTypeId: mapping.providerEventTypeId,
+    }));
+  } catch (error) {
+    return shape(publicCalcomProbe({
+      configured: true, username: client.calendar.username || "", eventTypeSlug: mapping.providerSlug,
+      error: error instanceof Error ? error.message : String(error), probedAt,
+    }));
+  }
+}
+
+/** Turns a probe failure into something a salon owner can act on. */
+export function calendarDetail(calendar: Record<string, unknown>): string {
+  const error = String(calendar.error || "");
+  if (!error || error === "calcom_not_configured") return "Not connected";
+  if (error === "no_booking_types_configured") return "Connected, but no booking types exist yet — repair the calendar";
+  if (/Event Type not found|HTTP 404/i.test(error)) return "Booking types are missing in Cal.com — repair the calendar";
+  if (/tenant_calendar_(connection|credential)_required|calcom_reconnect_required/.test(error)) {
+    return "Cal.com needs reconnecting";
+  }
+  return error.slice(0, 160);
+}
+
 export function integrationList(client: ClientConfig, calendar: Record<string, unknown>) {
   const now = new Date().toISOString();
   return [
     { id: "twilio", name: "Twilio", connected: Boolean(client.inboundNumbers.length), detail: client.inboundNumbers.length ? "Inbound numbers route directly to ElevenLabs" : "No inbound number assigned", lastCheckedAt: now },
     { id: "elevenlabs", name: "ElevenLabs", connected: client.voicePipeline === "elevenlabs-convai" && Boolean(client.elevenlabsAgentId), detail: client.elevenlabsAgentId ? "Realtime speech, barge-in and agent conversation" : "Assign this workspace's ElevenLabs agent ID", lastCheckedAt: now },
-    { id: "calcom", name: "Cal.com", connected: Boolean(calendar.ok), detail: calendar.ok ? `${calendar.slotCount || 0} slots available` : String(calendar.error || "Not connected"), lastCheckedAt: String(calendar.probedAt || now) },
+    { id: "calcom", name: "Cal.com", connected: Boolean(calendar.ok), detail: calendar.ok ? `${calendar.slotCount || 0} slots available in the next 7 days` : calendarDetail(calendar), lastCheckedAt: String(calendar.probedAt || now) },
     { id: "gemini", name: "Gemini", connected: Boolean(process.env.GEMINI_API_KEY), detail: "Knowledge embeddings", lastCheckedAt: now },
     { id: "stripe", name: "Stripe", connected: Boolean(process.env.STRIPE_SECRET_KEY), detail: "Billing webhook", lastCheckedAt: now },
     { id: "database", name: "PostgreSQL", connected: Boolean(process.env.DATABASE_URL), detail: "Tenant data and pgvector", lastCheckedAt: now },
@@ -1223,10 +1291,9 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
     const periodSummary = selected
       ? await store.getAnalyticsSummary(selected.id, { from, to })
       : undefined;
-    const activeCalendar = selected
-      ? (await store.listCalendarConnections(selected.id)).some((item) => item.provider === "calcom" && item.status === "active")
-      : false;
-    const calendar = activeCalendar ? { ok: true, slotCount: 0 } : { ok: false, error: "Not connected" };
+    const calendar = selected
+      ? await probeTenantCalendar(store, selected)
+      : { ok: false, error: "calcom_not_configured" };
     send(res, 200, {
       clients: clients.map((item) => safeEditableClient(item)),
       client: selected ? safeEditableClient(selected) : null,
@@ -3476,6 +3543,34 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
     return true;
   }
 
+  const calendarRepairMatch = route.match(/^\/clients\/([^/]+)\/calendar-connection\/repair$/);
+  if (calendarRepairMatch && req.method === "POST") {
+    const client = await requireManageClient(ctx, calendarRepairMatch[1]);
+    if (!client) return true;
+    try {
+      const eventTypes = await repairCalendarEventTypes(store, client);
+      calendarProbeCache.delete(client.id);
+      await store.appendOperatorAudit({
+        id: newId("audit_"), clientId: client.id, actorId: actor.subject,
+        action: "calendar.repaired",
+        detail: { eventTypes: eventTypes.map((item) => item.providerSlug) },
+        createdAt: new Date().toISOString(),
+      });
+      send(res, 200, {
+        eventTypes: eventTypes.map((item) => ({
+          serviceSlug: item.serviceSlug,
+          providerSlug: item.providerSlug,
+          durationMinutes: item.durationMinutes,
+          readinessOnly: item.readinessOnly ?? false,
+        })),
+        probe: await probeTenantCalendar(store, client),
+      });
+    } catch (error) {
+      send(res, 502, { error: error instanceof Error ? error.message : "calendar_repair_failed" });
+    }
+    return true;
+  }
+
   const calcomStartMatch = route.match(/^\/clients\/([^/]+)\/calendar-connection\/oauth\/start$/);
   if (calcomStartMatch && req.method === "POST") {
     const client = await requireManageClient(ctx, calcomStartMatch[1]);
@@ -3621,9 +3716,7 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
   if (route === "/integrations/status" && req.method === "GET") {
     const client = await requireClient(ctx, clientId(url));
     if (!client) return true;
-    const connected = (await store.listCalendarConnections(client.id))
-      .some((item) => item.provider === "calcom" && item.status === "active");
-    const calendar = connected ? { ok: true, slotCount: 0 } : { ok: false, error: "Not connected" };
+    const calendar = await probeTenantCalendar(store, client);
     send(res, 200, { items: integrationList(client, calendar) });
     return true;
   }

@@ -58,16 +58,23 @@ export function calcomTenantFromClient(
   };
 }
 
+/**
+ * Probes the event type the voice tools actually book against, so the dashboard
+ * cannot report a healthy calendar while every call fails. Pass the mapping from
+ * calendar_event_types; the raw service slug is only a legacy fallback.
+ */
 export async function probeCalcomForClient(opts: {
   client: ClientConfig | undefined;
   eventTypeSlug?: string;
+  eventTypeId?: string;
+  tenant?: CalcomTenant;
 }): Promise<PublicCalcomProbe> {
   const slug =
     opts.eventTypeSlug ||
     opts.client?.services[0]?.slug ||
     "15min";
-  const tenant = calcomTenantFromClient(opts.client);
-  const configured = Boolean(tenant.apiKey && tenant.username);
+  const tenant = opts.tenant || calcomTenantFromClient(opts.client);
+  const configured = Boolean(tenant.apiKey && (tenant.username || opts.eventTypeId));
   if (!configured) {
     return publicCalcomProbe({ configured: false, username: tenant.username, eventTypeSlug: slug });
   }
@@ -76,6 +83,7 @@ export async function probeCalcomForClient(opts: {
   try {
     const { slots } = await checkAvailability(tenant, {
       eventTypeSlug: slug,
+      eventTypeId: opts.eventTypeId,
       start: start.toISOString(),
       end: end.toISOString(),
     });

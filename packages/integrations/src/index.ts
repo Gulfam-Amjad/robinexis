@@ -1,7 +1,7 @@
 export { createToolExecutor } from "./tools.js";
 export { FakeCalendar } from "./fakeCalendar.js";
 export * as calcom from "./calcom.js";
-export { maskCalcomUsername } from "./calcom.js";
+export { checkAvailability, maskCalcomUsername } from "./calcom.js";
 export {
   CALCOM_SCOPES,
   calcomOAuthAuthorizeUrl,
@@ -78,6 +78,7 @@ export {
   publicCalcomProbe,
   publicClientView,
 } from "./dashboardStatus.js";
+export type { PublicCalcomProbe } from "./dashboardStatus.js";
 export {
   guestEmailFromPhone,
   isDialableE164,

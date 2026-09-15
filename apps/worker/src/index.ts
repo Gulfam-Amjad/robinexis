@@ -9,7 +9,13 @@ import {
   seedStore,
   structuredLog,
 } from "@robinexis/database";
-import { processNotificationDeliveries, reconcileStripe } from "@robinexis/integrations";
+import {
+  checkAvailability,
+  enqueueLifecycleEmail,
+  processNotificationDeliveries,
+  reconcileStripe,
+  resolveCalcomTenantConnection,
+} from "@robinexis/integrations";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 loadEnv({ path: path.resolve(__dirname, "../../../.env") });
@@ -25,7 +31,13 @@ const HEALTH_STALE_MS = Math.max(
   POLL * 4,
   Number(process.env.WORKER_HEALTH_STALE_MS) || 120_000,
 );
+const CALENDAR_HEALTH_INTERVAL_MS = Math.max(
+  5 * 60_000,
+  Number(process.env.CALENDAR_HEALTH_INTERVAL_MS) || 30 * 60_000,
+);
 let lastReconcile = 0;
+let lastCalendarHealthRun = 0;
+const calendarHealth = new Map<string, "ok" | "failed">();
 let lastTickSucceededAt = 0;
 let lastTickFailedAt = 0;
 let tickRunning = false;
@@ -161,6 +173,82 @@ async function retryProvisioningRuns(store: Awaited<ReturnType<typeof getStore>>
   }
 }
 
+/**
+ * Blades' event types were deleted out from under the platform and nothing
+ * noticed until a customer reported it, so every bookable tenant is probed on
+ * the event type its agent books against. Zero slots only warns — a fully booked
+ * salon is normal; a provider error means the calendar is genuinely unreachable.
+ */
+async function monitorCalendarHealth(store: Awaited<ReturnType<typeof getStore>>) {
+  if (Date.now() - lastCalendarHealthRun < CALENDAR_HEALTH_INTERVAL_MS) return;
+  lastCalendarHealthRun = Date.now();
+  const start = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  const end = new Date(Date.now() + 8 * 24 * 60 * 60 * 1000).toISOString();
+
+  for (const client of await store.listClients()) {
+    if (!client.enabledFeatures.includes("booking")) continue;
+    const connected = (await store.listCalendarConnections(client.id))
+      .some((item) => item.provider === "calcom" && item.status === "active");
+    if (!connected) continue;
+
+    const mapping = (await store.listCalendarEventTypes(client.id))
+      .find((item) => item.status === "active" && !item.readinessOnly);
+    let failure: string | undefined;
+    let slotCount = 0;
+    if (!mapping) {
+      failure = "no_booking_types_configured";
+    } else {
+      try {
+        const { tenant } = await resolveCalcomTenantConnection(store, client);
+        const availability = await checkAvailability(tenant, {
+          eventTypeSlug: mapping.providerSlug,
+          eventTypeId: mapping.providerEventTypeId,
+          start,
+          end,
+        });
+        slotCount = availability.slots.length;
+      } catch (error) {
+        failure = error instanceof Error ? error.message : String(error);
+      }
+    }
+
+    const previous = calendarHealth.get(client.id);
+    calendarHealth.set(client.id, failure ? "failed" : "ok");
+    if (failure) {
+      structuredLog("calendar_health_failed", {
+        tenantId: client.id,
+        eventType: mapping?.providerSlug,
+        error: failure.replace(/Bearer\s+\S+/gi, "Bearer [redacted]").slice(0, 200),
+      });
+      if (previous !== "failed") {
+        await enqueueLifecycleEmail({
+          store,
+          clientId: client.id,
+          operationId: `calendar_health_${client.id}`,
+          idempotencyKey: `calendar_health:${client.id}:${new Date().toISOString().slice(0, 13)}`,
+          to: process.env.SUPPORT_EMAIL,
+          template: [
+            `${client.businessName}: the booking calendar is not reachable`,
+            "",
+            `Workspace: ${client.businessName} (${client.id})`,
+            `Booking type: ${mapping?.providerSlug || "none configured"}`,
+            `Error: ${failure.slice(0, 200)}`,
+            "",
+            "The voice agent cannot take bookings until this is repaired.",
+          ].join("\n"),
+        });
+      }
+    } else {
+      if (!slotCount) {
+        structuredLog("calendar_health_no_slots", { tenantId: client.id, eventType: mapping?.providerSlug });
+      }
+      if (previous === "failed") {
+        structuredLog("calendar_health_recovered", { tenantId: client.id, eventType: mapping?.providerSlug });
+      }
+    }
+  }
+}
+
 async function tick() {
   const store = await getStore();
   const now = new Date();
@@ -198,6 +286,7 @@ async function tick() {
     structuredLog("notification_outbox_processed", { ...notifications, workerId: WORKER_ID });
   }
   await retryProvisioningRuns(store);
+  await monitorCalendarHealth(store);
 }
 
 async function runTick() {

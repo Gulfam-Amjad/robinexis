@@ -408,6 +408,11 @@ export const api = {
       `/api/v1/clients/${encodeURIComponent(clientId)}/calendar-connection`,
       { method: "DELETE" },
     ),
+  repairCalendar: (clientId: string) =>
+    request<{
+      eventTypes: Array<{ serviceSlug: string; providerSlug: string; durationMinutes: number; readinessOnly: boolean }>;
+      probe: { ok: boolean; slotCount: number; error?: string };
+    }>(`/api/v1/clients/${encodeURIComponent(clientId)}/calendar-connection/repair`, { method: "POST" }),
   documents: async (clientId: string) =>
     list(await request<KnowledgeDocument[] | ListResponse<KnowledgeDocument>>(`/api/v1/knowledge/documents${query({ clientId })}`)),
   createDocument: async (input: { clientId: string; title: string; source?: string; content?: string; file?: File }) => {

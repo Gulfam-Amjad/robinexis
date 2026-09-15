@@ -128,6 +128,7 @@ export async function runVoiceTool(
   const eventTypeMapping = (await store.listCalendarEventTypes(client.id))
     .find((item) => item.serviceSlug === eventTypeSlug && item.status === "active");
   const providerEventTypeSlug = eventTypeMapping?.providerSlug || eventTypeSlug;
+  const providerEventTypeId = eventTypeMapping?.providerEventTypeId;
 
   const exec = createToolExecutor({ ...options, store });
       const conversationId = String(input.conversationId || "").trim();
@@ -144,7 +145,7 @@ export async function runVoiceTool(
     }
     const result = await exec({
       name: "check_availability",
-      input: { eventTypeSlug: providerEventTypeSlug, start, end },
+      input: { eventTypeSlug: providerEventTypeSlug, eventTypeId: providerEventTypeId, start, end },
       call,
       client,
     });
@@ -169,6 +170,7 @@ export async function runVoiceTool(
     name: "check_availability",
     input: {
       eventTypeSlug: providerEventTypeSlug,
+      eventTypeId: providerEventTypeId,
       start,
       end: new Date(Date.parse(start) + duration * 60_000).toISOString(),
     },
@@ -190,6 +192,7 @@ export async function runVoiceTool(
     name: "create_booking",
     input: {
       eventTypeSlug: providerEventTypeSlug,
+      eventTypeId: providerEventTypeId,
       start,
       attendeeName,
       attendeePhone,
