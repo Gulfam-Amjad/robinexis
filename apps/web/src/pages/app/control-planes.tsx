@@ -117,6 +117,148 @@ export function BusinessPage() {
   return <WorkspaceGate>{(clientId) => <BusinessControl clientId={clientId} />}</WorkspaceGate>;
 }
 
+/** Turns a scanned fact into the text the business form expects. */
+function factText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => (typeof item === "string" ? item : JSON.stringify(item)))
+      .join("\n");
+  }
+  if (value === null || value === undefined) return "";
+  return JSON.stringify(value, null, 2);
+}
+
+/** Scanned services arrive as objects; the form stores "Name | slug | minutes". */
+function servicesText(value: unknown): string {
+  if (!Array.isArray(value)) return factText(value);
+  return value
+    .map((item) => {
+      const service = item as { title?: string; name?: string; slug?: string; durationMinutes?: number };
+      const title = service.title || service.name || "";
+      if (!title) return "";
+      const slug = service.slug || title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+      return `${title} | ${slug} | ${service.durationMinutes || 30}`;
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function WebsiteScanCard({
+  clientId,
+  canEdit,
+  onApply,
+}: {
+  clientId: string;
+  canEdit: boolean;
+  onApply: (facts: Record<string, unknown>) => void;
+}) {
+  const { push } = useToast();
+  const queryClient = useQueryClient();
+  const [url, setUrl] = useState("");
+  const intelligence = useQuery({
+    queryKey: ["website-intelligence", clientId],
+    queryFn: () => api.websiteIntelligence(clientId),
+    retry: false,
+  });
+  useEffect(() => {
+    const latest = intelligence.data?.sources[0]?.url;
+    if (latest) setUrl((current) => current || latest);
+  }, [intelligence.data?.sources]);
+
+  const scan = useMutation({
+    mutationFn: () => api.scanWebsite(clientId, url.trim()),
+    onSuccess: async (state) => {
+      queryClient.setQueryData(["website-intelligence", clientId], state);
+      push({
+        title: "Website scanned",
+        message: `${state.facts.length} details found${state.gaps.length ? `, ${state.gaps.length} still missing` : ""}`,
+        tone: "success",
+      });
+    },
+    onError: (error) => push({
+      title: "Website scan failed",
+      message: error.message === "firecrawl_not_configured"
+        ? "The scraper is not configured yet — FIRECRAWL_API_KEY is missing on the server."
+        : error.message,
+      tone: "error",
+    }),
+  });
+
+  const facts = intelligence.data?.facts || [];
+  const gaps = intelligence.data?.gaps || [];
+  return (
+    <Card className="form-card">
+      <SectionHeading
+        title="Scan your website"
+        description="Paste your public website and Robinexis reads your hours, services, prices and policies so the receptionist speaks from them. Nothing is published until you save and publish."
+      />
+      <div className="form-grid">
+        <Field label="Website address" hint="Public pages only, for example https://bladeshair.co.uk">
+          <input
+            type="url"
+            inputMode="url"
+            placeholder="https://your-salon.co.uk"
+            value={url}
+            onChange={(event) => setUrl(event.target.value)}
+            disabled={!canEdit || scan.isPending}
+          />
+        </Field>
+        <Button
+          type="button"
+          disabled={!canEdit || !url.trim() || scan.isPending}
+          onClick={() => scan.mutate()}
+        >
+          <RefreshCw size={15} /> {scan.isPending ? "Reading your site…" : "Scan website"}
+        </Button>
+      </div>
+      {intelligence.data?.run?.status === "failed" && (
+        <p className="muted">Last scan failed: {intelligence.data.run.error || "unknown error"}</p>
+      )}
+      {facts.length > 0 && (
+        <>
+          <div className="form-actions">
+            <Badge tone="success">{facts.length} details found</Badge>
+            {gaps.length > 0 && <Badge tone="warning">{gaps.length} still missing</Badge>}
+            {canEdit && (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  onApply(Object.fromEntries(facts.map((fact) => [fact.key, fact.value])));
+                  push({ title: "Copied into the form below", message: "Review every line, then save the draft.", tone: "success" });
+                }}
+              >
+                Fill the form from this scan
+              </Button>
+            )}
+          </div>
+          <ul className="fact-list">
+            {facts.map((fact) => (
+              <li key={fact.id}>
+                <strong>{fact.key}</strong>
+                {typeof fact.confidence === "number" && (
+                  <Badge tone={fact.confidence >= 0.85 ? "success" : "warning"}>
+                    {Math.round(fact.confidence * 100)}% confident
+                  </Badge>
+                )}
+                <p>{factText(fact.value).slice(0, 400)}</p>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {gaps.length > 0 && (
+        <ul className="fact-list">
+          {gaps.map((gap) => (
+            <li key={gap.key}><strong>Still needed: {gap.key.replaceAll("_", " ")}</strong><p>{gap.detail}</p></li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
 function BusinessControl({ clientId }: { clientId: string }) {
   const { canEditWorkspace } = usePermissions(clientId);
   const { push } = useToast();
@@ -125,6 +267,14 @@ function BusinessControl({ clientId }: { clientId: string }) {
   const initial = useMemo(() => businessDraft(client.data), [client.data]);
   const [draft, setDraft] = useState<BusinessDraft>(initial);
   useEffect(() => setDraft(initial), [initial]);
+  const applyScan = (facts: Record<string, unknown>) => setDraft((current) => ({
+    ...current,
+    businessName: typeof facts.businessName === "string" ? facts.businessName : current.businessName,
+    hours: facts.hours ? factText(facts.hours) : current.hours,
+    services: facts.services ? servicesText(facts.services) : current.services,
+    prices: facts.pricing ? factText(facts.pricing) : current.prices,
+    policies: facts.cancellationRules ? factText(facts.cancellationRules) : current.policies,
+  }));
   const dirty = JSON.stringify(draft) !== JSON.stringify(initial);
   useUnsavedChanges(dirty);
   const save = useMutation({
@@ -147,6 +297,7 @@ function BusinessControl({ clientId }: { clientId: string }) {
   const change = (key: keyof BusinessDraft) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setDraft((value) => ({ ...value, [key]: event.target.value }));
   return <>
     <PageHeader eyebrow="Business" title="One source of truth for every call" description="Keep location, opening hours, services, pricing and policies accurate. Saved changes become a reviewable draft." />
+    <WebsiteScanCard clientId={clientId} canEdit={canEditWorkspace} onApply={applyScan} />
     <form className="control-form" onSubmit={(event) => { event.preventDefault(); save.mutate(); }}>
       <fieldset disabled={!canEditWorkspace || save.isPending}>
         <Card className="form-card"><SectionHeading title="Business profile" description={!canEditWorkspace ? "Viewer access · read only" : "Public details the receptionist may share."} /><div className="form-grid">
