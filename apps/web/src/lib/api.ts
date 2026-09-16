@@ -100,6 +100,9 @@ export const api = {
       monthlyPricePence: number | null;
       trialDays: number;
       includedMinutes: number;
+      calendarLimit: number | null;
+      locationLimit: number | null;
+      phoneProvisioning: { customerOwned: boolean; managed: boolean };
       features: Array<{ id: string; operational: boolean }>;
     }>;
     currency: "GBP";
@@ -282,9 +285,9 @@ export const api = {
       { method: "PATCH", body: JSON.stringify(input) },
     ),
   approveWebsiteFacts: (id: string, runId: string) =>
-    request<{ approved: true; published: false }>(
+    request<{ approved: true; published: false; indexingStatus: string; indexingError?: string }>(
       `/api/v1/clients/${encodeURIComponent(id)}/website-intelligence/runs/${encodeURIComponent(runId)}/approve-indexing`,
-      { method: "POST", body: JSON.stringify({ indexKnowledge: false }) },
+      { method: "POST", body: JSON.stringify({ indexKnowledge: true }) },
     ),
   finalizeOnboarding: (id: string, input: {
     businessName: string;

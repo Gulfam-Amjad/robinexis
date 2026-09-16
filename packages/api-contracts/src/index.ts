@@ -179,6 +179,8 @@ export interface AdminControlPlane {
     provider: string;
     resourceType: string;
     lifecycleStatus: string;
+    assignmentState?: string;
+    accessReason?: string;
     healthy: boolean;
     updatedAt: string;
   }>;

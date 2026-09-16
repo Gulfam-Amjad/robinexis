@@ -46,6 +46,7 @@ function SetupControl({ clientId }: { clientId: string }) {
   const runs = useQuery({ queryKey: ["provisioning", clientId], queryFn: () => api.provisioningRuns(clientId), retry: false });
   const integrations = useQuery({ queryKey: ["integrations", clientId], queryFn: () => api.integrations(clientId), retry: false });
   const notifications = useQuery({ queryKey: ["notification-status", clientId], queryFn: () => api.notificationStatus(clientId), retry: false });
+  const usage = useQuery({ queryKey: ["usage", clientId], queryFn: () => api.usage(clientId), retry: false });
   const latest = runs.data?.items[0];
   const readiness = latest?.output?.readinessReport;
   const blockers = readiness?.hardGaps || (latest?.error ? [latest.error] : []);
@@ -73,7 +74,23 @@ function SetupControl({ clientId }: { clientId: string }) {
       <MetricCard label="Readiness" value={readiness ? readiness.passed ? "Passed" : "Blocked" : "Not run"} detail={readiness?.generatedAt ? formatDate(readiness.generatedAt) : "Waiting for isolated tests"} icon={ShieldCheck} tone={readiness?.passed ? "sage" : "cream"} />
       <MetricCard label="Connections" value={`${readyConnections}/${integrations.data?.length || 0}`} detail={integrations.error ? "Health unavailable" : "Provider health checks"} icon={Activity} />
       <MetricCard label="Updates" value={notifications.data?.failed ? "Needs attention" : notifications.data?.pending ? "Sending" : "Delivered"} detail={notifications.data?.lastDeliveryAt ? formatDate(notifications.data.lastDeliveryAt) : "Lifecycle notification status"} icon={Activity} tone={notifications.data?.failed ? "peach" : "sage"} />
+      <MetricCard label={`${usage.data?.plan || "Plan"} allowance`} value={`${usage.data?.remainingMinutes ?? 0} min`} detail={`${usage.data?.usedMinutes ?? 0} used this period`} icon={Clock3} tone={(usage.data?.remainingMinutes ?? 0) > 0 ? "sage" : "peach"} />
     </div>
+    <Card className="panel">
+      <SectionHeading title="Your launch path" description="Four clear stages from payment to a live receptionist." />
+      <div className="team-list">
+        {[
+          { label: "1. Plan active", done: ["active", "trialing"].includes(client.serviceStatus), detail: "Stripe subscription and minute allowance" },
+          { label: "2. Business reviewed", done: ["ready_to_provision", "provisioning", "testing", "awaiting_approval", "active"].includes(status), detail: "Website facts, services and call behaviour" },
+          { label: "3. Phone and calendar connected", done: Boolean(client.requestedPhoneNumber) && readyConnections > 0, detail: "Customer-owned Twilio plus tenant-scoped Cal.com" },
+          { label: "4. Tested and activated", done: status === "active", detail: "Readiness booking, cancellation and owner approval" },
+        ].map((stage) => <div className="team-row" key={stage.label}>
+          {stage.done ? <CheckCircle2 /> : <Clock3 />}
+          <div><strong>{stage.label}</strong><small>{stage.detail}</small></div>
+          <Badge tone={stage.done ? "success" : "neutral"}>{stage.done ? "Complete" : "Next"}</Badge>
+        </div>)}
+      </div>
+    </Card>
     {client.onboardingNotes && <div className="notice"><div><Activity /><span><strong>Setup update</strong> {client.onboardingNotes}</span></div></div>}
     <div className="overview-grid">
       <Card className="panel">
@@ -144,6 +161,18 @@ function servicesText(value: unknown): string {
     .join("\n");
 }
 
+function pricesText(value: unknown): string {
+  if (!Array.isArray(value)) return "";
+  return value
+    .map((item) => {
+      const service = item as { title?: string; name?: string; price?: string };
+      const title = service.title || service.name || "";
+      return title && service.price ? `${title}: ${service.price}` : "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
 function WebsiteScanCard({
   clientId,
   canEdit,
@@ -184,9 +213,42 @@ function WebsiteScanCard({
       tone: "error",
     }),
   });
+  const review = useMutation({
+    mutationFn: (factId: string) => {
+      const runId = intelligence.data?.run?.id;
+      if (!runId) throw new Error("website_scan_not_found");
+      return api.reviewWebsiteFact(clientId, runId, factId, { action: "confirm" });
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["website-intelligence", clientId] });
+    },
+    onError: (error) => push({ title: "Could not confirm this detail", message: error.message, tone: "error" }),
+  });
+  const approve = useMutation({
+    mutationFn: () => {
+      const runId = intelligence.data?.run?.id;
+      if (!runId) throw new Error("website_scan_not_found");
+      return api.approveWebsiteFacts(clientId, runId);
+    },
+    onSuccess: async (result) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["website-intelligence", clientId] }),
+        queryClient.invalidateQueries({ queryKey: ["client", clientId] }),
+      ]);
+      push({
+        title: "Website facts approved",
+        message: result.indexingStatus === "failed"
+          ? `Draft saved, but knowledge indexing failed: ${result.indexingError || "unknown error"}`
+          : "The approved facts are saved as a draft and indexed for the receptionist. Nothing was published.",
+        tone: result.indexingStatus === "failed" ? "error" : "success",
+      });
+    },
+    onError: (error) => push({ title: "Could not approve website facts", message: error.message, tone: "error" }),
+  });
 
   const facts = intelligence.data?.facts || [];
   const gaps = intelligence.data?.gaps || [];
+  const allReviewed = facts.length > 0 && facts.every((fact) => fact.reviewStatus !== "extracted");
   return (
     <Card className="form-card">
       <SectionHeading
@@ -232,6 +294,15 @@ function WebsiteScanCard({
                 Fill the form from this scan
               </Button>
             )}
+            {canEdit && (
+              <Button
+                type="button"
+                disabled={!allReviewed || approve.isPending}
+                onClick={() => approve.mutate()}
+              >
+                {approve.isPending ? "Indexing…" : "Approve and index"}
+              </Button>
+            )}
           </div>
           <ul className="fact-list">
             {facts.map((fact) => (
@@ -243,6 +314,17 @@ function WebsiteScanCard({
                   </Badge>
                 )}
                 <p>{factText(fact.value).slice(0, 400)}</p>
+                {canEdit && fact.reviewStatus === "extracted" && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={review.isPending}
+                    onClick={() => review.mutate(fact.id)}
+                  >
+                    Confirm this detail
+                  </Button>
+                )}
               </li>
             ))}
           </ul>
@@ -272,7 +354,7 @@ function BusinessControl({ clientId }: { clientId: string }) {
     businessName: typeof facts.businessName === "string" ? facts.businessName : current.businessName,
     hours: facts.hours ? factText(facts.hours) : current.hours,
     services: facts.services ? servicesText(facts.services) : current.services,
-    prices: facts.pricing ? factText(facts.pricing) : current.prices,
+    prices: facts.services ? pricesText(facts.services) || current.prices : current.prices,
     policies: facts.cancellationRules ? factText(facts.cancellationRules) : current.policies,
   }));
   const dirty = JSON.stringify(draft) !== JSON.stringify(initial);
@@ -435,7 +517,7 @@ export function AdminControlPlanePage() {
     <Card className="panel"><SectionHeading title="Blades baseline status" description="Protected baseline health only; no provider identifiers or prompt content are exposed." /><div className="deferred-row"><Bot /><div><strong>{data.data!.blades.present ? "Baseline tenant present" : "Baseline tenant missing"}</strong><p>{data.data!.blades.published ? "Published" : "Not published"} · {data.data!.blades.inboundActive ? "Inbound active" : "Inbound inactive"} · {data.data!.blades.serviceStatus || "No service status"}</p></div><Badge tone={data.data!.blades.present && data.data!.blades.published ? "success" : "warning"}>{data.data!.blades.present ? "Tracked" : "Attention"}</Badge></div></Card>
     <div className="overview-grid">
       <Card className="panel"><SectionHeading title="Provisioning and failed jobs" description="Open a tenant setup console to review readiness, retry a failed run, pause work, or record review." />{data.data!.provisioning.length ? <div className="team-list">{data.data!.provisioning.map((item) => <div className="team-row" key={item.clientId}><span className="client-avatar">{item.businessName.slice(0, 2).toUpperCase()}</span><div><strong>{item.businessName}</strong><small>{item.step?.replaceAll("_", " ") || item.onboardingStatus?.replaceAll("_", " ") || "Queued"}</small></div><Badge tone={statusTone(item.runStatus)}>{item.runStatus || "waiting"}</Badge><Link className="button button-secondary button-sm" to={`/admin/setup/${item.clientId}`}>Actions</Link></div>)}</div> : <EmptyState icon={CheckCircle2} title="Provisioning queue is clear" description="No staged or failed provisioning work was returned." />}</Card>
-      <Card className="panel"><SectionHeading title="Resource inventory" description="Sanitized lifecycle state; credentials and provider resource IDs stay server-side." />{data.data!.resources.length ? <div className="team-list">{data.data!.resources.map((item, index) => <div className="team-row" key={`${item.clientId}-${item.provider}-${item.resourceType}-${index}`}><Activity /><div><strong>{item.businessName} · {item.provider}</strong><small>{item.resourceType} · {formatDate(item.updatedAt)}</small></div><Badge tone={item.healthy ? "success" : "danger"}>{item.lifecycleStatus}</Badge></div>)}</div> : <EmptyState icon={Activity} title="No provider resources" description="Inventory appears after isolated provisioning begins." />}</Card>
+      <Card className="panel"><SectionHeading title="Resource inventory" description="Sanitized lifecycle state; credentials and provider resource IDs stay server-side." />{data.data!.resources.length ? <div className="team-list">{data.data!.resources.map((item, index) => <div className="team-row" key={`${item.clientId}-${item.provider}-${item.resourceType}-${index}`}><Activity /><div><strong>{item.businessName} · {item.provider}</strong><small>{item.resourceType}{item.assignmentState ? ` · ${item.assignmentState}` : ""}{item.accessReason ? ` · ${item.accessReason.replaceAll("_", " ")}` : ""} · {formatDate(item.updatedAt)}</small></div><Badge tone={item.healthy ? "success" : "danger"}>{item.assignmentState || item.lifecycleStatus}</Badge></div>)}</div> : <EmptyState icon={Activity} title="No provider resources" description="Inventory appears after isolated provisioning begins." />}</Card>
     </div>
     <div className="overview-grid">
       <Card className="panel"><SectionHeading title="Customer request queue" description="Support, invite and lifecycle requests across tenants." />{data.data!.requests.length ? <div className="team-list">{data.data!.requests.map((item) => <div className="team-row" key={item.id}><BookOpen /><div><strong>{item.businessName}</strong><small>{item.type.replaceAll("_", " ")} · {formatDate(item.createdAt)}</small></div><Badge tone={statusTone(item.status)}>{item.status}</Badge></div>)}</div> : <EmptyState icon={Users} title="No customer requests" description="New tenant-scoped requests will appear here." />}</Card>

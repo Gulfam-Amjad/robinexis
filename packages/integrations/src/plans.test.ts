@@ -28,6 +28,9 @@ describe("plan catalog", () => {
     });
     expect(plans.enterprise.monthlyPricePence).toBeNull();
     expect(plans.enterprise.calendarLimit).toBeNull();
+    expect(Object.values(plans).every((plan) =>
+      plan.phoneProvisioning.customerOwned && !plan.phoneProvisioning.managed
+    )).toBe(true);
   });
 
   it("allows minutes to be changed without scattering magic numbers", () => {

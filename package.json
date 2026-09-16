@@ -36,6 +36,7 @@
     "db:seed": "tsx packages/database/src/seed.ts",
     "check:calcom": "tsx packages/integrations/src/verifyCalendar.ts",
     "check:brain": "tsx packages/brain/src/verifyBrain.ts",
+    "check:secrets": "node scripts/scan-secrets.mjs",
     "check:csp-api-origin": "node scripts/verify-csp-api-origin.mjs",
     "test:csp-api-origin": "node --test scripts/verify-csp-api-origin.test.mjs",
     "backup:postgres": "node scripts/backup-postgres.mjs"

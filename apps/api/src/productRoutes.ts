@@ -367,7 +367,7 @@ function initialOnboardingWizard(client: ClientConfig): OnboardingWizardState {
       services: client.services,
       hours: client.hours,
       timezone: client.callingWindow?.tz || "Europe/London",
-      phoneMode: client.phoneAcquisitionMode === "customer_oauth" ? "customer_twilio" : "managed",
+      phoneMode: "customer_twilio",
       customerPhoneNumber: client.requestedPhoneNumber,
       calendarMode: client.calendar?.credentialRef ? "connect_existing" : "managed_calcom",
       existingCalendarProvider: client.calendar?.provider,
@@ -403,13 +403,14 @@ function dataReadinessBlockers(data: OnboardingWizardData) {
   if (!data.hours?.trim()) add("hours", "operations", "Add your opening hours.");
   if (!data.timezone?.trim()) add("timezone", "operations", "Choose your business timezone.");
   if (!data.bookingRules?.trim()) add("booking_rules", "operations", "Add the rules callers should know before booking.");
-  if (!data.phoneMode) add("phone_mode", "phone", "Choose a phone setup route.");
+  if (data.phoneMode !== "customer_twilio") {
+    add("phone_mode", "phone", "Connect a customer-owned Twilio account and number.");
+  }
   if (data.phoneMode === "customer_twilio" && !data.customerPhoneNumber?.match(/^\+[1-9]\d{7,14}$/)) {
     add("customer_phone_number", "phone", "Add the Twilio number you want Robinexis to assess.");
   }
-  if (!data.calendarMode) add("calendar_mode", "calendar", "Choose a calendar setup route.");
-  if (data.calendarMode === "connect_existing" && !data.existingCalendarProvider) {
-    add("calendar_provider", "calendar", "Choose the calendar you want to connect.");
+  if (data.calendarMode !== "managed_calcom") {
+    add("calendar_mode", "calendar", "Use the tenant-scoped Robinexis booking calendar.");
   }
   return blockers;
 }
@@ -931,7 +932,15 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
         provider: resource.provider,
         resourceType: resource.resourceType,
         lifecycleStatus: resource.lifecycleStatus,
-        healthy: resource.lifecycleStatus === "active",
+        assignmentState: resource.resourceType === "phone_number"
+          ? resource.metadata.assignmentState
+          : undefined,
+        accessReason: resource.resourceType === "phone_number"
+          ? resource.metadata.accessReason
+          : undefined,
+        healthy: resource.lifecycleStatus === "active" &&
+          resource.metadata.assignmentState !== "suspended" &&
+          !resource.lastError,
         updatedAt: resource.updatedAt,
       }))),
       requests: tenantRequests.map((request) => ({
@@ -1933,6 +1942,14 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       send(res, 409, { error: "onboarding_not_ready", readiness });
       return true;
     }
+    if (wizard.data.phoneMode !== "customer_twilio" || wizard.data.calendarMode !== "managed_calcom") {
+      send(res, 409, {
+        error: wizard.data.phoneMode !== "customer_twilio"
+          ? "customer_owned_twilio_required"
+          : "tenant_scoped_calcom_required",
+      });
+      return true;
+    }
     const transitionFrom = liveClient.onboardingStatus ?? "integrations_required";
     if (!canTransitionOnboarding(transitionFrom, "ready_to_provision")) {
       send(res, 409, {
@@ -1952,12 +1969,12 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       services: data.services!,
       hours: data.hours!.trim(),
       policies: [data.bookingRules!.trim(), `Recording consent: ${data.recordingConsent}`],
-      phoneAcquisitionMode: data.phoneMode === "customer_twilio" ? "customer_oauth" : "robinexis_account",
-      requestedPhoneNumber: data.phoneMode === "customer_twilio" ? data.customerPhoneNumber : undefined,
+      phoneAcquisitionMode: "customer_oauth",
+      requestedPhoneNumber: data.customerPhoneNumber,
       callingWindow: { ...client.callingWindow, tz: data.timezone! },
       calendar: {
         ...client.calendar,
-        provider: data.calendarMode === "managed_calcom" ? "calcom" : data.existingCalendarProvider!,
+        provider: "calcom",
         schedule: data.calendarSchedule,
       },
       onboardingStatus: "ready_to_provision",
@@ -2896,6 +2913,28 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
           new Date().toISOString(),
         );
         if (assignedProgress.error) throw new Error(assignedProgress.error);
+        const existingPhoneResource = (await store.listProviderResources(client.id))
+          .find((resource) =>
+            resource.provider === "elevenlabs" &&
+            resource.resourceType === "phone_number" &&
+            resource.providerResourceId === providerPhoneNumberId);
+        await store.upsertProviderResource({
+          id: existingPhoneResource?.id || newId("provider_resource_"),
+          clientId: client.id,
+          provider: "elevenlabs",
+          resourceType: "phone_number",
+          providerResourceId: providerPhoneNumberId,
+          lifecycleStatus: "active",
+          metadata: {
+            ...(existingPhoneResource?.metadata || {}),
+            agentId: intent.providerAgentId,
+            phoneNumber: intent.phoneNumber,
+            assignmentState: "assigned",
+            assignedAt: new Date().toISOString(),
+          },
+          createdAt: existingPhoneResource?.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
       }
       const stablePrompt = {
         ...prompt,

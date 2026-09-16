@@ -216,7 +216,12 @@ export function SelfServeOnboardingPage() {
 
   useEffect(() => {
     if (!view || view.wizard.version === hydratedVersion) return;
-    setData(view.wizard.data);
+    setData({
+      ...view.wizard.data,
+      phoneMode: "customer_twilio",
+      calendarMode: "managed_calcom",
+      existingCalendarProvider: "calcom",
+    });
     setServicesText(servicesToText(view.wizard.data.services));
     setHydratedVersion(view.wizard.version);
   }, [hydratedVersion, view]);
@@ -459,8 +464,7 @@ export function SelfServeOnboardingPage() {
           </div>}
 
           {active.id === "phone" && <div className="onboarding-choice-grid">
-            <label className={data.phoneMode === "managed" ? "selected" : ""}><input type="radio" name="phoneMode" checked={data.phoneMode === "managed"} onChange={() => update("phoneMode", "managed")} /><strong>Managed phone setup</strong><span>Robinexis will discuss a suitable number and routing with you. UK number availability and timing are confirmed during setup.</span></label>
-            <label className={data.phoneMode === "customer_twilio" ? "selected" : ""}><input type="radio" name="phoneMode" checked={data.phoneMode === "customer_twilio"} onChange={() => update("phoneMode", "customer_twilio")} /><strong>Use customer Twilio</strong><span>Tell us which Twilio number you want assessed. Connection and routing happen later with a specialist.</span></label>
+            <label className="selected"><input type="radio" name="phoneMode" checked readOnly /><strong>Connect your Twilio number</strong><span>Your number stays in your Twilio account. Robinexis verifies and connects it to your receptionist without purchasing anything on your behalf.</span></label>
             {data.phoneMode === "customer_twilio" && <>
               <Field label="Twilio phone number"><input inputMode="tel" placeholder="+44…" value={data.customerPhoneNumber || ""} onChange={(event) => update("customerPhoneNumber", event.target.value)} /></Field>
               <div className="onboarding-callout">
@@ -481,9 +485,7 @@ export function SelfServeOnboardingPage() {
           </div>}
 
           {active.id === "calendar" && <div className="onboarding-choice-grid">
-            <label className={data.calendarMode === "managed_calcom" ? "selected" : ""}><input type="radio" name="calendarMode" checked={data.calendarMode === "managed_calcom"} onChange={() => update("calendarMode", "managed_calcom")} /><strong>Managed Cal.com setup</strong><span>Robinexis will prepare booking types from your approved services and confirm them with you.</span></label>
-            <label className={data.calendarMode === "connect_existing" ? "selected" : ""}><input type="radio" name="calendarMode" checked={data.calendarMode === "connect_existing"} onChange={() => update("calendarMode", "connect_existing")} /><strong>Connect an existing calendar</strong><span>Choose the system. Secure connection is completed during specialist setup, not in this wizard.</span></label>
-            {data.calendarMode === "connect_existing" && <Field label="Calendar provider"><select value={data.existingCalendarProvider || ""} onChange={(event) => update("existingCalendarProvider", event.target.value as OnboardingWizardData["existingCalendarProvider"])}><option value="">Choose provider</option><option value="calcom">Cal.com</option><option value="google">Google Calendar</option><option value="outlook">Outlook</option><option value="fresha">Fresha</option></select></Field>}
+            <label className="selected"><input type="radio" name="calendarMode" checked readOnly /><strong>Robinexis booking calendar</strong><span>We automatically create private, workspace-prefixed Cal.com booking types from your approved services. No paid Cal.com plan is required.</span></label>
             <div className="form-grid">
               <Field label="Booking timezone"><input value={schedule.timezone} onChange={(event) => updateSchedule({ timezone: event.target.value })} placeholder="Europe/London" /></Field>
               <Field label="Weekday opening time"><input type="time" value={schedule.weeklyHours.monday?.[0]?.start || ""} onChange={(event) => {

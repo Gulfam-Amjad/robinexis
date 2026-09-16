@@ -4,11 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { config as loadEnv } from "dotenv";
 import { loadDatabaseEnv } from "@robinexis/database";
-import {
-  getStore,
-  seedStore,
-  structuredLog,
-} from "@robinexis/database";
+import { getStore, seedStore, structuredLog } from "@robinexis/database";
 import {
   checkAvailability,
   enqueueLifecycleEmail,
@@ -16,6 +12,7 @@ import {
   reconcileStripe,
   resolveCalcomTenantConnection,
 } from "@robinexis/integrations";
+import { reconcileBillingAccess } from "./billingAccess.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 loadEnv({ path: path.resolve(__dirname, "../../../.env") });
@@ -35,8 +32,13 @@ const CALENDAR_HEALTH_INTERVAL_MS = Math.max(
   5 * 60_000,
   Number(process.env.CALENDAR_HEALTH_INTERVAL_MS) || 30 * 60_000,
 );
+const BILLING_ACCESS_INTERVAL_MS = Math.max(
+  60_000,
+  Number(process.env.BILLING_ACCESS_INTERVAL_MS) || 5 * 60_000,
+);
 let lastReconcile = 0;
 let lastCalendarHealthRun = 0;
+let lastBillingAccessRun = 0;
 const calendarHealth = new Map<string, "ok" | "failed">();
 let lastTickSucceededAt = 0;
 let lastTickFailedAt = 0;
@@ -292,6 +294,13 @@ async function tick() {
   }
   await retryProvisioningRuns(store);
   await monitorCalendarHealth(store);
+  if (Date.now() - lastBillingAccessRun >= BILLING_ACCESS_INTERVAL_MS) {
+    lastBillingAccessRun = Date.now();
+    const billingAccess = await reconcileBillingAccess(store);
+    if (billingAccess.suspended || billingAccess.restored || billingAccess.failed) {
+      structuredLog("billing_access_reconciled", billingAccess);
+    }
+  }
 }
 
 async function runTick() {

@@ -471,6 +471,9 @@ export function PricingPage() {
         : "For multi-location teams with more complex workflows.",
     features: [
       `${plan.includedMinutes.toLocaleString("en-GB")} included minutes`,
+      plan.locationLimit === null ? "Multi-location by agreement" : `${plan.locationLimit} location`,
+      plan.calendarLimit === null ? "Calendar capacity by agreement" : `Up to ${plan.calendarLimit} calendar${plan.calendarLimit === 1 ? "" : "s"}`,
+      "Connect your own Twilio number",
       ...plan.features.filter((feature) => feature.operational).map((feature) => featureLabels[feature.id] || feature.id),
       `${plan.trialDays}-day trial`,
     ],

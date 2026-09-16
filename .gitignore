@@ -50,3 +50,4 @@ brains/**/*.zip
 .vercel
 supabase/.temp/
 .staging-local/
+.firecrawl/

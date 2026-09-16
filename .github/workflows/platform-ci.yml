@@ -48,6 +48,7 @@ jobs:
           node-version: "24"
           cache: npm
       - run: npm ci
+      - run: npm run check:secrets
       - run: npm run test:csp-api-origin
       - run: npm run check:csp-api-origin
         env:

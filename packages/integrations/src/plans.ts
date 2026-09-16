@@ -87,7 +87,7 @@ export function planCatalog(): Record<PlanTier, PlanDefinition> {
       includedMinutes: configuredMinutes("pro"),
       phoneProvisioning: {
         customerOwned: true,
-        managed: true,
+        managed: false,
         monthlySpendCapPence: configuredPhoneSpendCap("pro"),
       },
       features: proFeatures,
@@ -102,7 +102,7 @@ export function planCatalog(): Record<PlanTier, PlanDefinition> {
       includedMinutes: configuredMinutes("enterprise"),
       phoneProvisioning: {
         customerOwned: true,
-        managed: true,
+        managed: false,
         monthlySpendCapPence: configuredPhoneSpendCap("enterprise"),
       },
       features: [

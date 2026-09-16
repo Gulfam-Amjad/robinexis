@@ -10,10 +10,10 @@ export interface WebsiteIntelligenceLimits {
 }
 
 export const WEBSITE_LIMITS: Readonly<WebsiteIntelligenceLimits> = Object.freeze({
-  maxPages: 20,
+  maxPages: 10,
   maxDepth: 3,
   maxContentChars: 250_000,
-  timeoutMs: 45_000,
+  timeoutMs: 120_000,
   retries: 2,
 });
 

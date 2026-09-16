@@ -56,6 +56,11 @@ async function readyWizardStore() {
     id: "calendar_wizard", clientId: DEMO_CLIENT_ID, locationId: "location_wizard",
     provider: "calcom", status: "active", metadata: {}, createdAt: now, updatedAt: now,
   });
+  await store.upsertTwilioConnection({
+    id: "twilio_wizard", clientId: DEMO_CLIENT_ID, mode: "customer_oauth",
+    selectedPhoneNumber: "+447700900124", status: "active",
+    metadata: {}, createdAt: now, updatedAt: now,
+  });
   await store.saveOnboardingWizard({
     clientId: DEMO_CLIENT_ID, currentStep: "review", completedSteps: [],
     data: {
@@ -64,7 +69,8 @@ async function readyWizardStore() {
       tone: "Warm", transferNumber: "+447700900123", recordingConsent: "not_recording",
       services: [{ title: "Consultation", slug: "consultation", durationMinutes: 30 }],
       hours: "Monday-Friday 9-5", timezone: "Europe/London", bookingRules: "24 hours notice",
-      phoneMode: "managed", calendarMode: "managed_calcom",
+      phoneMode: "customer_twilio", customerPhoneNumber: "+447700900124",
+      calendarMode: "managed_calcom",
     },
     version: 3, createdAt: now, updatedAt: now,
   });

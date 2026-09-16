@@ -58,7 +58,7 @@ describe("website intelligence", () => {
     const start = JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body));
     expect(start).toMatchObject({
       url: "https://acme-salon.com/",
-      limit: 20,
+      limit: 10,
       maxDiscoveryDepth: 3,
       allowSubdomains: false,
       scrapeOptions: { onlyMainContent: true },

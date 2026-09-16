@@ -7,6 +7,7 @@ export default defineConfig({
       "packages/integrations/src/**/*.test.ts",
       "packages/database/src/**/*.test.ts",
       "apps/api/src/**/*.test.ts",
+      "apps/worker/src/**/*.test.ts",
     ],
     environment: "node",
   },
