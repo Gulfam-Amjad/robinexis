@@ -67,12 +67,20 @@ Paste secrets through Railway Variables, never into IaC. Required safety contrac
 
 Retired 1 September 2026:
 
-- Railway service: `@robinexis/voice-gateway`
+- Former Railway service: `@robinexis/voice-gateway`
 - Service ID: `652fb60c-b080-4129-a2f8-806ed68046a0`
 - Last successful deployment: `c752a7dc-e207-46c1-b501-6a339499f317`
 - Final stopped deployment: `d1424787-a954-4972-8c80-947b2277b412` (`FAILED`, stopped)
 - Last domain: `https://robinexisvoice-gateway-production.up.railway.app`
-- Retirement action: stopped the deployment and disconnected its GitHub source; service was not deleted.
+- Retirement action: stopped and disconnected on 1 September, then deleted on
+  16 September 2026 after confirming the source had been removed and the live
+  path remained Twilio → ElevenLabs → Railway API tools.
+
+The redundant `@robinexis/web` Railway service was also deleted on 16 September
+2026. Production web hosting remains Vercel at `app.robinexis.com`. These
+deletions attempted to free a Railway resource slot for Redis; the free-plan
+resource limit still blocked Redis creation, so a Railway plan upgrade remains
+required.
 
 Do not restore this during an ordinary API rollback. If an emergency audio rollback is explicitly approved:
 
@@ -82,3 +90,53 @@ Do not restore this during an ordinary API rollback. If an emergency audio rollb
 4. Only then change a sandbox Twilio number. Never move `+447446868067` without a separate controlled cutover.
 
 The current voice rollback is safer: select the previous ElevenLabs agent version and leave Twilio routing unchanged.
+
+## Alternate LiveKit runtime (build-only, disabled)
+
+`apps/voice-runtime` is an isolated LiveKit Agents worker for the `livekit-cascade`
+provider. It is not part of the active Railway IaC, is not deployed, and does not
+change Twilio, ElevenLabs, or production dispatch. It exits before creating a
+worker unless `VOICE_RUNTIME_ENABLED=true`.
+
+If an operator later creates a separate sandbox Railway service, use:
+
+```bash
+npm install
+npm run typecheck -w @robinexis/voice-runtime
+npm test -w @robinexis/voice-runtime
+npm run start -w @robinexis/voice-runtime
+```
+
+Copy only the alternate-runtime variables documented in `.env.example` to that
+service. Set `VOICE_RUNTIME_API_BASE_URL` to the authenticated API origin. The
+API and runtime share `VOICE_RUNTIME_INTERNAL_SECRET` for published-config reads
+and `VOICE_RUNTIME_SIGNING_SECRET` for timestamped HMAC-SHA256 post-call events.
+Tenant voice-tool credentials remain server-bound in `VOICE_TOOL_SECRETS_JSON`;
+they are never accepted in job metadata or audio.
+
+Dispatch metadata must be trusted control-plane JSON with exactly the operational
+identity needed by the worker:
+
+```json
+{
+  "tenantId": "tenant-id",
+  "providerJobId": "provider-job-id",
+  "direction": "inbound",
+  "objective": "Receptionist call"
+}
+```
+
+`clientId` is rejected. The runtime derives a stable provider-neutral call ID
+from the provider, tenant, and provider job ID. It loads only published config
+from `GET /internal/voice-runtime/config/:tenantId`, calls the existing
+tenant-authenticated `/api/v1/voice-tools/*` routes, and sends normalized usage,
+latency, transcript, and tool history to
+`POST /internal/voice-runtime/post-call`. LiveKit session recording and framework
+log/transcript upload are disabled; application logs redact secrets and call
+content.
+
+Before any sandbox test, create a dedicated LiveKit dispatch with no production
+phone number attached, verify `VOICE_RUNTIME_ENABLED=false` produces a non-zero
+exit, then explicitly enable only that sandbox service. Roll back by disabling
+the variable and removing the sandbox dispatch. Production routing remains on
+Twilio → ElevenLabs until a separate cutover is approved.

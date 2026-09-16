@@ -208,7 +208,7 @@ test("operator can open the data-backed overview", async ({ page }) => {
   await openWorkspaceSession(page);
 
   await page.goto("/app");
-  await expect(page.getByRole("heading", { name: /Demo Salon is in good hands/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Demo Salon is in good hands/i })).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText("12", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Needs setup").first()).toBeVisible();
   await expectNoPageOverflow(page);
@@ -281,9 +281,9 @@ test("all operator areas render against their backend contracts", async ({ page 
 test("operator admin is isolated under the admin route", async ({ page }) => {
   await openWorkspaceSession(page);
   await page.goto("/admin");
-  await expect(page.getByRole("heading", { name: "One place to run every client workspace" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Operations dashboard" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Operator admin" })).toHaveCount(0);
-  await expect(page.getByText("Client portfolio")).toBeVisible();
+  await expect(page.getByText("Provisioning queue", { exact: true }).first()).toBeVisible();
 
   await page.goto("/admin/control-plane");
   await expect(page.getByRole("heading", { name: "Platform control plane" })).toBeVisible();

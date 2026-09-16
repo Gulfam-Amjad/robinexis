@@ -56,6 +56,22 @@ async function seedSupabaseSession(
     if (path === "/api/v1/admin/summary") {
       return route.fulfill({ json: { mrrPence: 0, totalUsedMinutes: 0, totalFailedCalls: 0, clients: [] } });
     }
+    if (path === "/api/v1/admin/control-plane") {
+      return route.fulfill({ json: {
+        generatedAt: "2026-09-16T00:00:00.000Z",
+        health: {
+          status: "ok",
+          notificationQueue: { pending: 0, leased: 0, deadLetter: 0, providerFailures24h: 0 },
+          spend: { status: "configured", configuredCapCount: 0, uncappedConnectionCount: 0 },
+          backup: { status: "not_configured", freshness: "unknown" },
+        },
+        provisioning: [],
+        resources: [],
+        requests: [],
+        spendAlarms: [],
+        blades: { present: true, published: true, serviceStatus: "active", inboundActive: true },
+      } });
+    }
     if (path === "/api/v1/billing/checkout") {
       const body = route.request().postDataJSON() as { plan?: string };
       onCheckout?.(body.plan || "");
@@ -115,7 +131,7 @@ test("dashboard routes admins to the operator shell", async ({ page }) => {
   await seedSupabaseSession(page, "operator");
   await page.goto("/dashboard");
   await expect(page).toHaveURL(/\/admin$/);
-  await expect(page.getByRole("heading", { name: "One place to run every client workspace" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Operations dashboard" })).toBeVisible();
 });
 
 test("dashboard routes assigned clients to their workspace shell", async ({ page }) => {
