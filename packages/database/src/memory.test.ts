@@ -7,6 +7,12 @@ import type {
   CreditLedgerEntry,
   Location,
   OnboardingJob,
+  ProviderAccountSnapshot,
+  ProviderAlertRule,
+  ProviderDeployment,
+  ProviderRollbackSnapshot,
+  ProviderSwitchOperation,
+  ProviderUsageCostEvent,
   ProvisioningRun,
   StripeEvent,
   UserProfile,
@@ -136,6 +142,59 @@ describe("MemoryStore SaaS foundation", () => {
     expect(await store.claimProvisioningRun({ ...run, id: "run-duplicate" })).toBe(false);
     await store.saveProvisioningRun({ ...run, status: "succeeded", output: { agentId: "agent-1" } });
     expect((await store.getProvisioningRunByIdempotency("client-a", "signup-1"))?.status).toBe("succeeded");
+  });
+
+  it("stores provider control state with idempotent operations and events", async () => {
+    const store = new MemoryStore();
+    const deployment: ProviderDeployment = {
+      id: "deployment-livekit", clientId: "client-a", provider: "livekit-cascade",
+      status: "active", config: {}, createdAt: now, updatedAt: now,
+    };
+    await store.upsertProviderDeployment(deployment);
+    expect((await store.getActiveProviderDeployment("client-a"))?.provider).toBe("livekit-cascade");
+    await expect(store.upsertProviderDeployment({
+      ...deployment, id: "retired-active", provider: "groq-gateway",
+    })).rejects.toThrow("provider_retired");
+
+    const operation: ProviderSwitchOperation = {
+      id: "switch-1", clientId: "client-a", idempotencyKey: "switch-to-livekit",
+      toDeploymentId: deployment.id, status: "pending", requestedBy: "operator",
+      createdAt: now, updatedAt: now,
+    };
+    expect(await store.claimProviderSwitchOperation(operation)).toBe(true);
+    expect(await store.claimProviderSwitchOperation({ ...operation, id: "switch-2" })).toBe(false);
+
+    const rollback: ProviderRollbackSnapshot = {
+      id: "rollback-1", clientId: "client-a", switchOperationId: operation.id,
+      provider: "elevenlabs-convai", snapshot: { deploymentId: "old" }, createdAt: now,
+    };
+    expect(await store.saveProviderRollbackSnapshot(rollback)).toBe(true);
+    expect(await store.saveProviderRollbackSnapshot({ ...rollback, id: "rollback-2" })).toBe(false);
+
+    const usage: ProviderUsageCostEvent = {
+      id: "usage-1", clientId: "client-a", provider: "livekit-cascade",
+      providerEventId: "provider-event-1", occurredAt: now, usageQuantity: 30,
+      usageUnit: "seconds", costMinor: 2, currency: "GBP", metadata: {}, createdAt: now,
+    };
+    expect(await store.appendProviderUsageCostEvent(usage)).toBe(true);
+    expect(await store.appendProviderUsageCostEvent({ ...usage, id: "usage-2" })).toBe(false);
+    expect(await store.listProviderUsageCostEvents("client-b")).toEqual([]);
+
+    const account: ProviderAccountSnapshot = {
+      id: "account-1", provider: "livekit-cascade", scope: "account", status: "healthy",
+      usage: {}, limits: {}, cost: {}, capturedAt: now, createdAt: now,
+    };
+    await store.saveProviderAccountSnapshot(account);
+    expect((await store.getLatestProviderAccountSnapshot("livekit-cascade"))?.id)
+      .toBe(account.id);
+
+    const rule: ProviderAlertRule = {
+      id: "rule-1", clientId: "client-a", provider: "livekit-cascade",
+      metric: "cost_minor", operator: "gte", threshold: 1_000, windowMinutes: 60,
+      enabled: true, createdAt: now, updatedAt: now,
+    };
+    await store.upsertProviderAlertRule(rule);
+    expect(await store.listProviderAlertRules("client-a")).toEqual([rule]);
   });
 
   it("reclaims only stale provisioning runs and guards writes by claim token", async () => {

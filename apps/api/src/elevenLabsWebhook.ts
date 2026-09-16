@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import {
   newId,
   redactSecrets,
@@ -173,6 +173,27 @@ export async function ingestElevenLabsWebhook(
       referenceType: "call_duration",
       referenceId: `${call.id}:${durationSeconds}`,
       description: `${call.direction} call usage`,
+      createdAt: call.updatedAt,
+    });
+    const configuredRate = Number(process.env.ELEVENLABS_ESTIMATED_COST_PER_MINUTE_PENCE);
+    const ratePence = Number.isFinite(configuredRate) && configuredRate >= 0 ? configuredRate : 0;
+    const providerEventId = `${conversationId}:duration:${durationSeconds}`;
+    await store.appendProviderUsageCostEvent({
+      id: `usage_${createHash("sha256").update(`elevenlabs\0${providerEventId}`).digest("hex").slice(0, 24)}`,
+      clientId: client.id,
+      provider: "elevenlabs-convai",
+      providerEventId,
+      callId: conversationId,
+      occurredAt: call.updatedAt,
+      usageQuantity: usageDeltaSeconds,
+      usageUnit: "seconds",
+      costMinor: Math.max(0, Math.round((usageDeltaSeconds / 60) * ratePence)),
+      currency: "GBP",
+      metadata: {
+        estimated: true,
+        rateConfigured: Number.isFinite(configuredRate) && configuredRate >= 0,
+        ratePencePerMinute: ratePence,
+      },
       createdAt: call.updatedAt,
     });
   }

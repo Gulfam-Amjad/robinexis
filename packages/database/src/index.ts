@@ -18,6 +18,7 @@ export {
   sortClientsForDashboard,
 } from "./clientOrder.js";
 export {
+  activeVoiceProviderOf,
   isAiServiceEnabled,
   isGroqGatewayPipeline,
   voicePipelineOf,

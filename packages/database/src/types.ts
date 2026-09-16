@@ -12,8 +12,10 @@ export type ServiceStatus =
 
 export type CallDirection = "inbound" | "outbound";
 
-/** elevenlabs-convai = live Option 1 (do not answer on the gateway). groq-gateway = Option 2. */
-export type VoicePipeline = "elevenlabs-convai" | "groq-gateway";
+/** groq-gateway is retained only so legacy rows can be represented as retired. */
+export type ActiveVoiceProvider = "elevenlabs-convai" | "livekit-cascade";
+export type RetiredVoiceProvider = "groq-gateway";
+export type VoicePipeline = ActiveVoiceProvider | RetiredVoiceProvider;
 
 export type WorkspaceRole = "owner" | "manager" | "viewer";
 export type OnboardingStatus =
@@ -371,7 +373,7 @@ export interface AgentInstance {
   id: string;
   clientId: string;
   locationId?: string;
-  provider: "elevenlabs";
+  provider: "elevenlabs" | "livekit";
   providerAgentId?: string;
   voiceCredentialHash?: string;
   providerSecretId?: string;
@@ -771,6 +773,132 @@ export interface ProviderResource {
   encryptedCredential?: string;
   metadata: Record<string, unknown>;
   lastError?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ProviderDeploymentStatus = "staged" | "active" | "draining" | "retired" | "failed";
+
+export interface ProviderDeployment {
+  id: string;
+  clientId: string;
+  agentInstanceId?: string;
+  provider: VoicePipeline;
+  providerDeploymentId?: string;
+  status: ProviderDeploymentStatus;
+  config: Record<string, unknown>;
+  launchGate?: ProviderLaunchGate;
+  activatedAt?: string;
+  retiredAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProviderLaunchGateCheck {
+  key: string;
+  passed: boolean;
+  blocking: boolean;
+  detail: string;
+  baseline?: number | boolean;
+  candidate?: number | boolean;
+  threshold?: number;
+}
+
+export interface ProviderBenchmarkMetrics {
+  totalCostMinor: number;
+  successfulBookings: number;
+  bookingAttempts: number;
+  blindVoiceWins: number;
+  blindVoiceTies: number;
+  blindVoiceComparisons: number;
+  p95FirstResponseMs: number;
+  totalCalls: number;
+  failedCalls: number;
+  bargeInPassed: boolean;
+}
+
+export interface ProviderLaunchGate {
+  id: string;
+  deploymentId: string;
+  candidateProvider: ActiveVoiceProvider;
+  baseline: ProviderBenchmarkMetrics;
+  candidate: ProviderBenchmarkMetrics;
+  source?: "manual" | "import" | "automated";
+  evaluatedAt: string;
+  evaluatedBy: string;
+  passed: boolean;
+  checks: ProviderLaunchGateCheck[];
+}
+
+export type ProviderSwitchStatus =
+  | "pending"
+  | "running"
+  | "succeeded"
+  | "rolling_back"
+  | "rolled_back"
+  | "failed";
+
+export interface ProviderSwitchOperation {
+  id: string;
+  clientId: string;
+  idempotencyKey: string;
+  fromDeploymentId?: string;
+  toDeploymentId: string;
+  status: ProviderSwitchStatus;
+  rollbackSnapshotId?: string;
+  requestedBy: string;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+}
+
+export interface ProviderRollbackSnapshot {
+  id: string;
+  clientId: string;
+  switchOperationId: string;
+  provider: VoicePipeline;
+  deploymentId?: string;
+  snapshot: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface ProviderUsageCostEvent {
+  id: string;
+  clientId: string;
+  provider: ActiveVoiceProvider;
+  providerEventId: string;
+  callId?: string;
+  occurredAt: string;
+  usageQuantity: number;
+  usageUnit: "seconds" | "minutes" | "tokens" | "characters" | "calls";
+  costMinor: number;
+  currency: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface ProviderAccountSnapshot {
+  id: string;
+  provider: ActiveVoiceProvider;
+  scope: "account";
+  status: "healthy" | "degraded" | "unavailable";
+  usage: Record<string, unknown>;
+  limits: Record<string, unknown>;
+  cost: Record<string, unknown>;
+  capturedAt: string;
+  createdAt: string;
+}
+
+export interface ProviderAlertRule {
+  id: string;
+  clientId: string;
+  provider?: ActiveVoiceProvider;
+  metric: "cost_minor" | "usage_quantity" | "error_rate" | "latency_ms";
+  operator: "gt" | "gte";
+  threshold: number;
+  windowMinutes: number;
+  enabled: boolean;
   createdAt: string;
   updatedAt: string;
 }

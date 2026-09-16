@@ -112,12 +112,26 @@ export type {
   BuiltAgentConfig,
   ElevenLabsAgentConfig,
   ElevenLabsManagementClientOptions,
+  ElevenLabsSubscriptionSnapshot,
   HumanTransferInput,
   ImportTwilioNumberInput,
   ProvisionAgentInput,
   ProvisionAgentResult,
   StoredWorkspaceSecret,
 } from "./elevenLabsProvisioning.js";
+export {
+  ElevenLabsVoiceProviderAdapter,
+  LiveKitVoiceProviderAdapter,
+  TwilioVoiceRoutingClient,
+} from "./voiceProviderAdapters.js";
+export type {
+  ProviderAdapterContext,
+  ProviderAdapterHealth,
+  ProviderRouteSnapshot,
+  TwilioVoiceRoute,
+  TwilioVoiceRouting,
+  VoiceProviderAdapter,
+} from "./voiceProviderAdapters.js";
 export {
   FirecrawlWebsiteClient,
   WEBSITE_EXTRACTOR_VERSION,

@@ -37,7 +37,13 @@ import type {
   ProvisioningActivationIntent,
   ProvisioningActivationResult,
   ProvisioningRun,
+  ProviderAccountSnapshot,
+  ProviderAlertRule,
+  ProviderDeployment,
+  ProviderRollbackSnapshot,
   ProviderResource,
+  ProviderSwitchOperation,
+  ProviderUsageCostEvent,
   StripeEvent,
   Subscription,
   Suppression,
@@ -1352,6 +1358,153 @@ export class PostgresStore implements PlatformStore {
     const r = await this.pool.query("SELECT * FROM provider_resources WHERE client_id=$1 ORDER BY created_at,id", [clientId]);
     return r.rows.map(providerResourceFromRow);
   }
+  async upsertProviderDeployment(deployment: ProviderDeployment) {
+    await this.pool.query(
+      `INSERT INTO provider_deployments
+       (id,client_id,agent_instance_id,provider,provider_deployment_id,status,config,launch_gate,
+        activated_at,retired_at,created_at,updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       ON CONFLICT (id) DO UPDATE SET agent_instance_id=EXCLUDED.agent_instance_id,
+         provider=EXCLUDED.provider,provider_deployment_id=EXCLUDED.provider_deployment_id,
+         status=EXCLUDED.status,config=EXCLUDED.config,launch_gate=EXCLUDED.launch_gate,
+         activated_at=EXCLUDED.activated_at,retired_at=EXCLUDED.retired_at,updated_at=EXCLUDED.updated_at
+       WHERE provider_deployments.client_id=EXCLUDED.client_id`,
+      [deployment.id,deployment.clientId,deployment.agentInstanceId ?? null,deployment.provider,
+        deployment.providerDeploymentId ?? null,deployment.status,deployment.config,
+        deployment.launchGate ?? null,deployment.activatedAt ?? null,deployment.retiredAt ?? null,
+        deployment.createdAt,deployment.updatedAt],
+    );
+  }
+  async listProviderDeployments(clientId: string) {
+    const r = await this.pool.query(
+      "SELECT * FROM provider_deployments WHERE client_id=$1 ORDER BY created_at DESC,id DESC",
+      [clientId],
+    );
+    return r.rows.map(providerDeploymentFromRow);
+  }
+  async getActiveProviderDeployment(clientId: string) {
+    const r = await this.pool.query(
+      "SELECT * FROM provider_deployments WHERE client_id=$1 AND status='active' LIMIT 1",
+      [clientId],
+    );
+    return r.rows[0] ? providerDeploymentFromRow(r.rows[0]) : undefined;
+  }
+  async claimProviderSwitchOperation(operation: ProviderSwitchOperation) {
+    const r = await this.pool.query(
+      `INSERT INTO provider_switch_operations
+       (id,client_id,idempotency_key,from_deployment_id,to_deployment_id,status,rollback_snapshot_id,
+        requested_by,error,created_at,updated_at,completed_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       ON CONFLICT DO NOTHING RETURNING id`,
+      [operation.id,operation.clientId,operation.idempotencyKey,operation.fromDeploymentId ?? null,
+        operation.toDeploymentId,operation.status,operation.rollbackSnapshotId ?? null,
+        operation.requestedBy,operation.error ?? null,operation.createdAt,operation.updatedAt,
+        operation.completedAt ?? null],
+    );
+    return r.rowCount === 1;
+  }
+  async saveProviderSwitchOperation(operation: ProviderSwitchOperation) {
+    const r = await this.pool.query(
+      `UPDATE provider_switch_operations SET status=$3,rollback_snapshot_id=$4,error=$5,
+       updated_at=$6,completed_at=$7 WHERE client_id=$1 AND id=$2`,
+      [operation.clientId,operation.id,operation.status,operation.rollbackSnapshotId ?? null,
+        operation.error ?? null,operation.updatedAt,operation.completedAt ?? null],
+    );
+    if (r.rowCount !== 1) throw new Error("provider_switch_not_found");
+  }
+  async getProviderSwitchOperationByIdempotency(clientId: string, key: string) {
+    const r = await this.pool.query(
+      "SELECT * FROM provider_switch_operations WHERE client_id=$1 AND idempotency_key=$2",
+      [clientId,key],
+    );
+    return r.rows[0] ? providerSwitchOperationFromRow(r.rows[0]) : undefined;
+  }
+  async listProviderSwitchOperations(clientId: string) {
+    const r = await this.pool.query(
+      "SELECT * FROM provider_switch_operations WHERE client_id=$1 ORDER BY created_at DESC,id DESC",
+      [clientId],
+    );
+    return r.rows.map(providerSwitchOperationFromRow);
+  }
+  async saveProviderRollbackSnapshot(snapshot: ProviderRollbackSnapshot) {
+    const r = await this.pool.query(
+      `INSERT INTO provider_rollback_snapshots
+       (id,client_id,switch_operation_id,provider,deployment_id,snapshot,created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING RETURNING id`,
+      [snapshot.id,snapshot.clientId,snapshot.switchOperationId,snapshot.provider,
+        snapshot.deploymentId ?? null,snapshot.snapshot,snapshot.createdAt],
+    );
+    return r.rowCount === 1;
+  }
+  async getProviderRollbackSnapshot(clientId: string, id: string) {
+    const r = await this.pool.query(
+      "SELECT * FROM provider_rollback_snapshots WHERE client_id=$1 AND id=$2",
+      [clientId,id],
+    );
+    return r.rows[0] ? providerRollbackSnapshotFromRow(r.rows[0]) : undefined;
+  }
+  async appendProviderUsageCostEvent(event: ProviderUsageCostEvent) {
+    const r = await this.pool.query(
+      `INSERT INTO provider_usage_cost_events
+       (id,client_id,provider,provider_event_id,call_id,occurred_at,usage_quantity,usage_unit,
+        cost_minor,currency,metadata,created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       ON CONFLICT DO NOTHING RETURNING id`,
+      [event.id,event.clientId,event.provider,event.providerEventId,event.callId ?? null,
+        event.occurredAt,event.usageQuantity,event.usageUnit,event.costMinor,event.currency,
+        event.metadata,event.createdAt],
+    );
+    return r.rowCount === 1;
+  }
+  async listProviderUsageCostEvents(clientId: string, from?: string, to?: string) {
+    const r = await this.pool.query(
+      `SELECT * FROM provider_usage_cost_events WHERE client_id=$1
+       AND ($2::timestamptz IS NULL OR occurred_at >= $2)
+       AND ($3::timestamptz IS NULL OR occurred_at <= $3)
+       ORDER BY occurred_at DESC,id DESC`,
+      [clientId,from ?? null,to ?? null],
+    );
+    return r.rows.map(providerUsageCostEventFromRow);
+  }
+  async saveProviderAccountSnapshot(snapshot: ProviderAccountSnapshot) {
+    await this.pool.query(
+      `INSERT INTO provider_account_snapshots
+       (id,provider,scope,status,usage,limits,cost,captured_at,created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status,usage=EXCLUDED.usage,
+         limits=EXCLUDED.limits,cost=EXCLUDED.cost,captured_at=EXCLUDED.captured_at`,
+      [snapshot.id,snapshot.provider,snapshot.scope,snapshot.status,snapshot.usage,
+        snapshot.limits,snapshot.cost,snapshot.capturedAt,snapshot.createdAt],
+    );
+  }
+  async getLatestProviderAccountSnapshot(provider: ProviderAccountSnapshot["provider"]) {
+    const r = await this.pool.query(
+      `SELECT * FROM provider_account_snapshots
+       WHERE provider=$1 ORDER BY captured_at DESC,id DESC LIMIT 1`,
+      [provider],
+    );
+    return r.rows[0] ? providerAccountSnapshotFromRow(r.rows[0]) : undefined;
+  }
+  async upsertProviderAlertRule(rule: ProviderAlertRule) {
+    await this.pool.query(
+      `INSERT INTO provider_alert_rules
+       (id,client_id,provider,metric,operator,threshold,window_minutes,enabled,created_at,updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       ON CONFLICT (id) DO UPDATE SET provider=EXCLUDED.provider,metric=EXCLUDED.metric,
+         operator=EXCLUDED.operator,threshold=EXCLUDED.threshold,
+         window_minutes=EXCLUDED.window_minutes,enabled=EXCLUDED.enabled,updated_at=EXCLUDED.updated_at
+       WHERE provider_alert_rules.client_id=EXCLUDED.client_id`,
+      [rule.id,rule.clientId,rule.provider ?? null,rule.metric,rule.operator,rule.threshold,
+        rule.windowMinutes,rule.enabled,rule.createdAt,rule.updatedAt],
+    );
+  }
+  async listProviderAlertRules(clientId: string) {
+    const r = await this.pool.query(
+      "SELECT * FROM provider_alert_rules WHERE client_id=$1 ORDER BY created_at,id",
+      [clientId],
+    );
+    return r.rows.map(providerAlertRuleFromRow);
+  }
   async getPromptVersion(id: string) {
     const r = await this.pool.query(
       "SELECT id, client_id, version, compiled, created_at FROM prompt_versions WHERE id = $1",
@@ -2161,6 +2314,63 @@ function providerResourceFromRow(row: Record<string, any>): ProviderResource {
     providerResourceId: row.provider_resource_id ?? undefined, lifecycleStatus: row.lifecycle_status,
     credentialRef: row.credential_ref ?? undefined, encryptedCredential: row.encrypted_credential ?? undefined,
     metadata: row.metadata ?? {}, lastError: row.last_error ?? undefined,
+    createdAt: toIso(row.created_at), updatedAt: toIso(row.updated_at),
+  };
+}
+
+function providerDeploymentFromRow(row: Record<string, any>): ProviderDeployment {
+  return {
+    id: row.id, clientId: row.client_id, agentInstanceId: row.agent_instance_id ?? undefined,
+    provider: row.provider, providerDeploymentId: row.provider_deployment_id ?? undefined,
+    status: row.status, config: row.config ?? {}, launchGate: row.launch_gate ?? undefined,
+    activatedAt: row.activated_at ? toIso(row.activated_at) : undefined,
+    retiredAt: row.retired_at ? toIso(row.retired_at) : undefined,
+    createdAt: toIso(row.created_at), updatedAt: toIso(row.updated_at),
+  };
+}
+
+function providerSwitchOperationFromRow(row: Record<string, any>): ProviderSwitchOperation {
+  return {
+    id: row.id, clientId: row.client_id, idempotencyKey: row.idempotency_key,
+    fromDeploymentId: row.from_deployment_id ?? undefined, toDeploymentId: row.to_deployment_id,
+    status: row.status, rollbackSnapshotId: row.rollback_snapshot_id ?? undefined,
+    requestedBy: row.requested_by, error: row.error ?? undefined,
+    createdAt: toIso(row.created_at), updatedAt: toIso(row.updated_at),
+    completedAt: row.completed_at ? toIso(row.completed_at) : undefined,
+  };
+}
+
+function providerRollbackSnapshotFromRow(row: Record<string, any>): ProviderRollbackSnapshot {
+  return {
+    id: row.id, clientId: row.client_id, switchOperationId: row.switch_operation_id,
+    provider: row.provider, deploymentId: row.deployment_id ?? undefined,
+    snapshot: row.snapshot ?? {}, createdAt: toIso(row.created_at),
+  };
+}
+
+function providerUsageCostEventFromRow(row: Record<string, any>): ProviderUsageCostEvent {
+  return {
+    id: row.id, clientId: row.client_id, provider: row.provider,
+    providerEventId: row.provider_event_id, callId: row.call_id ?? undefined,
+    occurredAt: toIso(row.occurred_at), usageQuantity: Number(row.usage_quantity),
+    usageUnit: row.usage_unit, costMinor: Number(row.cost_minor), currency: row.currency,
+    metadata: row.metadata ?? {}, createdAt: toIso(row.created_at),
+  };
+}
+
+function providerAccountSnapshotFromRow(row: Record<string, any>): ProviderAccountSnapshot {
+  return {
+    id: row.id, provider: row.provider, scope: row.scope || "account", status: row.status,
+    usage: row.usage ?? {}, limits: row.limits ?? {}, cost: row.cost ?? {},
+    capturedAt: toIso(row.captured_at), createdAt: toIso(row.created_at),
+  };
+}
+
+function providerAlertRuleFromRow(row: Record<string, any>): ProviderAlertRule {
+  return {
+    id: row.id, clientId: row.client_id, provider: row.provider ?? undefined,
+    metric: row.metric, operator: row.operator, threshold: Number(row.threshold),
+    windowMinutes: Number(row.window_minutes), enabled: row.enabled,
     createdAt: toIso(row.created_at), updatedAt: toIso(row.updated_at),
   };
 }

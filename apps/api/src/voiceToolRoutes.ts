@@ -10,6 +10,7 @@ import {
   createToolExecutor,
   normalizeSpokenPhone,
 } from "@robinexis/integrations";
+import type { ToolName } from "@robinexis/tool-contracts";
 
 type ToolResponse = { status: number; body: Record<string, unknown> };
 
@@ -242,4 +243,40 @@ export async function runVoiceTool(
     status: 200,
     body: { ok: true, bookingUid: booking.uid, bookingStatus: booking.status || "accepted" },
   };
+}
+
+export async function runVoiceContractTool(
+  store: PlatformStore,
+  tool: ToolName,
+  input: Record<string, unknown>,
+  options: Parameters<typeof createToolExecutor>[0] & { clientId: string },
+): Promise<ToolResponse> {
+  if (tool === "check_availability" || tool === "create_booking") {
+    return runVoiceTool(
+      store,
+      tool === "check_availability" ? "check-availability" : "create-booking",
+      input,
+      options,
+    );
+  }
+  const client = await store.getPublishedClient(options.clientId);
+  if (!client) return { status: 404, body: { ok: false, error: "client_not_found" } };
+  const access = isAiServiceEnabled(client);
+  if (!access.inbound) {
+    return { status: 403, body: { ok: false, error: "service_unavailable", reason: access.reason } };
+  }
+  const conversationId = String(input.conversationId || "").trim();
+  if (!conversationId) return { status: 400, body: { ok: false, error: "missing_conversation_id" } };
+
+  const call = callFor(client.id, conversationId);
+  await store.saveCall(call);
+  const result = await createToolExecutor({ ...options, store })({
+    name: tool,
+    input,
+    call,
+    client,
+  });
+  return result.ok
+    ? { status: 200, body: { ok: true, ...result.data as object } }
+    : { status: 503, body: { ok: false, error: result.error || "voice_tool_failed" } };
 }

@@ -436,3 +436,30 @@ describe("provisionElevenLabsAgent", () => {
     ]);
   });
 });
+
+describe("ElevenLabs account subscription connector", () => {
+  it("uses the official subscription endpoint and returns sanitized fields", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+      tier: "creator",
+      status: "active",
+      character_count: 100,
+      character_limit: 1000,
+      next_character_count_reset_unix: 1_800_000_000,
+      can_extend_character_limit: true,
+      api_key: "must-not-leak",
+    }));
+    const client = new ElevenLabsManagementClient({ apiKey: "test-key", fetch: fetchMock });
+    await expect(client.getSubscription()).resolves.toEqual({
+      tier: "creator",
+      status: "active",
+      characterCount: 100,
+      characterLimit: 1000,
+      nextResetUnix: 1_800_000_000,
+      canExtendCharacterLimit: true,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.elevenlabs.io/v1/user/subscription",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+});

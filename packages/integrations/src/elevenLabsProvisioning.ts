@@ -263,6 +263,15 @@ export interface ElevenLabsManagementClientOptions {
   fetch?: typeof fetch;
 }
 
+export interface ElevenLabsSubscriptionSnapshot {
+  tier?: string;
+  status?: string;
+  characterCount?: number;
+  characterLimit?: number;
+  nextResetUnix?: number;
+  canExtendCharacterLimit?: boolean;
+}
+
 export class ElevenLabsManagementClient {
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
@@ -275,6 +284,36 @@ export class ElevenLabsManagementClient {
     this.baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.fetchImpl = options.fetch ?? globalThis.fetch;
+  }
+
+  async getSubscription(): Promise<ElevenLabsSubscriptionSnapshot> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const response = await this.fetchImpl(`${this.baseUrl}/v1/user/subscription`, {
+        method: "GET",
+        headers: { "xi-api-key": this.options.apiKey },
+        signal: controller.signal,
+      });
+      const body = await parseResponseBody(response) as Record<string, unknown>;
+      if (!response.ok) throw new ElevenLabsHttpError(response.status, body);
+      return {
+        tier: optionalString(body.tier),
+        status: optionalString(body.status),
+        characterCount: optionalNumber(body.character_count),
+        characterLimit: optionalNumber(body.character_limit),
+        nextResetUnix: optionalNumber(body.next_character_count_reset_unix),
+        canExtendCharacterLimit: typeof body.can_extend_character_limit === "boolean"
+          ? body.can_extend_character_limit
+          : undefined,
+      };
+    } catch (error) {
+      if (error instanceof ElevenLabsHttpError) throw error;
+      if (controller.signal.aborted || isAbortError(error)) throw new ElevenLabsTimeoutError(this.timeoutMs);
+      throw new ElevenLabsNetworkError(error);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   createAgent(
@@ -426,6 +465,14 @@ function isAbortError(error: unknown): boolean {
     error instanceof Error &&
     (error.name === "AbortError" || error.name === "TimeoutError")
   );
+}
+
+function optionalString(value: unknown) {
+  return typeof value === "string" ? value : undefined;
+}
+
+function optionalNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 export interface ProvisionAgentInput {

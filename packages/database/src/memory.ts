@@ -37,7 +37,13 @@ import type {
   ProvisioningActivationInput,
   ProvisioningActivationIntent,
   ProvisioningActivationResult,
+  ProviderAccountSnapshot,
+  ProviderAlertRule,
+  ProviderDeployment,
+  ProviderRollbackSnapshot,
   ProviderResource,
+  ProviderSwitchOperation,
+  ProviderUsageCostEvent,
   StripeEvent,
   Subscription,
   Suppression,
@@ -171,6 +177,21 @@ export interface PlatformStore {
   saveOnboardingWizard(state: OnboardingWizardState): Promise<void>;
   upsertProviderResource(resource: ProviderResource): Promise<void>;
   listProviderResources(clientId: string): Promise<ProviderResource[]>;
+  upsertProviderDeployment(deployment: ProviderDeployment): Promise<void>;
+  listProviderDeployments(clientId: string): Promise<ProviderDeployment[]>;
+  getActiveProviderDeployment(clientId: string): Promise<ProviderDeployment | undefined>;
+  claimProviderSwitchOperation(operation: ProviderSwitchOperation): Promise<boolean>;
+  saveProviderSwitchOperation(operation: ProviderSwitchOperation): Promise<void>;
+  getProviderSwitchOperationByIdempotency(clientId: string, key: string): Promise<ProviderSwitchOperation | undefined>;
+  listProviderSwitchOperations(clientId: string): Promise<ProviderSwitchOperation[]>;
+  saveProviderRollbackSnapshot(snapshot: ProviderRollbackSnapshot): Promise<boolean>;
+  getProviderRollbackSnapshot(clientId: string, id: string): Promise<ProviderRollbackSnapshot | undefined>;
+  appendProviderUsageCostEvent(event: ProviderUsageCostEvent): Promise<boolean>;
+  listProviderUsageCostEvents(clientId: string, from?: string, to?: string): Promise<ProviderUsageCostEvent[]>;
+  saveProviderAccountSnapshot(snapshot: ProviderAccountSnapshot): Promise<void>;
+  getLatestProviderAccountSnapshot(provider: ProviderAccountSnapshot["provider"]): Promise<ProviderAccountSnapshot | undefined>;
+  upsertProviderAlertRule(rule: ProviderAlertRule): Promise<void>;
+  listProviderAlertRules(clientId: string): Promise<ProviderAlertRule[]>;
 
   getPromptVersion(id: string): Promise<PromptVersion | undefined>;
   latestPrompt(clientId: string): Promise<PromptVersion | undefined>;
@@ -257,6 +278,12 @@ export class MemoryStore implements PlatformStore {
   onboardingGaps = new Map<string, OnboardingGap>();
   onboardingWizards = new Map<string, OnboardingWizardState>();
   providerResources = new Map<string, ProviderResource>();
+  providerDeployments = new Map<string, ProviderDeployment>();
+  providerSwitchOperations = new Map<string, ProviderSwitchOperation>();
+  providerRollbackSnapshots = new Map<string, ProviderRollbackSnapshot>();
+  providerUsageCostEvents = new Map<string, ProviderUsageCostEvent>();
+  providerAccountSnapshots = new Map<string, ProviderAccountSnapshot>();
+  providerAlertRules = new Map<string, ProviderAlertRule>();
 
   async getClient(id: string) {
     return this.clients.get(id);
@@ -994,6 +1021,92 @@ export class MemoryStore implements PlatformStore {
   }
   async listProviderResources(clientId: string) {
     return [...this.providerResources.values()].filter((resource) => resource.clientId === clientId);
+  }
+  async upsertProviderDeployment(deployment: ProviderDeployment) {
+    if (deployment.provider === "groq-gateway" && deployment.status !== "retired") {
+      throw new Error("provider_retired");
+    }
+    if (deployment.status === "active") {
+      for (const existing of this.providerDeployments.values()) {
+        if (existing.clientId === deployment.clientId && existing.id !== deployment.id && existing.status === "active") {
+          throw new Error("active_provider_deployment_conflict");
+        }
+      }
+    }
+    this.providerDeployments.set(`${deployment.clientId}:${deployment.id}`, structuredClone(deployment));
+  }
+  async listProviderDeployments(clientId: string) {
+    return [...this.providerDeployments.values()]
+      .filter((deployment) => deployment.clientId === clientId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+  async getActiveProviderDeployment(clientId: string) {
+    return [...this.providerDeployments.values()]
+      .find((deployment) => deployment.clientId === clientId && deployment.status === "active");
+  }
+  async claimProviderSwitchOperation(operation: ProviderSwitchOperation) {
+    const duplicate = [...this.providerSwitchOperations.values()].find(
+      (item) => item.clientId === operation.clientId && item.idempotencyKey === operation.idempotencyKey,
+    );
+    if (duplicate) return false;
+    this.providerSwitchOperations.set(`${operation.clientId}:${operation.id}`, structuredClone(operation));
+    return true;
+  }
+  async saveProviderSwitchOperation(operation: ProviderSwitchOperation) {
+    const key = `${operation.clientId}:${operation.id}`;
+    const existing = this.providerSwitchOperations.get(key);
+    if (!existing) throw new Error("provider_switch_not_found");
+    this.providerSwitchOperations.set(key, structuredClone(operation));
+  }
+  async getProviderSwitchOperationByIdempotency(clientId: string, key: string) {
+    return [...this.providerSwitchOperations.values()].find(
+      (operation) => operation.clientId === clientId && operation.idempotencyKey === key,
+    );
+  }
+  async listProviderSwitchOperations(clientId: string) {
+    return [...this.providerSwitchOperations.values()]
+      .filter((operation) => operation.clientId === clientId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+  async saveProviderRollbackSnapshot(snapshot: ProviderRollbackSnapshot) {
+    const duplicate = [...this.providerRollbackSnapshots.values()].find(
+      (item) => item.clientId === snapshot.clientId && item.switchOperationId === snapshot.switchOperationId,
+    );
+    if (duplicate) return false;
+    this.providerRollbackSnapshots.set(`${snapshot.clientId}:${snapshot.id}`, structuredClone(snapshot));
+    return true;
+  }
+  async getProviderRollbackSnapshot(clientId: string, id: string) {
+    return this.providerRollbackSnapshots.get(`${clientId}:${id}`);
+  }
+  async appendProviderUsageCostEvent(event: ProviderUsageCostEvent) {
+    const duplicate = [...this.providerUsageCostEvents.values()].find(
+      (item) => item.clientId === event.clientId &&
+        (item.id === event.id || (item.provider === event.provider && item.providerEventId === event.providerEventId)),
+    );
+    if (duplicate) return false;
+    this.providerUsageCostEvents.set(`${event.clientId}:${event.id}`, structuredClone(event));
+    return true;
+  }
+  async listProviderUsageCostEvents(clientId: string, from?: string, to?: string) {
+    return [...this.providerUsageCostEvents.values()]
+      .filter((event) => event.clientId === clientId &&
+        (!from || event.occurredAt >= from) && (!to || event.occurredAt <= to))
+      .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
+  }
+  async saveProviderAccountSnapshot(snapshot: ProviderAccountSnapshot) {
+    this.providerAccountSnapshots.set(snapshot.id, structuredClone(snapshot));
+  }
+  async getLatestProviderAccountSnapshot(provider: ProviderAccountSnapshot["provider"]) {
+    return [...this.providerAccountSnapshots.values()]
+      .filter((snapshot) => snapshot.provider === provider)
+      .sort((a, b) => b.capturedAt.localeCompare(a.capturedAt))[0];
+  }
+  async upsertProviderAlertRule(rule: ProviderAlertRule) {
+    this.providerAlertRules.set(`${rule.clientId}:${rule.id}`, structuredClone(rule));
+  }
+  async listProviderAlertRules(clientId: string) {
+    return [...this.providerAlertRules.values()].filter((rule) => rule.clientId === clientId);
   }
   async getPromptVersion(id: string) {
     return this.prompts.find((p) => p.id === id);

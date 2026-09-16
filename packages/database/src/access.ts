@@ -1,14 +1,21 @@
 import { appendFileSync } from "node:fs";
-import type { ClientConfig, ServiceStatus, VoicePipeline } from "./types.js";
+import type { ActiveVoiceProvider, ClientConfig, ServiceStatus, VoicePipeline } from "./types.js";
 
 export function voicePipelineOf(
   client: Pick<ClientConfig, "voicePipeline"> | { voicePipeline?: VoicePipeline },
 ): VoicePipeline {
-  return client.voicePipeline === "elevenlabs-convai" ? "elevenlabs-convai" : "groq-gateway";
+  if (client.voicePipeline === "elevenlabs-convai" || client.voicePipeline === "livekit-cascade") {
+    return client.voicePipeline;
+  }
+  return "groq-gateway";
 }
 
 export function isGroqGatewayPipeline(client: Pick<ClientConfig, "voicePipeline">): boolean {
-  return voicePipelineOf(client) === "groq-gateway";
+  return client.voicePipeline === "groq-gateway";
+}
+
+export function activeVoiceProviderOf(value: unknown): ActiveVoiceProvider | undefined {
+  return value === "elevenlabs-convai" || value === "livekit-cascade" ? value : undefined;
 }
 
 const GRACE_DAYS = Number(process.env.STRIPE_GRACE_DAYS || 3);

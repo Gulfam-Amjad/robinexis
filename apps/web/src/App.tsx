@@ -25,6 +25,9 @@ const LegalPage = lazy(() => import("./pages/legal"));
 const BladesReceptionistDemoPage = lazy(() => import("./pages/blades-demo"));
 const appPages = () => import("./pages/app");
 const controlPlanePages = () => import("./pages/app/control-planes");
+const adminOperationsPages = () => import("./pages/admin/operations");
+const adminCustomerPages = () => import("./pages/admin/customers");
+const adminUsagePages = () => import("./pages/admin/usage-cost");
 
 const OverviewPage = lazy(() => appPages().then((m) => ({ default: m.OverviewPage })));
 const SetupPage = lazy(() => controlPlanePages().then((m) => ({ default: m.SetupPage })));
@@ -47,7 +50,10 @@ const TeamPage = lazy(() => appPages().then((m) => ({ default: m.TeamPage })));
 const BillingPage = lazy(() => appPages().then((m) => ({ default: m.BillingPage })));
 const SettingsPage = lazy(() => appPages().then((m) => ({ default: m.SettingsPage })));
 const SupportPage = lazy(() => appPages().then((m) => ({ default: m.SupportPage })));
-const AdminOverviewPage = lazy(() => appPages().then((m) => ({ default: m.AdminOverviewPage })));
+const AdminOperationsPage = lazy(() => adminOperationsPages().then((m) => ({ default: m.AdminOperationsPage })));
+const AdminCustomersPage = lazy(() => adminCustomerPages().then((m) => ({ default: m.AdminCustomersPage })));
+const AdminCustomerDetailPage = lazy(() => adminCustomerPages().then((m) => ({ default: m.AdminCustomerDetailPage })));
+const AdminUsageCostPage = lazy(() => adminUsagePages().then((m) => ({ default: m.AdminUsageCostPage })));
 const AdminControlPlanePage = lazy(() => controlPlanePages().then((m) => ({ default: m.AdminControlPlanePage })));
 const SetupConsolePage = lazy(() => appPages().then((m) => ({ default: m.SetupConsolePage })));
 
@@ -168,7 +174,10 @@ export default function App() {
             </Route>
             <Route element={<RequireOperator />}>
               <Route path="/admin" element={<AppShell />}>
-                <Route index element={<AdminOverviewPage />} />
+                <Route index element={<AdminOperationsPage />} />
+                <Route path="customers" element={<AdminCustomersPage />} />
+                <Route path="customers/:id" element={<AdminCustomerDetailPage />} />
+                <Route path="usage-cost" element={<AdminUsageCostPage />} />
                 <Route path="control-plane" element={<AdminControlPlanePage />} />
                 <Route path="setup/:id" element={<SetupConsolePage />} />
                 <Route path="clients/new" element={<OnboardingPage />} />

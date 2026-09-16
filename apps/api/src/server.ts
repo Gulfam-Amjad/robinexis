@@ -16,6 +16,7 @@ import {
   handleStripeWebhook,
   validateTwilioWebhook,
 } from "@robinexis/integrations";
+import { TOOL_NAMES, type ToolName } from "@robinexis/tool-contracts";
 import { applyCors, authenticateRequest, describeAuthMode } from "./auth.js";
 import { ingestElevenLabsWebhook } from "./elevenLabsWebhook.js";
 import {
@@ -26,7 +27,12 @@ import {
 } from "./productRoutes.js";
 import { checkDistributedRateLimit, checkRateLimit, limitForPath, requestIp } from "./rateLimit.js";
 import { provisionClientAgent } from "./provisioningService.js";
-import { runVoiceTool, voiceToolClientIdForRequest } from "./voiceToolRoutes.js";
+import { runVoiceContractTool, voiceToolClientIdForRequest } from "./voiceToolRoutes.js";
+import {
+  ingestVoiceRuntimePostCall,
+  runtimeConfigFor,
+  voiceRuntimeAuthorized,
+} from "./voiceRuntimeRoutes.js";
 import { initializeBackendTelemetry } from "./telemetry.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -179,6 +185,27 @@ const server = http.createServer(async (req, res) => {
       }
       return;
     }
+    const runtimeConfigMatch = url.pathname.match(/^\/internal\/voice-runtime\/config\/([^/]+)$/);
+    if (runtimeConfigMatch && req.method === "GET") {
+      if (!voiceRuntimeAuthorized(req.headers["x-voice-runtime-secret"])) {
+        send(res, 401, { error: "unauthorized" });
+        return;
+      }
+      const result = await runtimeConfigFor(store, decodeURIComponent(runtimeConfigMatch[1]));
+      send(res, result.status, result.body);
+      return;
+    }
+    if (url.pathname === "/internal/voice-runtime/post-call" && req.method === "POST") {
+      const raw = await readRaw(req);
+      const result = await ingestVoiceRuntimePostCall(
+        store,
+        raw,
+        String(req.headers["x-voice-runtime-timestamp"] || ""),
+        String(req.headers["x-voice-runtime-signature"] || ""),
+      );
+      send(res, result.status, result.body);
+      return;
+    }
     if (url.pathname === "/webhooks/twilio/number-status" && req.method === "POST") {
       const raw = await readRaw(req);
       const form = new URLSearchParams(raw.toString());
@@ -281,10 +308,13 @@ const server = http.createServer(async (req, res) => {
       }
       return;
     }
-    const voiceToolMatch = url.pathname.match(
-      /^\/api\/v1\/voice-tools\/(check-availability|create-booking)$/,
-    );
+    const voiceToolMatch = url.pathname.match(/^\/api\/v1\/voice-tools\/([a-z-]+)$/);
     if (voiceToolMatch && req.method === "POST") {
+      const toolName = voiceToolMatch[1].replaceAll("-", "_") as ToolName;
+      if (!TOOL_NAMES.includes(toolName)) {
+        send(res, 404, { ok: false, error: "unknown_voice_tool" });
+        return;
+      }
       const authorizedClientId = await voiceToolClientIdForRequest(
         store,
         req.headers["x-voice-tool-secret"],
@@ -294,9 +324,9 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const input = JSON.parse((await readRaw(req)).toString() || "{}") as Record<string, unknown>;
-      const result = await runVoiceTool(
+      const result = await runVoiceContractTool(
         store,
-        voiceToolMatch[1] as "check-availability" | "create-booking",
+        toolName,
         input,
         { store, clientId: authorizedClientId },
       );

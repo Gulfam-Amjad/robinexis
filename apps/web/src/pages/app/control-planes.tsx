@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity, AlertTriangle, BookOpen, Bot, CalendarDays, CheckCircle2, Clock3,
-  ExternalLink, PhoneCall, RefreshCw, ShieldCheck, Users, XCircle,
+  ExternalLink, PhoneCall, Plus, RefreshCw, ShieldCheck, Trash2, Users, XCircle,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
@@ -118,14 +118,19 @@ function SetupControl({ clientId }: { clientId: string }) {
 
 type BusinessDraft = {
   businessName: string; location: string; email: string; phone: string; hours: string;
-  services: string; policies: string; prices: string;
+  services: Array<{ title: string; slug: string; durationMinutes: number }>;
+  policies: string; prices: string;
 };
 
 function businessDraft(client?: Client): BusinessDraft {
   return {
     businessName: client?.businessName || "", location: client?.location || "", email: client?.email || "",
     phone: client?.phone || "", hours: client?.hours || "",
-    services: (client?.services || []).map((item) => `${item.title} | ${item.slug} | ${item.durationMinutes}`).join("\n"),
+    services: (client?.services || []).map((item) => ({
+      title: item.title,
+      slug: item.slug,
+      durationMinutes: item.durationMinutes,
+    })),
     policies: (client?.policies || []).join("\n"), prices: client?.prices || "",
   };
 }
@@ -146,19 +151,18 @@ function factText(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
-/** Scanned services arrive as objects; the form stores "Name | slug | minutes". */
-function servicesText(value: unknown): string {
-  if (!Array.isArray(value)) return factText(value);
+/** Scanned services become editable rows while remaining a review-only draft. */
+function servicesDraft(value: unknown): BusinessDraft["services"] {
+  if (!Array.isArray(value)) return [];
   return value
     .map((item) => {
       const service = item as { title?: string; name?: string; slug?: string; durationMinutes?: number };
       const title = service.title || service.name || "";
-      if (!title) return "";
+      if (!title) return undefined;
       const slug = service.slug || title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-      return `${title} | ${slug} | ${service.durationMinutes || 30}`;
+      return { title, slug, durationMinutes: Math.max(5, service.durationMinutes || 30) };
     })
-    .filter(Boolean)
-    .join("\n");
+    .filter((service): service is { title: string; slug: string; durationMinutes: number } => Boolean(service));
 }
 
 function pricesText(value: unknown): string {
@@ -353,7 +357,7 @@ function BusinessControl({ clientId }: { clientId: string }) {
     ...current,
     businessName: typeof facts.businessName === "string" ? facts.businessName : current.businessName,
     hours: facts.hours ? factText(facts.hours) : current.hours,
-    services: facts.services ? servicesText(facts.services) : current.services,
+    services: facts.services ? servicesDraft(facts.services) : current.services,
     prices: facts.services ? pricesText(facts.services) || current.prices : current.prices,
     policies: facts.cancellationRules ? factText(facts.cancellationRules) : current.policies,
   }));
@@ -363,10 +367,13 @@ function BusinessControl({ clientId }: { clientId: string }) {
     mutationFn: () => api.updateClient(clientId, {
       ...draft,
       policies: draft.policies.split("\n").map((value) => value.trim()).filter(Boolean),
-      services: draft.services.split("\n").map((line) => {
-        const [title, slug, duration] = line.split("|").map((value) => value.trim());
-        return { title, slug: slug || title.toLowerCase().replace(/[^a-z0-9]+/g, "-"), durationMinutes: Math.max(5, Number(duration) || 30) };
-      }).filter((service) => service.title),
+      services: draft.services
+        .filter((service) => service.title.trim())
+        .map((service) => ({
+          title: service.title.trim(),
+          slug: service.slug.trim() || service.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""),
+          durationMinutes: Math.max(5, Number(service.durationMinutes) || 30),
+        })),
     }),
     onSuccess: async () => {
       await Promise.all([queryClient.invalidateQueries({ queryKey: ["client", clientId] }), queryClient.invalidateQueries({ queryKey: ["clients"] })]);
@@ -376,7 +383,15 @@ function BusinessControl({ clientId }: { clientId: string }) {
   });
   if (client.isLoading) return <LoadingState label="Loading business profile…" />;
   if (client.error) return <ErrorState error={client.error} onRetry={() => client.refetch()} />;
-  const change = (key: keyof BusinessDraft) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setDraft((value) => ({ ...value, [key]: event.target.value }));
+  const change = (key: Exclude<keyof BusinessDraft, "services">) =>
+    (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+      setDraft((value) => ({ ...value, [key]: event.target.value }));
+  const updateService = (index: number, patch: Partial<BusinessDraft["services"][number]>) =>
+    setDraft((value) => ({
+      ...value,
+      services: value.services.map((service, serviceIndex) =>
+        serviceIndex === index ? { ...service, ...patch } : service),
+    }));
   return <>
     <PageHeader eyebrow="Business" title="One source of truth for every call" description="Keep location, opening hours, services, pricing and policies accurate. Saved changes become a reviewable draft." />
     <WebsiteScanCard clientId={clientId} canEdit={canEditWorkspace} onApply={applyScan} />
@@ -388,10 +403,16 @@ function BusinessControl({ clientId }: { clientId: string }) {
           <Field label="Public email"><input type="email" value={draft.email} onChange={change("email")} /></Field>
           <Field label="Public phone"><input inputMode="tel" value={draft.phone} onChange={change("phone")} /></Field>
         </div></Card>
-        <Card className="form-card"><SectionHeading title="Hours and services" description="Use one service per line: Name | slug | minutes." /><div className="form-grid">
-          <Field label="Opening hours"><textarea rows={7} value={draft.hours} onChange={change("hours")} /></Field>
-          <Field label="Services"><textarea rows={7} value={draft.services} onChange={change("services")} /></Field>
-        </div></Card>
+        <Card className="form-card"><SectionHeading title="Opening hours" description="Use plain language callers will understand." /><Field label="Opening hours"><textarea rows={6} value={draft.hours} onChange={change("hours")} /></Field></Card>
+        <Card className="form-card">
+          <SectionHeading title="Bookable services" description="Keep the customer-facing name and appointment duration accurate." action={<Button type="button" variant="secondary" size="sm" onClick={() => setDraft((value) => ({ ...value, services: [...value.services, { title: "", slug: "", durationMinutes: 30 }] }))}><Plus size={14} /> Add service</Button>} />
+          {draft.services.length ? <div className="service-editor-list">{draft.services.map((service, index) => <div className="service-editor-row" key={`${index}-${service.slug}`}>
+            <Field label="Service name"><input value={service.title} onChange={(event) => updateService(index, { title: event.target.value })} /></Field>
+            <Field label="Booking key" hint="Lowercase letters, numbers and hyphens"><input value={service.slug} pattern="[a-z0-9-]{2,80}" onChange={(event) => updateService(index, { slug: event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-") })} /></Field>
+            <Field label="Duration (minutes)"><input type="number" min={5} step={5} value={service.durationMinutes} onChange={(event) => updateService(index, { durationMinutes: Number(event.target.value) })} /></Field>
+            <Button type="button" variant="ghost" size="sm" aria-label={`Remove ${service.title || "service"}`} onClick={() => setDraft((value) => ({ ...value, services: value.services.filter((_, serviceIndex) => serviceIndex !== index) }))}><Trash2 size={15} /></Button>
+          </div>)}</div> : <EmptyState title="No services added" description="Add the services your receptionist can discuss and book." />}
+        </Card>
         <Card className="form-card"><SectionHeading title="Prices and policies" description="Only publish facts the team has approved." /><Field label="Pricing notes"><textarea rows={5} value={draft.prices} onChange={change("prices")} /></Field><Field label="Policies" hint="One policy per line"><textarea rows={6} value={draft.policies} onChange={change("policies")} /></Field></Card>
       </fieldset>
       <div className="sticky-save"><span>{!canEditWorkspace ? "Viewer access · read only" : dirty ? "You have unsaved changes" : "All changes saved"}</span>{canEditWorkspace && <Button disabled={!dirty || save.isPending}>{save.isPending ? "Saving…" : "Save draft"}</Button>}</div>

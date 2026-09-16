@@ -140,3 +140,27 @@ phone number attached, verify `VOICE_RUNTIME_ENABLED=false` produces a non-zero
 exit, then explicitly enable only that sandbox service. Roll back by disabling
 the variable and removing the sandbox dispatch. Production routing remains on
 Twilio → ElevenLabs until a separate cutover is approved.
+
+## Dual-provider quality rollout
+
+Keep `PROVIDER_SWITCH_ROUTING_ENABLED=false` throughout benchmark evaluation.
+The quality endpoint only calculates and stores evidence; it must not provision,
+dispatch, attach a number, or call a provider adapter.
+
+1. **Local/mock:** set `PROVIDER_SWITCH_ENABLED=true` and
+   `PROVIDER_QUALITY_EVALUATION_ENABLED=true`; keep runtime and routing false.
+   Run deterministic evaluator, API authorization, idempotency and scenario tests.
+2. **Sandbox:** run the UK salon fixtures against isolated provider deployments.
+   Import baseline/candidate metrics and confirm every check passes. Keep all
+   production and protected numbers detached.
+3. **Demos:** repeat blind voice and booking scenarios on internal demo tenants.
+   Re-evaluate before `PROVIDER_LAUNCH_GATE_MAX_AGE_HOURS` expires.
+4. **One canary:** obtain operator approval, verify rollback snapshot/confirmation,
+   then enable `PROVIDER_SWITCH_ROUTING_ENABLED=true` only for the controlled
+   switch window. Preview must show a recent stored passing gate.
+5. **Broader:** review canary failed-call, booking and latency telemetry before
+   each expansion. Evaluate and store a fresh gate for every staged deployment.
+
+Any missing, failed, malformed, future-dated or stale LiveKit gate blocks preview
+and start even when provider health is green. Disable routing first to stop the
+rollout; rollback via the recorded source snapshot when required.

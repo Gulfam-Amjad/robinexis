@@ -124,4 +124,22 @@ describe("database migrations", () => {
     expect(schema).toMatch(/REFERENCE SNAPSHOT ONLY/i);
     expect(schema).toMatch(/sole executable schema source/i);
   });
+
+  it("ships the fail-closed dual-provider control plane separately from credits", () => {
+    const sql = readFileSync(path.join(dir, "024_dual_provider_control.sql"), "utf8");
+    expect(sql).toMatch(/'elevenlabs-convai', 'livekit-cascade'/i);
+    expect(sql).toMatch(/provider <> 'groq-gateway' OR status = 'retired'/i);
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS provider_deployments/i);
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS provider_switch_operations/i);
+    expect(sql).toMatch(/UNIQUE \(client_id, idempotency_key\)/i);
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS provider_rollback_snapshots/i);
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS provider_usage_cost_events/i);
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS provider_account_snapshots/i);
+    expect(sql).toMatch(/scope TEXT NOT NULL DEFAULT 'account'/i);
+    expect(sql.match(/CREATE TABLE IF NOT EXISTS provider_account_snapshots[\s\S]*?\);/i)?.[0])
+      .not.toMatch(/client_id/i);
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS provider_alert_rules/i);
+    expect(sql).not.toMatch(/ALTER TABLE credit_ledger/i);
+    expect(sql).toMatch(/REVOKE ALL ON public\.provider_deployments FROM anon, authenticated/i);
+  });
 });

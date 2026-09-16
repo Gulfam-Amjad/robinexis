@@ -126,6 +126,47 @@ describe("product route tenant authorization", () => {
     expect(forbidden.status).toBe(404);
   });
 
+  it("lets only operators triage customer requests and records the change", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    const now = new Date().toISOString();
+    await store.saveTenantRequest({
+      id: "request_triage_test",
+      clientId: BLADES_HAIR_ID,
+      type: "support",
+      status: "pending",
+      requestedBy: "owner@blades.test",
+      payload: { subject: "Opening hours" },
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const forbidden = await request(
+      store,
+      salonActor,
+      "/api/v1/admin/requests/request_triage_test/status",
+      "POST",
+      { status: "in_progress" },
+    );
+    expect(forbidden.status).toBe(403);
+
+    const updated = await request(
+      store,
+      operatorActor,
+      "/api/v1/admin/requests/request_triage_test/status",
+      "POST",
+      { status: "completed" },
+    );
+    expect(updated).toMatchObject({
+      status: 200,
+      body: { request: { id: "request_triage_test", status: "completed" } },
+    });
+    expect((await store.listOperatorAudit(BLADES_HAIR_ID))[0]).toMatchObject({
+      action: "support.status_changed",
+      detail: { requestId: "request_triage_test", status: "completed" },
+    });
+  });
+
   it("authorizes self-serve finalize only for the owning salon", async () => {
     const store = new MemoryStore();
     await seedStore(store);

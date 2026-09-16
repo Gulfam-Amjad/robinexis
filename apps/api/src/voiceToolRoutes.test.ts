@@ -4,6 +4,7 @@ import { BLADES_HAIR_ID, MemoryStore, seedStore } from "@robinexis/database";
 import { FakeCalendar } from "@robinexis/integrations";
 import {
   runVoiceTool,
+  runVoiceContractTool,
   voiceToolAuthorized,
   voiceToolClientId,
   voiceToolClientIdForRequest,
@@ -14,6 +15,20 @@ describe("ElevenLabs voice tool routes", () => {
     expect(voiceToolAuthorized("correct", "correct")).toBe(true);
     expect(voiceToolAuthorized("wrong", "correct")).toBe(false);
     expect(voiceToolAuthorized("", "")).toBe(false);
+  });
+
+  it("executes the full provider-neutral tool contract through tenant-bound context", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    const result = await runVoiceContractTool(
+      store,
+      "get_business_info",
+      { conversationId: "call_provider_neutral", topic: "hours" },
+      { store, clientId: BLADES_HAIR_ID },
+    );
+    expect(result.status).toBe(200);
+    expect(result.body.ok).toBe(true);
+    expect((await store.getCall("call_provider_neutral"))?.clientId).toBe(BLADES_HAIR_ID);
   });
 
   it("maps each webhook secret to one server-authorized tenant", () => {

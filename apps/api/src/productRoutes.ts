@@ -76,6 +76,8 @@ import {
 } from "./auth.js";
 import { ensureSelfServeWorkspace, writableClientId } from "./billingService.js";
 import { provisionClientAgent, repairCalendarEventTypes } from "./provisioningService.js";
+import { handleProviderSwitchRoute } from "./providerSwitchRoutes.js";
+import { handleProviderUsageRoute } from "./providerUsageRoutes.js";
 
 export type ProductSend = (
   res: http.ServerResponse,
@@ -788,6 +790,9 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
   const { req, res, url, store, actor, send } = ctx;
   const route = url.pathname.slice("/api/v1".length) || "/";
 
+  if (await handleProviderUsageRoute(ctx, route)) return true;
+  if (await handleProviderSwitchRoute(ctx, route)) return true;
+
   if (route === "/session" && req.method === "GET") {
     const clientId = writableClientId(actor) || Object.keys(actor.clientRoles)[0];
     const client = clientId ? await store.getClient(clientId) : undefined;
@@ -834,7 +839,9 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
         subscriptionProvider: subscription?.provider,
         usedMinutes: (usage?.inboundMinutes || 0) + (usage?.outboundMinutes || 0),
         remainingMinutes: Math.max(0, ledger.reduce((sum, entry) => sum + entry.minutes, 0)),
-        failedCalls: calls.filter((call) => call.status === "failed").length,
+        failedCalls: calls.filter((call) =>
+          call.status === "failed" && call.createdAt.startsWith(month)
+        ).length,
       };
     }));
     const mrrPence = items.reduce((sum, item) => {
@@ -1427,7 +1434,7 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
     }
     const client = await requireClient(ctx, serviceStatusMatch[1]);
     if (!client) return true;
-    const body = await readJson<{ action?: string }>(ctx);
+    const body = await readJson<{ action?: string; reason?: string }>(ctx);
     if (body.action !== "suspend" && body.action !== "reactivate") {
       send(res, 400, { error: "valid_service_action_required" });
       return true;
@@ -1439,7 +1446,10 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       clientId: client.id,
       actorId: actor.subject,
       action: `service.${body.action}`,
-      detail: { serviceStatus: client.serviceStatus },
+      detail: {
+        serviceStatus: client.serviceStatus,
+        reason: body.reason?.trim().slice(0, 500) || "No operator reason supplied",
+      },
       createdAt: new Date().toISOString(),
     });
     send(res, 200, { clientId: client.id, serviceStatus: client.serviceStatus });

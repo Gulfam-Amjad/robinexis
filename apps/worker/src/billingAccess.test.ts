@@ -80,4 +80,60 @@ describe("billing access reconciliation", () => {
       expect.stringContaining("billing-restore"),
     );
   });
+
+  it("uses the active LiveKit adapter without touching ElevenLabs", async () => {
+    const store = new MemoryStore();
+    const client: ClientConfig = {
+      ...robinexisDemoSeed(),
+      id: "client_livekit_billing",
+      slug: "livekit-billing",
+      voicePipeline: "livekit-cascade",
+      published: true,
+      onboardingStatus: "active",
+      serviceStatus: "paused",
+    };
+    await store.upsertClient(client);
+    await store.upsertProviderDeployment({
+      id: "deployment_livekit_billing",
+      clientId: client.id,
+      provider: "livekit-cascade",
+      providerDeploymentId: "dispatch_livekit",
+      status: "active",
+      config: {
+        phoneNumberId: "PN_LK",
+        suspendVoiceUrl: "https://example.test/suspended",
+        ingress: { kind: "twilio_voice_url", voiceUrl: "https://example.test/livekit" },
+        assignmentState: "assigned",
+      },
+      createdAt: "2026-09-01T00:00:00.000Z",
+      updatedAt: "2026-09-01T00:00:00.000Z",
+    });
+    const livekitAdapter = {
+      suspend: vi.fn(async () => undefined),
+      restore: vi.fn(async () => undefined),
+    };
+    const management = {
+      assignAgentToPhoneNumber: vi.fn(),
+      unassignAgentFromPhoneNumber: vi.fn(),
+    };
+
+    await expect(reconcileBillingAccess(store, { livekitAdapter, management })).resolves.toMatchObject({
+      suspended: 1,
+      failed: 0,
+    });
+    expect(livekitAdapter.suspend).toHaveBeenCalledOnce();
+    expect(management.unassignAgentFromPhoneNumber).not.toHaveBeenCalled();
+
+    client.serviceStatus = "active";
+    await store.upsertClient(client);
+    const deployment = (await store.getActiveProviderDeployment(client.id))!;
+    deployment.config = { ...deployment.config, assignmentState: "suspended" };
+    await store.upsertProviderDeployment(deployment);
+    await expect(reconcileBillingAccess(store, { livekitAdapter, management })).resolves.toMatchObject({
+      restored: 1,
+      failed: 0,
+    });
+    expect(livekitAdapter.restore).toHaveBeenCalledOnce();
+    expect(management.assignAgentToPhoneNumber).not.toHaveBeenCalled();
+  });
 });

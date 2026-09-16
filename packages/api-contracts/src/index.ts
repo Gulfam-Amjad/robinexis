@@ -27,6 +27,183 @@ export type OnboardingStatus =
   | "failed";
 export type PhoneAcquisitionMode = "robinexis_account" | "customer_oauth";
 
+export const ACTIVE_VOICE_PROVIDERS = ["elevenlabs-convai", "livekit-cascade"] as const;
+export type ActiveVoiceProvider = (typeof ACTIVE_VOICE_PROVIDERS)[number];
+export type RetiredVoiceProvider = "groq-gateway";
+export type VoiceProvider = ActiveVoiceProvider | RetiredVoiceProvider;
+
+export type VoiceProviderResolution =
+  | { supported: true; active: true; provider: ActiveVoiceProvider }
+  | { supported: true; active: false; provider: RetiredVoiceProvider; reason: "provider_retired" }
+  | { supported: false; active: false; provider?: undefined; reason: "provider_unknown" };
+
+/** Converts persisted provider values without ever activating a legacy or unknown value. */
+export function resolveVoiceProvider(value: unknown): VoiceProviderResolution {
+  if (value === "elevenlabs-convai" || value === "livekit-cascade") {
+    return { supported: true, active: true, provider: value };
+  }
+  if (value === "groq-gateway") {
+    return { supported: true, active: false, provider: value, reason: "provider_retired" };
+  }
+  return { supported: false, active: false, reason: "provider_unknown" };
+}
+
+export interface ProviderCallContract {
+  provider: ActiveVoiceProvider;
+  deploymentId: string;
+  providerCallId: string;
+  direction: CallDirection;
+  status: CallStatus;
+  startedAt: string;
+  endedAt?: string;
+  durationSeconds?: number;
+  outcome?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ProviderQualityContract {
+  provider: ActiveVoiceProvider;
+  callId: string;
+  measuredAt: string;
+  endToEndLatencyMs?: number;
+  timeToFirstAudioMs?: number;
+  interruptionCount?: number;
+  transcriptConfidence?: number;
+  successful: boolean;
+  dimensions?: Record<string, number | boolean | string>;
+}
+
+export interface ProviderCostContract {
+  provider: ActiveVoiceProvider;
+  providerEventId: string;
+  callId?: string;
+  occurredAt: string;
+  usageQuantity: number;
+  usageUnit: "seconds" | "minutes" | "tokens" | "characters" | "calls";
+  costMinor: number;
+  currency: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ProviderLaunchGateCheck {
+  key: string;
+  passed: boolean;
+  blocking: boolean;
+  detail: string;
+  baseline?: number | boolean;
+  candidate?: number | boolean;
+  threshold?: number;
+}
+
+export interface ProviderBenchmarkMetrics {
+  totalCostMinor: number;
+  successfulBookings: number;
+  bookingAttempts: number;
+  blindVoiceWins: number;
+  blindVoiceTies: number;
+  blindVoiceComparisons: number;
+  p95FirstResponseMs: number;
+  totalCalls: number;
+  failedCalls: number;
+  bargeInPassed: boolean;
+}
+
+export interface ProviderLaunchGateInput {
+  candidateProvider: ActiveVoiceProvider;
+  deploymentId: string;
+  baseline: ProviderBenchmarkMetrics;
+  candidate: ProviderBenchmarkMetrics;
+  source?: "manual" | "import" | "automated";
+}
+
+export interface ProviderLaunchGateContract extends ProviderLaunchGateInput {
+  id: string;
+  evaluatedAt: string;
+  evaluatedBy: string;
+  passed: boolean;
+  checks: ProviderLaunchGateCheck[];
+}
+
+export type ProviderSwitchApiStatus =
+  | "ready"
+  | "blocked"
+  | "in_progress"
+  | "live"
+  | "rollback_in_progress"
+  | "rolled_back"
+  | "failed";
+
+export interface ProviderSwitchCheck {
+  key: string;
+  passed: boolean;
+  blocking: boolean;
+  detail: string;
+}
+
+export interface ProviderSwitchPreview {
+  clientId: string;
+  fromProvider?: ActiveVoiceProvider;
+  toProvider: ActiveVoiceProvider;
+  targetDeploymentId?: string;
+  status: "ready" | "blocked";
+  featureEnabled: boolean;
+  checks: ProviderSwitchCheck[];
+}
+
+export interface ProviderSwitchOperationView {
+  id: string;
+  clientId: string;
+  idempotencyKey: string;
+  fromProvider?: ActiveVoiceProvider;
+  toProvider: ActiveVoiceProvider;
+  status: ProviderSwitchApiStatus;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+  rollbackAvailable: boolean;
+}
+
+export interface ProviderHealthView {
+  clientId: string;
+  provider?: ActiveVoiceProvider;
+  deploymentId?: string;
+  status: "healthy" | "degraded" | "unavailable";
+  checks: ProviderSwitchCheck[];
+  checkedAt: string;
+}
+
+export interface ProviderUsagePortfolio {
+  from: string;
+  to: string;
+  totals: {
+    usageMinutes: number;
+    estimatedCostMinor: number;
+    currency: string;
+  };
+  providers: Array<{
+    provider: ActiveVoiceProvider;
+    usageMinutes: number;
+    estimatedCostMinor: number;
+    eventCount: number;
+    estimated: boolean;
+  }>;
+  clients: Array<{
+    clientId: string;
+    businessName: string;
+    provider: ActiveVoiceProvider;
+    usageMinutes: number;
+    estimatedCostMinor: number;
+  }>;
+  accountSnapshots: Array<{
+    provider: ActiveVoiceProvider;
+    status: "healthy" | "degraded" | "unavailable";
+    capturedAt: string;
+    usage: Record<string, unknown>;
+    limits: Record<string, unknown>;
+  }>;
+}
+
 export interface PublicTwilioConnection {
   mode: PhoneAcquisitionMode;
   status: "not_connected" | "pending" | "credentials_required" | "active" | "expired" | "revoked" | "failed";
@@ -97,7 +274,7 @@ export interface Client extends ClientSummary {
   transferNumber?: string;
   voiceId?: string;
   elevenlabsAgentId?: string;
-  voicePipeline?: "elevenlabs-convai" | "groq-gateway";
+  voicePipeline?: VoiceProvider;
   services?: ClientService[];
   staff?: string[];
   hours?: string;
@@ -146,6 +323,29 @@ export interface ProvisioningReadinessReport {
   checks: Array<{ key: string; status: "passed" | "failed"; detail: string }>;
   syntheticBooking?: { providerBookingId?: string; created: boolean; cancelled: boolean };
   testCallLink?: string;
+}
+
+export interface AdminSummary {
+  month: string;
+  mrrPence: number;
+  totalUsedMinutes: number;
+  totalFailedCalls: number;
+  setupQueueCount: number;
+  failedBillingEvents: Array<{
+    id: string;
+    clientId?: string;
+    eventType: string;
+    error?: string;
+    receivedAt: string;
+  }>;
+  clients: Array<{
+    clientId: string;
+    plan: "starter" | "pro" | "enterprise";
+    subscriptionStatus: string;
+    usedMinutes: number;
+    remainingMinutes: number;
+    failedCalls: number;
+  }>;
 }
 
 export interface AdminControlPlane {

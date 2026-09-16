@@ -13,10 +13,13 @@
     "start:source": "tsx src/server.ts"
   },
   "dependencies": {
+    "@robinexis/api-contracts": "*",
     "@robinexis/brain": "*",
     "@robinexis/database": "*",
+    "@robinexis/evaluations": "*",
     "@robinexis/integrations": "*",
     "@robinexis/knowledge": "*",
+    "@robinexis/tool-contracts": "*",
     "dotenv": "^17.4.2",
     "jose": "^6.0.12"
   }

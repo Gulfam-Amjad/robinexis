@@ -1,5 +1,6 @@
 import type {
   AdminControlPlane,
+  AdminSummary,
   AnalyticsSummary,
   ApiErrorBody,
   Booking,
@@ -19,6 +20,12 @@ import type {
   PublicPromptVersion,
   PublicCalendarConnection,
   PublicTwilioConnection,
+  ProviderHealthView,
+  ProviderLaunchGateContract,
+  ProviderLaunchGateInput,
+  ProviderSwitchOperationView,
+  ProviderSwitchPreview,
+  ProviderUsagePortfolio,
   SessionActor,
   TimeseriesPoint,
   Usage,
@@ -129,29 +136,57 @@ export const api = {
   bootstrap: (clientId?: string) =>
     request<BootstrapResponse>(`/api/v1/bootstrap${query({ clientId })}`),
   clients: async () => list(await request<ClientSummary[] | ListResponse<ClientSummary>>("/api/v1/clients")),
-  adminSummary: () => request<{
-    month: string;
-    mrrPence: number;
-    totalUsedMinutes: number;
-    totalFailedCalls: number;
-    setupQueueCount?: number;
-    failedBillingEvents?: Array<{
-      id: string;
-      clientId?: string;
-      eventType: string;
-      error?: string;
-      receivedAt: string;
-    }>;
-    clients: Array<{
-      clientId: string;
-      plan: "starter" | "pro" | "enterprise";
-      subscriptionStatus: string;
-      usedMinutes: number;
-      remainingMinutes: number;
-      failedCalls: number;
-    }>;
-  }>("/api/v1/admin/summary"),
+  adminSummary: () => request<AdminSummary>("/api/v1/admin/summary"),
   adminControlPlane: () => request<AdminControlPlane>("/api/v1/admin/control-plane"),
+  prepareProviderDeployment: (
+    clientId: string,
+    provider: "elevenlabs-convai" | "livekit-cascade",
+  ) => request<{ deploymentId: string; provider: string; status: "staged"; preparedAt: string }>(
+    `/api/v1/admin/clients/${encodeURIComponent(clientId)}/provider-switch/prepare`,
+    { method: "POST", body: JSON.stringify({ provider }) },
+  ),
+  previewProviderSwitch: (clientId: string, toProvider: "elevenlabs-convai" | "livekit-cascade") =>
+    request<ProviderSwitchPreview>(
+      `/api/v1/admin/clients/${encodeURIComponent(clientId)}/provider-switch/preview`,
+      { method: "POST", body: JSON.stringify({ toProvider }) },
+    ),
+  startProviderSwitch: (clientId: string, input: {
+    toProvider: "elevenlabs-convai" | "livekit-cascade";
+    idempotencyKey: string;
+    confirmation: string;
+  }) => request<ProviderSwitchOperationView>(
+    `/api/v1/admin/clients/${encodeURIComponent(clientId)}/provider-switch/start`,
+    { method: "POST", body: JSON.stringify(input) },
+  ),
+  providerSwitchStatus: (clientId: string, operationId?: string) =>
+    request<ProviderSwitchOperationView>(
+      `/api/v1/admin/clients/${encodeURIComponent(clientId)}/provider-switch/status${query({ operationId })}`,
+    ),
+  rollbackProviderSwitch: (clientId: string, operationId: string, confirmation: string) =>
+    request<ProviderSwitchOperationView>(
+      `/api/v1/admin/clients/${encodeURIComponent(clientId)}/provider-switch/rollback`,
+      { method: "POST", body: JSON.stringify({ operationId, confirmation }) },
+    ),
+  providerHealth: (clientId: string) =>
+    request<ProviderHealthView>(
+      `/api/v1/admin/clients/${encodeURIComponent(clientId)}/provider-switch/health`,
+    ),
+  providerLaunchGate: (clientId: string, deploymentId: string) =>
+    request<ProviderLaunchGateContract>(
+      `/api/v1/admin/clients/${encodeURIComponent(clientId)}/provider-switch/launch-gate${query({ deploymentId })}`,
+    ),
+  evaluateProviderLaunchGate: (clientId: string, input: ProviderLaunchGateInput) =>
+    request<ProviderLaunchGateContract>(
+      `/api/v1/admin/clients/${encodeURIComponent(clientId)}/provider-switch/launch-gate`,
+      { method: "POST", body: JSON.stringify(input) },
+    ),
+  providerUsage: (range: { from?: string; to?: string } = {}) =>
+    request<ProviderUsagePortfolio>(`/api/v1/admin/provider-usage${query(range)}`),
+  refreshElevenLabsAccount: () =>
+    request<ProviderUsagePortfolio["accountSnapshots"][number]>(
+      "/api/v1/admin/provider-usage/elevenlabs/refresh",
+      { method: "POST" },
+    ),
   notificationStatus: (clientId: string) =>
     request<{ pending: number; failed: number; lastDeliveryAt?: string }>(
       `/api/v1/clients/${encodeURIComponent(clientId)}/notifications/status`,
@@ -161,6 +196,13 @@ export const api = {
       `/api/v1/admin/billing-events/${encodeURIComponent(eventId)}/replay`,
       { method: "POST" },
     ),
+  updateAdminRequestStatus: (
+    requestId: string,
+    status: "pending" | "in_progress" | "completed" | "rejected",
+  ) => request<{ request: { id: string; status: string } }>(
+    `/api/v1/admin/requests/${encodeURIComponent(requestId)}/status`,
+    { method: "POST", body: JSON.stringify({ status }) },
+  ),
   adminAudit: (clientId?: string) =>
     request<{ items: Array<{ id: string; clientId?: string; actorId: string; action: string; detail: Record<string, unknown>; createdAt: string }> }>(
       `/api/v1/admin/audit${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ""}`,
@@ -308,10 +350,10 @@ export const api = {
       `/api/v1/clients/${encodeURIComponent(id)}/onboarding/finalize`,
       { method: "POST", body: JSON.stringify(input) },
     ),
-  setServiceStatus: (id: string, action: "suspend" | "reactivate") =>
+  setServiceStatus: (id: string, action: "suspend" | "reactivate", reason?: string) =>
     request<{ clientId: string; serviceStatus: string }>(
       `/api/v1/clients/${encodeURIComponent(id)}/service-status`,
-      { method: "POST", body: JSON.stringify({ action }) },
+      { method: "POST", body: JSON.stringify({ action, reason }) },
     ),
   adjustCredits: (id: string, minutes: number, reason: string, idempotencyKey: string) =>
     request<{ appended: boolean; remainingMinutes: number }>(

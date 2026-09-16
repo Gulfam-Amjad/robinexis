@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isAiServiceEnabled } from "./access.js";
+import { activeVoiceProviderOf, isAiServiceEnabled, voicePipelineOf } from "./access.js";
 
 describe("self-serve activation gate", () => {
   it("keeps paid and published workspaces disabled until provisioning is active", () => {
@@ -19,5 +19,13 @@ describe("self-serve activation gate", () => {
       onboardingStatus: "active",
     });
     expect(result.inbound).toBe(true);
+  });
+
+  it("normalizes legacy rows without activating retired or unknown providers", () => {
+    expect(voicePipelineOf({})).toBe("groq-gateway");
+    expect(activeVoiceProviderOf("elevenlabs-convai")).toBe("elevenlabs-convai");
+    expect(activeVoiceProviderOf("livekit-cascade")).toBe("livekit-cascade");
+    expect(activeVoiceProviderOf("groq-gateway")).toBeUndefined();
+    expect(activeVoiceProviderOf("future-provider")).toBeUndefined();
   });
 });

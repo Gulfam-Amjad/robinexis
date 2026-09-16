@@ -33,6 +33,7 @@ import {
   Settings2,
   ShieldCheck,
   Sparkles,
+  Store,
   Trash2,
   TrendingUp,
   UploadCloud,
@@ -150,28 +151,42 @@ function OverviewContent({ clientId }: { clientId: string }) {
   const integration = (id: string) => integrations.find((item) => item.id.toLowerCase() === id);
   const monthlyMinutes = usage.data ? usage.data.inboundMinutes + usage.data.outboundMinutes : undefined;
   const minuteLimit = client.data?.monthlyMinuteLimit;
+  const remainingMinutes = usage.data?.remainingMinutes ??
+    (minuteLimit && monthlyMinutes !== undefined ? Math.max(0, minuteLimit - monthlyMinutes) : undefined);
+  const answerRate = summary?.totalCalls
+    ? Math.round(((summary.answeredCalls || 0) / summary.totalCalls) * 100)
+    : 0;
+  const essentialConnections = ["elevenlabs", "calcom", "twilio"];
+  const readyConnections = essentialConnections.filter((id) => integration(id)?.connected).length;
+  const nextAction = !activeClient?.published
+    ? { title: "Approve your receptionist", detail: "Review the saved draft before it can answer customers.", to: "/app/agents", label: "Review receptionist" }
+    : readyConnections < essentialConnections.length
+      ? { title: "Finish business setup", detail: "Connect the phone and calendar required for live calls.", to: "/app/setup", label: "Open setup" }
+      : remainingMinutes !== undefined && remainingMinutes <= 0
+        ? { title: "Your minute allowance is used", detail: "Review your plan before more calls can be answered.", to: "/billing", label: "Manage plan" }
+        : { title: "Your receptionist is ready", detail: "Make a test call whenever you change business information.", to: "/app/playground", label: "Test receptionist" };
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
   return (
     <>
-      <PageHeader eyebrow="Good afternoon" title={`${activeClient?.businessName || "Your business"} is in good hands`} description="Here’s what your receptionist has been doing for your customers." actions={<LinkButton to="/app/playground" variant="secondary"><Play size={15} /> Test agent</LinkButton>} />
+      <PageHeader eyebrow={greeting} title={`${activeClient?.businessName || "Your business"} is in good hands`} description="Calls, bookings and the next action for your receptionist—without provider jargon." actions={<LinkButton to="/app/playground" variant="secondary"><Play size={15} /> Test receptionist</LinkButton>} />
       {!activeClient?.published && <div className="notice"><div><WandSparkles /><span><strong>This workspace configuration is still a draft.</strong> Review it and approve a version for audit before go-live.</span></div><Link to="/app/agents">Review agent <ChevronRight size={15} /></Link></div>}
       <div className="metrics-grid">
         <MetricCard label="Total calls" value={summary?.totalCalls ?? 0} detail="Current period" icon={PhoneCall} tone="cream" />
         <MetricCard label="Appointments booked" value={summary?.bookedAppointments ?? 0} detail={`${Math.round(summary?.bookingRate || 0)}% booking rate`} icon={CalendarCheck2} tone="sage" />
-        <MetricCard label="Minutes handled" value={summary?.minutesUsed ?? 0} detail="Time back for your team" icon={Clock3} tone="peach" />
+        <MetricCard label="Calls answered" value={`${answerRate}%`} detail={`${summary?.answeredCalls || 0} answered successfully`} icon={CheckCircle2} tone="peach" />
         <MetricCard
-          label="Monthly usage"
-          value={usage.isLoading ? "…" : monthlyMinutes ?? "—"}
-          detail={usage.error ? "Usage unavailable" : minuteLimit ? `of ${minuteLimit} minute allowance` : usage.data?.month || "Current billing month"}
+          label="Minutes remaining"
+          value={usage.isLoading ? "…" : remainingMinutes ?? "—"}
+          detail={usage.error ? "Usage unavailable" : usage.data?.plan ? `${usage.data.plan} plan · ${usage.data.month}` : usage.data?.month || "Current billing month"}
           icon={CircleDollarSign}
           tone="lilac"
         />
       </div>
       <Card className="panel">
-        <SectionHeading title="Recovery metrics" description="Robinexis shows outcomes only when the underlying booking events can support them." />
-        <div className="metrics-grid metrics-compact">
-          <MetricCard label="Appointments rescheduled" value="Unavailable" detail="Reschedule event history is not complete yet" icon={RefreshCw} />
-          <MetricCard label="No-shows recovered" value="Unavailable" detail="No-show outcomes are not connected yet" icon={CalendarCheck2} />
-          <MetricCard label="Recovered revenue" value="Unavailable" detail="No verified revenue attribution is available" icon={CircleDollarSign} />
+        <div className="dashboard-next-action">
+          <div><span className="eyebrow">Recommended next action</span><h2>{nextAction.title}</h2><p>{nextAction.detail}</p></div>
+          <LinkButton to={nextAction.to}>{nextAction.label} <ChevronRight size={15} /></LinkButton>
         </div>
       </Card>
       <div className="overview-grid">
@@ -180,15 +195,14 @@ function OverviewContent({ clientId }: { clientId: string }) {
           <CallTable calls={calls.slice(0, 5)} compact />
         </Card>
         <Card className="panel quick-panel">
-          <SectionHeading title="Agent health" description="Ready for the next call" />
-          <div className="health-ring"><div><strong>{activeClient?.access?.inbound ? "Active" : activeClient?.published ? "Ready" : "Draft"}</strong><span>phone status</span></div></div>
+          <SectionHeading title="Receptionist readiness" description="The essentials required for live customer calls." />
           <div className="health-list">
             <span>{integration("elevenlabs")?.connected ? <CheckCircle2 /> : <XCircle className="danger-icon" />} Voice agent <Badge tone={integration("elevenlabs")?.connected ? "success" : "warning"}>{integration("elevenlabs")?.connected ? "Connected" : "Needs setup"}</Badge></span>
-            <span>{integration("gemini")?.connected ? <CheckCircle2 /> : <XCircle className="danger-icon" />} Business knowledge <Badge tone={integration("gemini")?.connected ? "success" : "warning"}>{integration("gemini")?.connected ? "Ready" : "Needs setup"}</Badge></span>
             <span>{integration("calcom")?.connected ? <CheckCircle2 /> : <XCircle className="danger-icon" />} Calendar connection <Badge tone={integration("calcom")?.connected ? "success" : "warning"}>{integration("calcom")?.connected ? "Ready" : "Needs setup"}</Badge></span>
+            <span>{integration("twilio")?.connected ? <CheckCircle2 /> : <XCircle className="danger-icon" />} Phone connection <Badge tone={integration("twilio")?.connected ? "success" : "warning"}>{integration("twilio")?.connected ? "Ready" : "Needs setup"}</Badge></span>
             <span>{activeClient?.published ? <CheckCircle2 /> : <Clock3 />} Approved version <Badge tone={activeClient?.published ? "success" : "warning"}>{activeClient?.published ? "Recorded" : "Needs review"}</Badge></span>
           </div>
-          <Link className="button button-secondary button-md full-button" to="/app/agents">Manage agent <Settings2 size={15} /></Link>
+          <Link className="button button-secondary button-md full-button" to="/app/setup">Open setup <Settings2 size={15} /></Link>
         </Card>
       </div>
     </>
@@ -244,16 +258,7 @@ export function AdminOverviewPage() {
     navigate("/app");
   };
   const adjustCredits = (clientId: string) => {
-    const rawMinutes = window.prompt("Minutes to add (negative removes minutes)");
-    if (rawMinutes === null) return;
-    const minutes = Number(rawMinutes);
-    if (!Number.isFinite(minutes) || minutes === 0) {
-      push({ title: "Enter a non-zero number of minutes", tone: "error" });
-      return;
-    }
-    const reason = window.prompt("Reason for this audited adjustment")?.trim();
-    if (!reason) return;
-    creditAdjustment.mutate({ clientId, minutes, reason });
+    navigate(`/admin/customers/${clientId}?adjust=credits`);
   };
 
   return (
@@ -945,7 +950,7 @@ function CalendarContent({ clientId }: { clientId: string }) {
   const nextBooking = [...(bookings.data || [])].sort((left, right) => new Date(left.start).getTime() - new Date(right.start).getTime())[0];
   return (
     <>
-      <PageHeader eyebrow="Calendar" title="Bookings and availability in one view" description="Find customers, review the exact status returned by the calendar, and make confirmed changes." actions={<Link className="button button-secondary button-md" to="/app/integrations"><Link2 size={15} /> Calendar settings</Link>} />
+      <PageHeader eyebrow="Calendar" title="Bookings and availability in one view" description="Find customers, review the exact status returned by the calendar, and make confirmed changes." actions={<Link className="button button-secondary button-md" to="/app/calendar/settings"><Link2 size={15} /> Calendar settings</Link>} />
       <div className="calendar-summary">
         <Card><CalendarCheck2 /><div><strong>{bookings.data?.length || 0}</strong><span>Appointments returned</span></div></Card>
         <Card><Clock3 /><div><strong>{nextBooking ? formatDate(nextBooking.start, { day: "2-digit", month: "short" }) : "—"}</strong><span>Next appointment</span></div></Card>
@@ -1415,8 +1420,9 @@ function UsageContent({ clientId }: { clientId: string }) {
 
   return (
     <>
-      <PageHeader eyebrow="Usage" title="Voice minutes, clearly accounted for" description={`Usage reported by the platform for ${usage.data?.month || "the current month"}.`} />
+      <PageHeader eyebrow="Plan & usage" title="Your plan, allowance and voice usage" description={`Usage reported by the platform for ${usage.data?.month || "the current month"}.`} actions={<LinkButton to="/billing" variant="secondary">Manage billing</LinkButton>} />
       <div className="metrics-grid metrics-compact">
+        <MetricCard label="Current plan" value={usage.data?.plan ? usage.data.plan[0].toUpperCase() + usage.data.plan.slice(1) : "Not reported"} detail={client.data?.serviceStatus?.replaceAll("_", " ") || "Subscription status unavailable"} icon={CircleDollarSign} tone="lilac" />
         <MetricCard label="Total minutes" value={total} detail={usage.data?.month || "Current month"} icon={Clock3} />
         <MetricCard label="Inbound minutes" value={inbound} detail="Customer calls received" icon={PhoneCall} tone="sage" />
         <MetricCard label="Outbound minutes" value={outbound} detail="Platform-reported outbound usage" icon={Headphones} tone="lilac" />
@@ -1514,17 +1520,9 @@ export function SupportPage() {
 
 export function SettingsPage() {
   const { activeClientId } = useClient();
-  const { canEditWorkspace: canEdit, canCreateClients, isOperator } = usePermissions(activeClientId);
-  const queryClient = useQueryClient();
+  const { canCreateClients, isOperator } = usePermissions(activeClientId);
   const { push } = useToast();
   const client = useQuery({ queryKey: ["client", activeClientId], queryFn: () => api.client(activeClientId!), enabled: Boolean(activeClientId), retry: false });
-  const settingsSchema = z.object({ businessName: z.string().min(2), location: z.string().optional(), email: z.string().email().or(z.literal("")), phone: z.string().optional() });
-  const form = useForm<z.infer<typeof settingsSchema>>({ values: { businessName: client.data?.businessName || "", location: client.data?.location || "", email: client.data?.email || "", phone: client.data?.phone || "" }, resolver: zodResolver(settingsSchema) });
-  const save = useMutation({
-    mutationFn: (values: z.infer<typeof settingsSchema>) => api.updateClient(activeClientId!, values),
-    onSuccess: async () => { await Promise.all([queryClient.invalidateQueries({ queryKey: ["client", activeClientId] }), queryClient.invalidateQueries({ queryKey: ["clients"] })]); push({ title: "Settings saved", message: "Approve a new workspace version if these details affect conversations.", tone: "success" }); },
-    onError: (error) => push({ title: "Save failed", message: error.message, tone: "error" }),
-  });
   const lifecycleRequest = useMutation({
     mutationFn: (type: "data_export" | "workspace_deletion") => api.createRequest({ type }),
     onSuccess: (_, type) => push({
@@ -1541,9 +1539,9 @@ export function SettingsPage() {
     <>
       <PageHeader eyebrow="Workspace settings" title="The business behind the voice" description="Manage operational details used across your agents, calls, and reports." />
       <div className="settings-layout">
-        <nav className="settings-nav"><a className="active" href="#business"><Settings2 /> Business profile</a><a href="#security"><ShieldCheck /> Security</a>{isOperator && <a href="#developer"><Code2 /> Developer</a>}</nav>
+        <nav className="settings-nav"><Link className="active" to="/app/business"><Settings2 /> Business profile</Link><a href="#security"><ShieldCheck /> Security</a>{isOperator && <a href="#developer"><Code2 /> Developer</a>}</nav>
         <div>
-          <Card className="form-card" id="business"><SectionHeading title="Business profile" description={canEdit ? "Changing approved business details marks the current agent configuration as a draft." : "Your viewer role can review these details but cannot change them."} /><form onSubmit={form.handleSubmit((values) => save.mutate(values))}><fieldset disabled={!canEdit || save.isPending}><div className="form-grid"><Field label="Business name"><input {...form.register("businessName")} /></Field><Field label="Location"><input {...form.register("location")} /></Field><Field label="Public email"><input {...form.register("email")} /></Field><Field label="Public phone"><input {...form.register("phone")} /></Field></div>{canEdit && <div className="form-actions"><Button disabled={save.isPending}>{save.isPending ? "Saving…" : "Save changes"}</Button></div>}</fieldset></form></Card>
+          <Card className="form-card" id="business"><SectionHeading title="One business profile" description="Opening hours, services, prices and public details now live in one reviewable draft." /><div className="deferred-row"><Store /><div><strong>{client.data?.businessName}</strong><p>{client.data?.location || "No public location saved"}</p></div><LinkButton to="/app/business">Open business setup</LinkButton></div></Card>
           <Card className="form-card" id="security"><SectionHeading title="Session security" description="The dashboard stores a short-lived access token for this tab only." /><div className="security-setting"><span><KeyRound /></span><div><strong>Supabase session</strong><p>A signed JWT is verified by the Railway API, then restricted to assigned workspaces and roles.</p></div><Badge tone="success">Protected</Badge></div></Card>
           <Card className="form-card" id="data"><SectionHeading title="Your data" description="Exports and deletion are reviewed, tenant-scoped, and audited before any irreversible action." /><div className="row-actions"><Button variant="secondary" disabled={lifecycleRequest.isPending} onClick={() => lifecycleRequest.mutate("data_export")}>Request data export</Button><Button variant="ghost" disabled={lifecycleRequest.isPending} onClick={() => { if (window.confirm("Request operator review for permanent workspace deletion? No data is deleted immediately.")) lifecycleRequest.mutate("workspace_deletion"); }}>Request deletion review</Button></div></Card>
           {isOperator && <Card className="form-card" id="developer"><SectionHeading title="API environment" description="Production dashboard requests use the versioned Railway API." /><div className="code-line"><code>/api/v1</code><button className="icon-button" onClick={() => navigator.clipboard.writeText("/api/v1")}><Copy size={16} /></button></div></Card>}

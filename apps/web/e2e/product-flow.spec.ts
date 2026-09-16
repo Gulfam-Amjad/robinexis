@@ -20,6 +20,7 @@ async function openWorkspaceSession(
   workspaceRole: "owner" | "manager" | "viewer" = "owner",
 ) {
   let lifecycleStatus = onboardingStatus;
+  let storedLaunchGate: Record<string, unknown> | undefined;
   const wizardSteps = ["website", "facts", "behavior", "operations", "phone", "calendar", "review"] as const;
   const wizard = {
     clientId: client.id,
@@ -76,6 +77,8 @@ async function openWorkspaceSession(
       mrrPence: 0,
       totalUsedMinutes: 12,
       totalFailedCalls: 0,
+      setupQueueCount: 0,
+      failedBillingEvents: [],
       clients: [{ clientId: client.id, plan: "starter", subscriptionStatus: "trialing", usedMinutes: 12, remainingMinutes: 88, failedCalls: 0 }],
     } });
     if (path === "/api/v1/admin/control-plane") return route.fulfill({ json: {
@@ -91,6 +94,14 @@ async function openWorkspaceSession(
       requests: [],
       spendAlarms: [],
       blades: { present: true, published: true, serviceStatus: "active", inboundActive: true },
+    } });
+    if (path === "/api/v1/admin/provider-usage") return route.fulfill({ json: {
+      from: "2026-09-01T00:00:00.000Z",
+      to: "2026-09-30T23:59:59.999Z",
+      totals: { usageMinutes: 12, estimatedCostMinor: 45, currency: "GBP" },
+      providers: [],
+      clients: [{ clientId: client.id, businessName: client.businessName, provider: "elevenlabs-convai", usageMinutes: 12, estimatedCostMinor: 45 }],
+      accountSnapshots: [],
     } });
     if (path.endsWith("/prompt-versions") || path.endsWith("/provisioning")) return route.fulfill({ json: { items: [] } });
     if (path === "/api/v1/calls") return route.fulfill({ json: { items: [] } });
@@ -123,6 +134,50 @@ async function openWorkspaceSession(
       trialEndsAt: "2026-09-16T00:00:00.000Z",
       cancelAtPeriodEnd: false,
     } });
+    if (path.endsWith("/provider-switch/health")) {
+      return route.fulfill({ json: { clientId: client.id, status: "healthy", checks: [], checkedAt: new Date().toISOString() } });
+    }
+    if (path.endsWith("/provider-switch/prepare")) {
+      return route.fulfill({ status: 201, json: {
+        deploymentId: "deployment_livekit_staged",
+        provider: "livekit-cascade",
+        status: "staged",
+        preparedAt: new Date().toISOString(),
+      } });
+    }
+    if (path.endsWith("/provider-switch/launch-gate")) {
+      if (route.request().method() === "GET") {
+        return storedLaunchGate
+          ? route.fulfill({ json: storedLaunchGate })
+          : route.fulfill({ status: 404, json: { error: "provider_launch_gate_not_found" } });
+      }
+      const input = route.request().postDataJSON();
+      storedLaunchGate = {
+        ...input,
+        id: "gate_e2e",
+        evaluatedAt: new Date().toISOString(),
+        evaluatedBy: "operator",
+        passed: true,
+        checks: [{ key: "barge_in", passed: true, blocking: true, detail: "Candidate barge-in test passed." }],
+      };
+      return route.fulfill({ status: 201, json: storedLaunchGate });
+    }
+    if (path.endsWith("/provider-switch/preview")) {
+      return route.fulfill({ json: {
+        clientId: client.id,
+        fromProvider: "elevenlabs-convai",
+        toProvider: "livekit-cascade",
+        targetDeploymentId: "deployment_livekit_staged",
+        status: storedLaunchGate ? "ready" : "blocked",
+        featureEnabled: true,
+        checks: [{
+          key: "quality_launch_gate",
+          passed: Boolean(storedLaunchGate),
+          blocking: true,
+          detail: storedLaunchGate ? "Stored quality gate passed." : "A stored passing quality gate is required.",
+        }],
+      } });
+    }
     if (path === `/api/v1/clients/${client.id}`) return route.fulfill({ json: { ...client, role: "AI receptionist", tone: "Warm and concise", publishedFacts: [], services: [] } });
     if (withOnboarding && path === `/api/v1/clients/${client.id}/onboarding/wizard`) {
       if (route.request().method() === "PATCH") {
@@ -211,6 +266,8 @@ test("operator can open the data-backed overview", async ({ page }) => {
   await expect(page.getByRole("heading", { name: /Demo Salon is in good hands/i })).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText("12", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Needs setup").first()).toBeVisible();
+  await expect(page.getByText("Recommended next action")).toBeVisible();
+  await expect(page.getByText("Recovery metrics")).toHaveCount(0);
   await expectNoPageOverflow(page);
 });
 
@@ -261,7 +318,7 @@ test("all operator areas render against their backend contracts", async ({ page 
     ["/app/calendar", "Bookings and availability in one view"],
     ["/app/calendar/settings", "Control when and how bookings happen"],
     ["/app/phone", "Ownership, routing and health"],
-    ["/app/usage", "Voice minutes, clearly accounted for"],
+    ["/app/usage", "Your plan, allowance and voice usage"],
     ["/app/knowledge", "Give your agent the right answers"],
     ["/app/integrations", "Connect the tools behind the conversation"],
     ["/app/team", "The people behind Demo Salon"],
@@ -292,6 +349,92 @@ test("operator admin is isolated under the admin route", async ({ page }) => {
   await page.goto("/admin/clients/new");
   await expect(page.getByRole("heading", { name: "Let’s learn the essentials" })).toBeVisible();
   await expectNoPageOverflow(page);
+});
+
+test("operator triages requests, replays billing, and adjusts allowance with audit input", async ({ page }) => {
+  await openWorkspaceSession(page);
+  const actions: string[] = [];
+  await page.route("**/api/v1/admin/control-plane", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    await route.fulfill({ json: {
+      generatedAt: "2026-09-16T10:00:00.000Z",
+      health: {
+        status: "ok",
+        notificationQueue: { pending: 0, leased: 0, deadLetter: 0, providerFailures24h: 0 },
+        spend: { status: "configured", configuredCapCount: 1, uncappedConnectionCount: 0 },
+        backup: { status: "configured", freshness: "recent" },
+      },
+      provisioning: [], resources: [], spendAlarms: [],
+      requests: [{ id: "request_1", clientId: client.id, businessName: client.businessName, type: "support", status: "pending", createdAt: "2026-09-16T09:00:00.000Z" }],
+      blades: { present: true, published: true, serviceStatus: "active", inboundActive: true },
+    } });
+  });
+  await page.route("**/api/v1/admin/summary", async (route) => {
+    await route.fulfill({ json: {
+      month: "2026-09", mrrPence: 9900, totalUsedMinutes: 12, totalFailedCalls: 0, setupQueueCount: 0,
+      failedBillingEvents: [{ id: "evt_failed", clientId: client.id, eventType: "invoice.payment_failed", error: "Temporary provider error", receivedAt: "2026-09-16T09:00:00.000Z" }],
+      clients: [{ clientId: client.id, plan: "starter", subscriptionStatus: "active", usedMinutes: 12, remainingMinutes: 88, failedCalls: 0 }],
+    } });
+  });
+  await page.route("**/api/v1/admin/requests/*/status", async (route) => {
+    actions.push(`request:${route.request().postDataJSON().status}`);
+    await route.fulfill({ json: { request: { id: "request_1", status: "in_progress" } } });
+  });
+  await page.route("**/api/v1/admin/billing-events/*/replay", async (route) => {
+    actions.push("billing:replay");
+    await route.fulfill({ json: { ok: true, status: "processed" } });
+  });
+  await page.route("**/api/v1/clients/*/credit-adjustments", async (route) => {
+    const body = route.request().postDataJSON();
+    actions.push(`credit:${body.minutes}:${body.reason}`);
+    await route.fulfill({ json: { appended: true, remainingMinutes: 113 } });
+  });
+
+  await page.goto("/admin");
+  await page.getByRole("button", { name: "Start" }).click();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Replay" }).click();
+  await expect.poll(() => actions).toContain("request:in_progress");
+  await expect.poll(() => actions).toContain("billing:replay");
+
+  await page.goto(`/admin/customers/${client.id}?adjust=credits`);
+  const dialog = page.getByRole("dialog", { name: "Adjust customer allowance" });
+  await dialog.getByLabel("Minutes").fill("25");
+  await dialog.getByLabel("Audit reason").fill("Customer goodwill");
+  await dialog.getByRole("button", { name: "Record adjustment" }).click();
+  await expect.poll(() => actions).toContain("credit:25:Customer goodwill");
+});
+
+test("operator stores quality evidence before LiveKit preflight", async ({ page }) => {
+  await openWorkspaceSession(page);
+  const startRequests: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().endsWith("/provider-switch/start")) startRequests.push(request.url());
+  });
+  await page.goto(`/admin/customers/${client.id}`);
+  await page.getByRole("button", { name: "1. Prepare staged deployment" }).click();
+  await expect(page.getByText("2. Benchmark launch gate")).toBeVisible();
+
+  const metrics = JSON.stringify({
+    totalCostMinor: 7_500,
+    successfulBookings: 100,
+    bookingAttempts: 125,
+    blindVoiceWins: 20,
+    blindVoiceTies: 0,
+    blindVoiceComparisons: 25,
+    p95FirstResponseMs: 500,
+    totalCalls: 1_000,
+    failedCalls: 20,
+    bargeInPassed: true,
+  });
+  await page.getByLabel("Baseline benchmark JSON").fill(metrics.replace("7500", "10000"));
+  await page.getByLabel("Candidate benchmark JSON").fill(metrics);
+  await page.getByRole("button", { name: "Evaluate and store gate" }).click();
+  await expect(page.getByText("Quality gate passed")).toBeVisible();
+  expect(startRequests).toEqual([]);
+
+  await page.getByRole("button", { name: /Run safe-switch preflight/ }).click();
+  await expect(page.getByText("Ready to switch")).toBeVisible();
 });
 
 test("viewer control planes are read-only on mobile", async ({ page }) => {
@@ -329,7 +472,7 @@ test("salon owners see only their workspace experience", async ({ page }) => {
   await expect(page.getByText("Salon owner", { exact: true })).toBeVisible();
   await expect(page.getByText("Demo Salon", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("link", { name: "Campaigns" })).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "Plan & billing" })).toHaveAttribute("href", "/billing");
+  await expect(page.getByRole("link", { name: "Plan & usage" })).toHaveAttribute("href", "/app/usage");
   await expect(page.getByRole("link", { name: "Operator admin" })).toHaveCount(0);
 
   await page.goto("/app/team");

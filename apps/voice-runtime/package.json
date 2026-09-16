@@ -1,0 +1,25 @@
+{
+  "name": "@robinexis/voice-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts dev",
+    "start": "tsx src/index.ts start",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run --config vitest.config.ts"
+  },
+  "dependencies": {
+    "@livekit/agents": "1.9.0",
+    "@livekit/agents-plugin-cartesia": "1.9.0",
+    "@livekit/agents-plugin-deepgram": "1.9.0",
+    "@livekit/agents-plugin-google": "1.9.0",
+    "@robinexis/brain": "*",
+    "@robinexis/database": "*",
+    "@robinexis/tool-contracts": "*",
+    "dotenv": "17.4.2"
+  }
+}

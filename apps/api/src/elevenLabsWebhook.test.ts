@@ -1,10 +1,14 @@
 import { createHmac } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { BLADES_HAIR_ID, MemoryStore, seedStore } from "@robinexis/database";
 import { ingestElevenLabsWebhook, verifyElevenLabsWebhook } from "./elevenLabsWebhook.js";
 
 const secret = "test_webhook_secret";
 const timestamp = Math.floor(Date.now() / 1000);
+const previousEstimatedRate = process.env.ELEVENLABS_ESTIMATED_COST_PER_MINUTE_PENCE;
+afterEach(() => {
+  process.env.ELEVENLABS_ESTIMATED_COST_PER_MINUTE_PENCE = previousEstimatedRate;
+});
 
 function signed(body: object) {
   const raw = Buffer.from(JSON.stringify(body));
@@ -24,6 +28,7 @@ describe("ElevenLabs post-call webhook", () => {
   });
 
   it("maps the provider agent to one tenant and persists a real call record", async () => {
+    process.env.ELEVENLABS_ESTIMATED_COST_PER_MINUTE_PENCE = "12";
     const store = new MemoryStore();
     await seedStore(store);
     await store.saveToolAction({
@@ -64,10 +69,19 @@ describe("ElevenLabs post-call webhook", () => {
     const month = new Date().toISOString().slice(0, 7);
     expect((await store.getUsage(BLADES_HAIR_ID, month))?.inboundMinutes).toBeCloseTo(10 / 60);
     expect(await store.getCreditBalance(BLADES_HAIR_ID)).toBeCloseTo(-(10 / 60));
+    expect(await store.listProviderUsageCostEvents(BLADES_HAIR_ID)).toEqual([
+      expect.objectContaining({
+        provider: "elevenlabs-convai",
+        usageQuantity: 10,
+        costMinor: 2,
+        metadata: expect.objectContaining({ estimated: true, rateConfigured: true }),
+      }),
+    ]);
 
     const replay = await ingestElevenLabsWebhook(store, event.raw, event.header, secret);
     expect(replay.status).toBe(200);
     expect((await store.getUsage(BLADES_HAIR_ID, month))?.inboundMinutes).toBeCloseTo(10 / 60);
     expect(await store.getCreditBalance(BLADES_HAIR_ID)).toBeCloseTo(-(10 / 60));
+    expect(await store.listProviderUsageCostEvents(BLADES_HAIR_ID)).toHaveLength(1);
   });
 });

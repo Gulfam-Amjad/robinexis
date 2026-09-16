@@ -1,6 +1,4 @@
 import {
-  BarChart3,
-  BookOpen,
   Bot,
   CalendarDays,
   ChevronDown,
@@ -11,7 +9,7 @@ import {
   Menu,
   MessageSquareText,
   PhoneCall,
-  PlugZap,
+  Search,
   Settings,
   Sparkles,
   Store,
@@ -29,23 +27,37 @@ import { usePermissions } from "../lib/permissions";
 import { useClient, useSession } from "../state";
 import { Badge } from "./ui";
 
-const navigation = [
-  { label: "Overview", to: "/app", icon: LayoutDashboard, end: true },
-  { label: "Setup", to: "/app/setup", icon: ListChecks },
-  { label: "Business", to: "/app/business", icon: Store },
-  { label: "Receptionist", to: "/app/agents", icon: Bot },
-  { label: "Test receptionist", to: "/app/playground", icon: MessageSquareText },
-  { label: "Phone", to: "/app/phone", icon: PhoneCall },
-  { label: "Calls", to: "/app/calls", icon: PhoneCall },
-  { label: "Analytics", to: "/app/analytics", icon: BarChart3 },
-  { label: "Calendar", to: "/app/calendar", icon: CalendarDays },
-  { label: "Usage", to: "/app/usage", icon: CircleDollarSign },
-  { label: "Knowledge", to: "/app/knowledge", icon: BookOpen },
-  { label: "Integrations", to: "/app/integrations", icon: PlugZap },
-] as const;
+const navigationSections = [
+  {
+    label: "Workspace",
+    items: [{ label: "Home", to: "/app", icon: LayoutDashboard, end: true }],
+  },
+  {
+    label: "Receptionist",
+    items: [
+      { label: "Receptionist", to: "/app/agents", icon: Bot },
+      { label: "Test receptionist", to: "/app/playground", icon: MessageSquareText },
+    ],
+  },
+  {
+    label: "Activity",
+    items: [
+      { label: "Calls", to: "/app/calls", icon: PhoneCall },
+      { label: "Calendar", to: "/app/calendar", icon: CalendarDays },
+    ],
+  },
+  {
+    label: "Manage",
+    items: [
+      { label: "Business setup", to: "/app/business", icon: Store },
+      { label: "Plan & usage", to: "/app/usage", icon: CircleDollarSign },
+    ],
+  },
+] satisfies Array<{ label: string; items: NavigationItem[] }>;
+
+const navigation = navigationSections.flatMap((section) => section.items);
 
 const secondary = [
-  { label: "Plan & billing", to: "/billing", icon: CircleDollarSign },
   { label: "Team", to: "/app/team", icon: Users },
   { label: "Support", to: "/app/support", icon: MessageSquareText },
   { label: "Settings", to: "/app/settings", icon: Settings },
@@ -53,9 +65,10 @@ const secondary = [
 
 const adminNavigation = [
   { label: "Operations", to: "/admin", icon: LayoutDashboard, end: true },
+  { label: "Customers", to: "/admin/customers", icon: Users },
+  { label: "Usage & cost", to: "/admin/usage-cost", icon: CircleDollarSign },
   { label: "Control plane", to: "/admin/control-plane", icon: ListChecks },
-  { label: "Add client", to: "/admin/clients/new", icon: Users },
-  { label: "Plan & usage", to: "/admin/billing", icon: CircleDollarSign },
+  { label: "Add customer", to: "/admin/clients/new", icon: Users },
 ] as const;
 
 type NavigationItem = { label: string; to: string; icon: LucideIcon; end?: boolean };
@@ -86,9 +99,13 @@ function NavItems({
   );
   return (
     <>
-      <nav className="sidebar-nav" aria-label="Product navigation">
-        {(adminArea ? adminNavigation : navigation).map(render)}
-      </nav>
+      {adminArea ? <>
+        <span className="nav-scope-label">Platform</span>
+        <nav className="sidebar-nav" aria-label="Product navigation">{adminNavigation.map(render)}</nav>
+      </> : navigationSections.map((section) => <div className="nav-section" key={section.label}>
+        <span className="nav-scope-label">{section.label}</span>
+        <nav className="sidebar-nav" aria-label={section.label === "Workspace" ? "Product navigation" : `${section.label} navigation`}>{section.items.map(render)}</nav>
+      </div>)}
       <div className="sidebar-spacer" />
       <nav className="sidebar-nav sidebar-secondary" aria-label="Workspace navigation">
         {adminArea
@@ -98,6 +115,51 @@ function NavItems({
       </nav>
     </>
   );
+}
+
+function WorkspaceSwitcher({
+  clients,
+  activeClientId,
+  activeName,
+  label,
+  onSelect,
+}: {
+  clients: Array<{ id: string; businessName: string; slug: string }>;
+  activeClientId?: string;
+  activeName: string;
+  label: string;
+  onSelect: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const switcherRef = useRef<HTMLDivElement>(null);
+  const filtered = clients.filter((client) =>
+    `${client.businessName} ${client.slug}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()),
+  );
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent) => {
+      if (switcherRef.current && !switcherRef.current.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+  return <div className="client-switcher-wrap" ref={switcherRef}>
+    <button className="client-switcher" type="button" aria-haspopup="listbox" aria-expanded={open} onClick={() => { setSearch(""); setOpen((value) => !value); }}>
+      <span className="client-avatar">{initials(activeName)}</span>
+      <span className="client-switcher-copy"><small>{label}</small><strong>{activeName}</strong></span>
+      <ChevronsUpDown size={15} />
+    </button>
+    {open && <div className="workspace-picker">
+      <label><span className="sr-only">Search workspaces</span><Search size={15} /><input autoFocus type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search workspaces" /></label>
+      <div role="listbox" aria-label="Select workspace">
+        {filtered.map((client) => <button role="option" aria-selected={client.id === activeClientId} type="button" key={client.id} onClick={() => { onSelect(client.id); setOpen(false); }}>
+          <span>{client.businessName}</span><small>{client.slug}</small>
+        </button>)}
+        {!filtered.length && <p>No matching workspaces</p>}
+      </div>
+    </div>}
+  </div>;
 }
 
 export function AppShell() {
@@ -112,12 +174,12 @@ export function AppShell() {
   const location = useLocation();
   const adminArea = location.pathname === "/admin" || location.pathname.startsWith("/admin/");
   const current = [...(adminArea ? adminNavigation : navigation), ...secondary].find((item) =>
-    item.to === "/app" ? location.pathname === "/app" : location.pathname.startsWith(item.to),
+    "end" in item && item.end ? location.pathname === item.to : location.pathname.startsWith(item.to),
   );
   const integrations = useQuery({
     queryKey: ["shell-integrations", activeClientId],
     queryFn: () => api.integrations(activeClientId!),
-    enabled: Boolean(activeClientId),
+    enabled: Boolean(activeClientId) && !adminArea,
     staleTime: 60_000,
     retry: false,
   });
@@ -161,23 +223,9 @@ export function AppShell() {
       {mobileOpen && <button aria-label="Close menu" className="sidebar-scrim" onClick={() => setMobileOpen(false)} />}
       <aside className={`sidebar ${mobileOpen ? "sidebar-open" : ""}`}>
         <div className="sidebar-head"><Logo light /><button aria-label="Close navigation" className="icon-button mobile-only" onClick={() => setMobileOpen(false)}><X /></button></div>
-        <div className="client-switcher">
-          <span className="client-avatar">{initials(activeClient?.businessName || "New workspace")}</span>
-          <label>
-            <small>{actorRole === "operator" ? "Client workspace" : "Your salon"}</small>
-            {actorRole === "operator" || clients.length > 1 ? (
-              <select value={activeClientId || ""} onChange={(event) => setActiveClientId(event.target.value)}>
-                {!clients.length && <option value="">No clients yet</option>}
-                {clients.map((client) => <option value={client.id} key={client.id}>{client.businessName}</option>)}
-              </select>
-            ) : (
-              <strong className="fixed-workspace-name">{activeClient?.businessName || "No workspace"}</strong>
-            )}
-          </label>
-          {(actorRole === "operator" || clients.length > 1) && <ChevronsUpDown size={15} />}
-        </div>
+        {actorRole === "operator" || clients.length > 1 ? <WorkspaceSwitcher clients={clients} activeClientId={activeClientId} activeName={activeClient?.businessName || "No workspace selected"} label={adminArea ? "Workspace context" : "Current workspace"} onSelect={setActiveClientId} /> : <div className="client-switcher client-switcher-fixed"><span className="client-avatar">{initials(activeClient?.businessName || "No workspace")}</span><span className="client-switcher-copy"><small>Your workspace</small><strong>{activeClient?.businessName || "No workspace"}</strong></span></div>}
         <NavItems isOperator={isOperator} adminArea={adminArea} onNavigate={() => setMobileOpen(false)} />
-        {activeClientId && <div className="sidebar-health"><span className={connected === total && total ? "health-dot ready" : "health-dot"} /><div><strong>System connections</strong><small>{integrations.isLoading ? "Checking…" : `${connected} of ${total} ready`}</small></div><Link to="/app/integrations">View</Link></div>}
+        {!adminArea && activeClientId && <div className="sidebar-health"><span className={connected === total && total ? "health-dot ready" : "health-dot"} /><div><strong>System connections</strong><small>{integrations.isLoading ? "Checking…" : `${connected} of ${total} ready`}</small></div><Link to="/app/integrations">View</Link></div>}
         <div className="sidebar-help">
           <span><Sparkles size={16} /> Need a hand?</span>
           <p>Our team can help tune your agent.</p>
@@ -189,7 +237,7 @@ export function AppShell() {
         <header className="topbar">
           <div className="topbar-title">
             <button aria-label="Open navigation" aria-expanded={mobileOpen} className="icon-button mobile-only" onClick={() => setMobileOpen(true)}><Menu /></button>
-            <div><small>{actorRole === "operator" ? "Robinexis operations" : activeClient?.businessName || "Salon workspace"}</small><strong>{current?.label || "Robinexis"}</strong></div>
+            <div><small>{adminArea ? "Platform" : `Workspace · ${activeClient?.businessName || "No selection"}`}</small><strong>{current?.label || "Robinexis"}</strong></div>
           </div>
           <div className="topbar-actions" ref={profileRef}>
             <Badge tone={actorRole === "operator" ? "accent" : "neutral"}>
