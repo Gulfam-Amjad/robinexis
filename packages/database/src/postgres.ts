@@ -1265,7 +1265,7 @@ export class PostgresStore implements PlatformStore {
            (id,client_id,extraction_run_id,key,value,confidence,source_evidence,
             review_status,reviewed_by,reviewed_at,created_at)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-          [fact.id,clientId,runId,fact.key,fact.value,fact.confidence ?? null,
+          [fact.id,clientId,runId,fact.key,JSON.stringify(fact.value),fact.confidence ?? null,
             fact.sourceEvidence ?? null,fact.reviewStatus,fact.reviewedBy ?? null,
             fact.reviewedAt ?? null,fact.createdAt],
         );
@@ -1280,7 +1280,7 @@ export class PostgresStore implements PlatformStore {
       `UPDATE extracted_facts SET value=$4,confidence=$5,source_evidence=$6,
        review_status=$7,reviewed_by=$8,reviewed_at=$9
        WHERE client_id=$1 AND id=$2 AND extraction_run_id=$3 RETURNING id`,
-      [fact.clientId,fact.id,fact.extractionRunId,fact.value,fact.confidence ?? null,
+      [fact.clientId,fact.id,fact.extractionRunId,JSON.stringify(fact.value),fact.confidence ?? null,
         fact.sourceEvidence ?? null,fact.reviewStatus,fact.reviewedBy ?? null,fact.reviewedAt ?? null],
     );
     if (r.rowCount !== 1) throw new Error("extracted_fact_not_found");
