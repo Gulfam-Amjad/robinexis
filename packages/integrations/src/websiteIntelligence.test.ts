@@ -58,13 +58,39 @@ describe("website intelligence", () => {
     const start = JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body));
     expect(start).toMatchObject({
       url: "https://acme-salon.com/",
-      limit: 10,
+      limit: 5,
       maxDiscoveryDepth: 3,
       allowSubdomains: false,
       scrapeOptions: { onlyMainContent: true },
     });
     expect(start.scrapeOptions.formats[1].schema).toEqual(receptionistExtractionSchema);
     expect(fetcher.mock.calls[0]?.[1]).toMatchObject({ redirect: "error" });
+  });
+
+  it("falls back to a structured homepage scrape when crawl returns no pages", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "crawl_empty" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: "completed", data: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        success: true,
+        data: {
+          markdown: "# Acme Salon",
+          json: { businessName: "Acme Salon" },
+          metadata: { sourceURL: "https://acme-salon.com/" },
+        },
+      }), { status: 200 }));
+    const client = new FirecrawlWebsiteClient({
+      apiKey: "test-key",
+      apiUrl: "https://firecrawl.test",
+      fetch: fetcher,
+      limits: { timeoutMs: 1_000, retries: 0 },
+    });
+
+    await expect(client.extract("https://acme-salon.com/")).resolves.toMatchObject({
+      pages: 1,
+      facts: [{ key: "businessName", value: "Acme Salon" }],
+    });
+    expect(fetcher.mock.calls[2]?.[0]).toBe("https://firecrawl.test/v2/scrape");
   });
 
   it("rejects cross-domain result pages as unsafe redirects", async () => {

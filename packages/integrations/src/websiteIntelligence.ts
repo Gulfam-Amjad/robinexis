@@ -10,7 +10,7 @@ export interface WebsiteIntelligenceLimits {
 }
 
 export const WEBSITE_LIMITS: Readonly<WebsiteIntelligenceLimits> = Object.freeze({
-  maxPages: 10,
+  maxPages: 5,
   maxDepth: 3,
   maxContentChars: 250_000,
   timeoutMs: 120_000,
@@ -184,6 +184,18 @@ export class FirecrawlWebsiteClient {
 
   async extract(input: string): Promise<FirecrawlWebsiteResult> {
     const url = validatePublicWebsiteUrl(input);
+    const scrapeOptions = {
+      formats: [
+        "markdown",
+        {
+          type: "json",
+          schema: receptionistExtractionSchema,
+          prompt: "Extract only explicit receptionist-ready business facts. Do not infer missing values.",
+        },
+      ],
+      onlyMainContent: true,
+      maxAge: 0,
+    };
     const started = await this.request<{ success?: boolean; id?: string }>("/v2/crawl", {
       method: "POST",
       body: JSON.stringify({
@@ -192,18 +204,7 @@ export class FirecrawlWebsiteClient {
         maxDiscoveryDepth: this.limits.maxDepth,
         allowSubdomains: false,
         ignoreQueryParameters: true,
-        scrapeOptions: {
-          formats: [
-            "markdown",
-            {
-              type: "json",
-              schema: receptionistExtractionSchema,
-              prompt: "Extract only explicit receptionist-ready business facts. Do not infer missing values.",
-            },
-          ],
-          onlyMainContent: true,
-          maxAge: 0,
-        },
+        scrapeOptions,
       }),
     });
     if (!started.id) throw new Error("firecrawl_crawl_id_missing");
@@ -220,7 +221,14 @@ export class FirecrawlWebsiteClient {
       await sleep(1_000);
     } while (true);
 
-    const pages = (result.data ?? []).slice(0, this.limits.maxPages);
+    let pages = (result.data ?? []).slice(0, this.limits.maxPages);
+    if (!pages.length) {
+      const fallback = await this.request<{ success?: boolean; data?: FirecrawlPage }>("/v2/scrape", {
+        method: "POST",
+        body: JSON.stringify({ url: url.toString(), ...scrapeOptions }),
+      });
+      pages = fallback.data ? [fallback.data] : [];
+    }
     if (!pages.length) throw new Error("firecrawl_no_pages");
     const accepted = pages.map((page) => {
       const sourceUrl = String(page.metadata?.sourceURL || page.metadata?.url || "");
