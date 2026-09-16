@@ -1609,6 +1609,8 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
         reviewStatus: "extracted",
         createdAt: completedAt,
       }));
+      // Values include JSON scalars such as businessName as well as arrays and
+      // objects; the PostgreSQL adapter serializes each shape as valid JSONB.
       await store.replaceExtractedFacts(client.id, run.id, facts);
       const gaps = await refreshWebsiteGaps(store, client.id, result.facts, completedAt);
       Object.assign(run, {
