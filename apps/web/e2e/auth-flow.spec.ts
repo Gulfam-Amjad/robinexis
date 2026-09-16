@@ -137,7 +137,14 @@ test("dashboard routes admins to the operator shell", async ({ page }) => {
 test("dashboard routes assigned clients to their workspace shell", async ({ page }) => {
   await seedSupabaseSession(page, "salon");
   await page.goto("/dashboard");
-  await expect(page).toHaveURL(/\/app$/);
+  await expect(page).toHaveURL(/\/app\/w\/client_demo$/);
+  await expect(page.getByText("Demo Salon", { exact: true }).first()).toBeVisible();
+});
+
+test("workspace URLs reject tenant IDs outside the signed-in membership", async ({ page }) => {
+  await seedSupabaseSession(page, "salon");
+  await page.goto("/app/w/client_other/calls");
+  await expect(page).toHaveURL(/\/app\/w\/client_demo$/);
   await expect(page.getByText("Demo Salon", { exact: true }).first()).toBeVisible();
 });
 

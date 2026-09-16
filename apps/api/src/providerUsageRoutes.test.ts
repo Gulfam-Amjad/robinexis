@@ -84,17 +84,36 @@ describe("provider usage operations", () => {
       metadata: { estimated: true },
       createdAt: "2026-09-16T10:00:00.000Z",
     });
+    await store.appendProviderUsageCostEvent({
+      id: "usage-2",
+      clientId: client.id,
+      provider: "livekit-cascade",
+      providerEventId: "room-1",
+      occurredAt: "2026-09-16T10:05:00.000Z",
+      usageQuantity: 1,
+      usageUnit: "minutes",
+      costMinor: 10,
+      currency: "GBP",
+      metadata: { estimated: true },
+      createdAt: "2026-09-16T10:05:00.000Z",
+    });
     const result = await providerUsagePortfolio(
       store,
       "2026-09-01T00:00:00.000Z",
       "2026-10-01T00:00:00.000Z",
     );
-    expect(result.totals).toMatchObject({ usageMinutes: 2, estimatedCostMinor: 24 });
+    expect(result.totals).toMatchObject({ usageMinutes: 3, estimatedCostMinor: 34 });
     expect(result.clients[0]).toMatchObject({
       clientId: client.id,
       provider: "elevenlabs-convai",
       usageMinutes: 2,
       estimatedCostMinor: 24,
+    });
+    expect(result.clientTotals[0]).toMatchObject({
+      clientId: client.id,
+      providers: ["elevenlabs-convai", "livekit-cascade"],
+      usageMinutes: 3,
+      estimatedCostMinor: 34,
     });
   });
 });

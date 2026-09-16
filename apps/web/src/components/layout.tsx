@@ -1,4 +1,7 @@
 import {
+  BarChart3,
+  Bell,
+  BookOpen,
   Bot,
   CalendarDays,
   ChevronDown,
@@ -9,6 +12,7 @@ import {
   Menu,
   MessageSquareText,
   PhoneCall,
+  PlugZap,
   Search,
   Settings,
   Sparkles,
@@ -23,45 +27,10 @@ import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { api, initials } from "../lib/api";
 import { AUTH_REQUIRED } from "../lib/auth";
+import { workspaceNavigationSections, workspacePath, type WorkspaceNavigationIcon } from "../lib/navigation";
 import { usePermissions } from "../lib/permissions";
 import { useClient, useSession } from "../state";
 import { Badge } from "./ui";
-
-const navigationSections = [
-  {
-    label: "Workspace",
-    items: [{ label: "Home", to: "/app", icon: LayoutDashboard, end: true }],
-  },
-  {
-    label: "Receptionist",
-    items: [
-      { label: "Receptionist", to: "/app/agents", icon: Bot },
-      { label: "Test receptionist", to: "/app/playground", icon: MessageSquareText },
-    ],
-  },
-  {
-    label: "Activity",
-    items: [
-      { label: "Calls", to: "/app/calls", icon: PhoneCall },
-      { label: "Calendar", to: "/app/calendar", icon: CalendarDays },
-    ],
-  },
-  {
-    label: "Manage",
-    items: [
-      { label: "Business setup", to: "/app/business", icon: Store },
-      { label: "Plan & usage", to: "/app/usage", icon: CircleDollarSign },
-    ],
-  },
-] satisfies Array<{ label: string; items: NavigationItem[] }>;
-
-const navigation = navigationSections.flatMap((section) => section.items);
-
-const secondary = [
-  { label: "Team", to: "/app/team", icon: Users },
-  { label: "Support", to: "/app/support", icon: MessageSquareText },
-  { label: "Settings", to: "/app/settings", icon: Settings },
-] as const;
 
 const adminNavigation = [
   { label: "Operations", to: "/admin", icon: LayoutDashboard, end: true },
@@ -72,6 +41,23 @@ const adminNavigation = [
 ] as const;
 
 type NavigationItem = { label: string; to: string; icon: LucideIcon; end?: boolean };
+const workspaceIcons: Record<WorkspaceNavigationIcon, LucideIcon> = {
+  home: LayoutDashboard,
+  bot: Bot,
+  test: MessageSquareText,
+  calls: PhoneCall,
+  calendar: CalendarDays,
+  insights: BarChart3,
+  business: Store,
+  knowledge: BookOpen,
+  connections: PlugZap,
+  setup: ListChecks,
+  usage: CircleDollarSign,
+  team: Users,
+  alerts: Bell,
+  support: MessageSquareText,
+  settings: Settings,
+};
 
 export function Logo({ light = false }: { light?: boolean }) {
   return (
@@ -85,10 +71,12 @@ export function Logo({ light = false }: { light?: boolean }) {
 function NavItems({
   isOperator,
   adminArea,
+  activeClientId,
   onNavigate,
 }: {
   isOperator: boolean;
   adminArea: boolean;
+  activeClientId?: string;
   onNavigate?: () => void;
 }) {
   const render = ({ label, to, icon: Icon, end }: NavigationItem) => (
@@ -102,15 +90,22 @@ function NavItems({
       {adminArea ? <>
         <span className="nav-scope-label">Platform</span>
         <nav className="sidebar-nav" aria-label="Product navigation">{adminNavigation.map(render)}</nav>
-      </> : navigationSections.map((section) => <div className="nav-section" key={section.label}>
+      </> : workspaceNavigationSections.map((section) => <div className="nav-section" key={section.label}>
         <span className="nav-scope-label">{section.label}</span>
-        <nav className="sidebar-nav" aria-label={section.label === "Workspace" ? "Product navigation" : `${section.label} navigation`}>{section.items.map(render)}</nav>
+        <nav className="sidebar-nav" aria-label={section.label === "Workspace" ? "Product navigation" : `${section.label} navigation`}>
+          {section.items.map((item) => render({
+            label: item.label,
+            to: workspacePath(activeClientId, item.suffix),
+            icon: workspaceIcons[item.icon],
+            end: item.end,
+          }))}
+        </nav>
       </div>)}
       <div className="sidebar-spacer" />
       <nav className="sidebar-nav sidebar-secondary" aria-label="Workspace navigation">
         {adminArea
-          ? render({ label: "Client workspace", to: "/app", icon: LayoutDashboard, end: true })
-          : secondary.map(render)}
+          ? render({ label: "Client workspace", to: workspacePath(activeClientId), icon: LayoutDashboard, end: true })
+          : null}
         {!adminArea && isOperator && render({ label: "Operator admin", to: "/admin", icon: Settings })}
       </nav>
     </>
@@ -173,9 +168,17 @@ export function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
   const adminArea = location.pathname === "/admin" || location.pathname.startsWith("/admin/");
-  const current = [...(adminArea ? adminNavigation : navigation), ...secondary].find((item) =>
-    "end" in item && item.end ? location.pathname === item.to : location.pathname.startsWith(item.to),
-  );
+  const currentWorkspaceSuffix = location.pathname.match(/^\/app\/w\/[^/]+\/?(.*)$/)?.[1] || "";
+  const selectWorkspace = (id: string) => {
+    setActiveClientId(id);
+    if (!adminArea) navigate(workspacePath(id, currentWorkspaceSuffix));
+  };
+  const current = adminArea
+    ? adminNavigation.find((item) => "end" in item && item.end ? location.pathname === item.to : location.pathname.startsWith(item.to))
+    : workspaceNavigationSections.flatMap((section) => section.items).find((item) => {
+      const target = workspacePath(activeClientId, item.suffix);
+      return item.end ? location.pathname === target : location.pathname.startsWith(target);
+    });
   const integrations = useQuery({
     queryKey: ["shell-integrations", activeClientId],
     queryFn: () => api.integrations(activeClientId!),
@@ -223,8 +226,8 @@ export function AppShell() {
       {mobileOpen && <button aria-label="Close menu" className="sidebar-scrim" onClick={() => setMobileOpen(false)} />}
       <aside className={`sidebar ${mobileOpen ? "sidebar-open" : ""}`}>
         <div className="sidebar-head"><Logo light /><button aria-label="Close navigation" className="icon-button mobile-only" onClick={() => setMobileOpen(false)}><X /></button></div>
-        {actorRole === "operator" || clients.length > 1 ? <WorkspaceSwitcher clients={clients} activeClientId={activeClientId} activeName={activeClient?.businessName || "No workspace selected"} label={adminArea ? "Workspace context" : "Current workspace"} onSelect={setActiveClientId} /> : <div className="client-switcher client-switcher-fixed"><span className="client-avatar">{initials(activeClient?.businessName || "No workspace")}</span><span className="client-switcher-copy"><small>Your workspace</small><strong>{activeClient?.businessName || "No workspace"}</strong></span></div>}
-        <NavItems isOperator={isOperator} adminArea={adminArea} onNavigate={() => setMobileOpen(false)} />
+        {actorRole === "operator" || clients.length > 1 ? <WorkspaceSwitcher clients={clients} activeClientId={activeClientId} activeName={activeClient?.businessName || "No workspace selected"} label={adminArea ? "Workspace context" : "Current workspace"} onSelect={selectWorkspace} /> : <div className="client-switcher client-switcher-fixed"><span className="client-avatar">{initials(activeClient?.businessName || "No workspace")}</span><span className="client-switcher-copy"><small>Your workspace</small><strong>{activeClient?.businessName || "No workspace"}</strong></span></div>}
+        <NavItems isOperator={isOperator} adminArea={adminArea} activeClientId={activeClientId} onNavigate={() => setMobileOpen(false)} />
         {!adminArea && activeClientId && <div className="sidebar-health"><span className={connected === total && total ? "health-dot ready" : "health-dot"} /><div><strong>System connections</strong><small>{integrations.isLoading ? "Checking…" : `${connected} of ${total} ready`}</small></div><Link to="/app/integrations">View</Link></div>}
         <div className="sidebar-help">
           <span><Sparkles size={16} /> Need a hand?</span>
@@ -254,7 +257,7 @@ export function AppShell() {
             </button>
             {profileOpen && (
               <div className="profile-menu" role="menu">
-                <button onClick={handleLogout}><LogOut size={16} /> Sign out & clear key</button>
+                <button onClick={handleLogout}><LogOut size={16} /> Sign out</button>
               </div>
             )}
           </div>

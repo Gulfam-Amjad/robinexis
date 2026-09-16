@@ -71,6 +71,7 @@ import type {
 } from "@robinexis/api-contracts";
 import { api, formatDate } from "../../lib/api";
 import { usePermissions } from "../../lib/permissions";
+import { workspacePath } from "../../lib/navigation";
 import { workspaceReceptionistDemo } from "../../lib/receptionistDemo";
 import { useClient, useSession, useToast } from "../../state";
 import { ReceptionistCall } from "../../components/ReceptionistCall";
@@ -143,6 +144,12 @@ function OverviewContent({ clientId }: { clientId: string }) {
   const bootstrap = useQuery({ queryKey: ["bootstrap", clientId], queryFn: () => api.bootstrap(clientId), retry: false });
   const usage = useQuery({ queryKey: ["usage", clientId], queryFn: () => api.usage(clientId), retry: false });
   const client = useQuery({ queryKey: ["client", clientId], queryFn: () => api.client(clientId), retry: false });
+  const sevenDayRange = useMemo(() => {
+    const to = new Date();
+    return { from: new Date(to.getTime() - 6 * 86_400_000).toISOString(), to: to.toISOString() };
+  }, []);
+  const series = useQuery({ queryKey: ["today-series", clientId], queryFn: () => api.analyticsTimeseries(clientId, sevenDayRange), retry: false });
+  const bookings = useQuery({ queryKey: ["today-bookings", clientId], queryFn: () => api.bookings(clientId), retry: false });
   if (bootstrap.isLoading) return <LoadingState />;
   if (bootstrap.error) return <ErrorState error={bootstrap.error} onRetry={() => bootstrap.refetch()} />;
   const summary = bootstrap.data?.summary;
@@ -158,19 +165,29 @@ function OverviewContent({ clientId }: { clientId: string }) {
     : 0;
   const essentialConnections = ["elevenlabs", "calcom", "twilio"];
   const readyConnections = essentialConnections.filter((id) => integration(id)?.connected).length;
+  const today = new Date().toISOString().slice(0, 10);
+  const todayBookings = (bookings.data || []).filter((booking) => booking.start.slice(0, 10) === today);
+  const trendData = series.data?.length ? series.data : fallbackSeries.slice(-7);
+  const publicNumber = client.data?.inboundNumbers?.[0] || client.data?.phone;
+  const receptionistLive = Boolean(activeClient?.access?.inbound);
   const nextAction = !activeClient?.published
-    ? { title: "Approve your receptionist", detail: "Review the saved draft before it can answer customers.", to: "/app/agents", label: "Review receptionist" }
+    ? { title: "Approve your receptionist", detail: "Review the saved draft before it can answer customers.", to: workspacePath(clientId, "receptionist/edit"), label: "Review receptionist" }
     : readyConnections < essentialConnections.length
-      ? { title: "Finish business setup", detail: "Connect the phone and calendar required for live calls.", to: "/app/setup", label: "Open setup" }
+      ? { title: "Finish business setup", detail: "Connect the phone and calendar required for live calls.", to: workspacePath(clientId, "setup"), label: "Open setup" }
       : remainingMinutes !== undefined && remainingMinutes <= 0
         ? { title: "Your minute allowance is used", detail: "Review your plan before more calls can be answered.", to: "/billing", label: "Manage plan" }
-        : { title: "Your receptionist is ready", detail: "Make a test call whenever you change business information.", to: "/app/playground", label: "Test receptionist" };
+        : { title: "Your receptionist is ready", detail: "Make a test call whenever you change business information.", to: workspacePath(clientId, "test"), label: "Test receptionist" };
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
   return (
     <>
-      <PageHeader eyebrow={greeting} title={`${activeClient?.businessName || "Your business"} is in good hands`} description="Calls, bookings and the next action for your receptionist—without provider jargon." actions={<LinkButton to="/app/playground" variant="secondary"><Play size={15} /> Test receptionist</LinkButton>} />
-      {!activeClient?.published && <div className="notice"><div><WandSparkles /><span><strong>This workspace configuration is still a draft.</strong> Review it and approve a version for audit before go-live.</span></div><Link to="/app/agents">Review agent <ChevronRight size={15} /></Link></div>}
+      <PageHeader eyebrow={`${greeting} · Today`} title={`${activeClient?.businessName || "Your business"} is in good hands`} description="Calls, bookings and your receptionist’s status in one clear view." />
+      <Card className={`today-hero ${receptionistLive ? "is-live" : ""}`}>
+        <div className="today-hero-status"><span className="status-orb live"><Bot /></span><div><small>Your AI receptionist</small><h2>{receptionistLive ? "Live and answering" : activeClient?.published ? "Ready for phone connection" : "Waiting for approval"}</h2><p>{publicNumber || "A public number will appear when phone setup is complete"}</p></div></div>
+        <div className="today-hero-greeting"><small>Call greeting</small><p>“{client.data?.greeting || `Hello, you've reached ${activeClient?.businessName || "our salon"}. How can I help?`}”</p></div>
+        <LinkButton to={workspacePath(clientId, "test")}><Play size={15} /> Start a test call</LinkButton>
+      </Card>
+      {!activeClient?.published && <div className="notice"><div><WandSparkles /><span><strong>Your saved configuration is still a draft.</strong> Review it before it can become the approved receptionist version.</span></div><Link to={workspacePath(clientId, "receptionist/edit")}>Review receptionist <ChevronRight size={15} /></Link></div>}
       <div className="metrics-grid">
         <MetricCard label="Total calls" value={summary?.totalCalls ?? 0} detail="Current period" icon={PhoneCall} tone="cream" />
         <MetricCard label="Appointments booked" value={summary?.bookedAppointments ?? 0} detail={`${Math.round(summary?.bookingRate || 0)}% booking rate`} icon={CalendarCheck2} tone="sage" />
@@ -190,8 +207,18 @@ function OverviewContent({ clientId }: { clientId: string }) {
         </div>
       </Card>
       <div className="overview-grid">
+        <Card className="panel chart-card">
+          <SectionHeading title="Last 7 days" description="Calls and confirmed booking outcomes" action={<Link to={workspacePath(clientId, "insights")} className="subtle-link">Full insights <ChevronRight size={14} /></Link>} />
+          <div className="chart-wrap chart-wrap-compact" role="img" aria-label="Calls and bookings over the last seven days"><ResponsiveContainer width="100%" height="100%"><AreaChart data={trendData}><defs><linearGradient id="today-calls" x1="0" x2="0" y1="0" y2="1"><stop offset="5%" stopColor="#09fe94" stopOpacity={0.35}/><stop offset="95%" stopColor="#09fe94" stopOpacity={0}/></linearGradient></defs><CartesianGrid strokeDasharray="4 4" vertical={false} stroke="#e5e5e5" /><XAxis dataKey="date" tickFormatter={(value) => value.slice(5)} axisLine={false} tickLine={false} /><YAxis allowDecimals={false} axisLine={false} tickLine={false} /><Tooltip /><Area type="monotone" dataKey="calls" stroke="#09fe94" fill="url(#today-calls)" strokeWidth={2.5} /><Area type="monotone" dataKey="bookings" stroke="#1ff4ff" fill="transparent" strokeWidth={2} /></AreaChart></ResponsiveContainer></div>
+        </Card>
         <Card className="panel">
-          <SectionHeading title="Recent calls" description="The latest customer conversations" action={<Link to="/app/calls" className="subtle-link">View all <ChevronRight size={14} /></Link>} />
+          <SectionHeading title="Today’s bookings" description={`${todayBookings.length} appointment${todayBookings.length === 1 ? "" : "s"} returned`} action={<Link to={workspacePath(clientId, "bookings")} className="subtle-link">Open bookings <ChevronRight size={14} /></Link>} />
+          {bookings.isLoading ? <SkeletonRows count={3} /> : bookings.error ? <p className="muted">Bookings are temporarily unavailable.</p> : todayBookings.length ? <div className="team-list">{todayBookings.slice(0, 4).map((booking) => <div className="team-row" key={booking.uid}><CalendarCheck2 /><div><strong>{booking.attendeeName || "Customer"}</strong><small>{formatDate(booking.start, { hour: "2-digit", minute: "2-digit" })} · {booking.title || "Appointment"}</small></div><Badge tone="success">{booking.status || "confirmed"}</Badge></div>)}</div> : <EmptyState icon={CalendarDays} title="No bookings today" description="New appointments made by your receptionist will appear here." />}
+        </Card>
+      </div>
+      <div className="overview-grid">
+        <Card className="panel">
+          <SectionHeading title="Recent calls" description="The latest customer conversations" action={<Link to={workspacePath(clientId, "calls")} className="subtle-link">View all <ChevronRight size={14} /></Link>} />
           <CallTable calls={calls.slice(0, 5)} compact />
         </Card>
         <Card className="panel quick-panel">
@@ -202,7 +229,7 @@ function OverviewContent({ clientId }: { clientId: string }) {
             <span>{integration("twilio")?.connected ? <CheckCircle2 /> : <XCircle className="danger-icon" />} Phone connection <Badge tone={integration("twilio")?.connected ? "success" : "warning"}>{integration("twilio")?.connected ? "Ready" : "Needs setup"}</Badge></span>
             <span>{activeClient?.published ? <CheckCircle2 /> : <Clock3 />} Approved version <Badge tone={activeClient?.published ? "success" : "warning"}>{activeClient?.published ? "Recorded" : "Needs review"}</Badge></span>
           </div>
-          <Link className="button button-secondary button-md full-button" to="/app/setup">Open setup <Settings2 size={15} /></Link>
+          <Link className="button button-secondary button-md full-button" to={workspacePath(clientId, "setup")}>Open setup <Settings2 size={15} /></Link>
         </Card>
       </div>
     </>
@@ -567,22 +594,20 @@ export function AgentsPage() {
 }
 
 function AgentsContent({ clientId }: { clientId: string }) {
-  const { isOperator } = usePermissions(clientId);
   const client = useQuery({ queryKey: ["client", clientId], queryFn: () => api.client(clientId), retry: false });
   if (client.isLoading) return <LoadingState label="Loading your agent…" />;
   if (client.error) return <ErrorState error={client.error} onRetry={() => client.refetch()} />;
   const item = client.data!;
   return (
     <>
-      <PageHeader eyebrow="Voice agents" title="Your reception team" description="Configure how Robinexis answers, acts, and hands conversations back to people." actions={isOperator ? <LinkButton to="/admin/agents/new"><Plus size={15} /> New agent</LinkButton> : undefined} />
+      <PageHeader eyebrow="Your AI receptionist" title="One receptionist, fully briefed" description="Control how Robinexis welcomes callers, answers questions, books appointments and hands calls to your team." />
       <div className="agent-grid">
         <Card className="agent-card">
           <div className="agent-card-top"><span className="agent-avatar"><Bot /></span><Badge tone={item.published ? "success" : "warning"}>{item.published ? "Approved" : "Draft"}</Badge></div>
           <h2>{item.role || `${item.businessName} Receptionist`}</h2><p>{item.tone || "Warm, confident and naturally helpful"}</p>
           <div className="agent-meta"><span><PhoneCall /> {item.inboundNumbers?.length || 0} number{item.inboundNumbers?.length === 1 ? "" : "s"}</span><span><BookOpen /> {item.publishedFacts?.length || 0} facts</span></div>
-          <div className="agent-card-actions"><Link className="button button-secondary button-md" to={`/app/agents/${item.id}`}>Open agent</Link><Link className="icon-button" to="/app/playground"><Play size={17} /></Link></div>
+          <div className="agent-card-actions"><Link className="button button-secondary button-md" to={workspacePath(clientId, "receptionist/edit")}>Manage receptionist</Link><Link className="icon-button" aria-label="Start a test call" to={workspacePath(clientId, "test")}><Play size={17} /></Link></div>
         </Card>
-        {isOperator && <button className="new-agent-card" onClick={() => { window.location.href = "/admin/agents/new"; }}><span><Plus /></span><strong>Create another agent</strong><p>Set up a different role, location, or conversation flow.</p></button>}
       </div>
     </>
   );
@@ -674,17 +699,24 @@ function AgentForm({ client, isNew = false }: { client: Client; isNew?: boolean 
           <Field label="Tone" error={errors.tone?.message}><input {...register("tone")} /></Field>
           {isOperator && <Field label="ElevenLabs agent ID" hint="Required for this workspace's browser playground."><input placeholder="agent_…" {...register("elevenlabsAgentId")} /></Field>}
           {isOperator && <Field label="ElevenLabs voice ID" hint="Leave empty to use the workspace default."><input placeholder="Optional voice ID" {...register("voiceId")} /></Field>}
-          <Field label="Human transfer number"><input placeholder="+44…" {...register("transferNumber")} /></Field>
-          <Field label="Twilio inbound number" hint="Buy the number in Twilio, then paste one E.164 value per line. Robinexis assigns it to this workspace’s agent."><textarea rows={2} placeholder="+447700900000" {...register("inboundNumbers")} /></Field>
+          {isOperator && <Field label="Human transfer number"><input placeholder="+44…" {...register("transferNumber")} /></Field>}
+          {isOperator && <Field label="Twilio inbound number" hint="Operator-only provider routing value."><textarea rows={2} placeholder="+447700900000" {...register("inboundNumbers")} /></Field>}
         </div>
         <Field label="Opening greeting" error={errors.greeting?.message}><textarea rows={3} {...register("greeting")} /></Field>
       </Card>
-      <Card className="form-card">
+      {isOperator ? <Card className="form-card">
         <SectionHeading title="Approved knowledge" description="One fact per line. The agent is instructed never to invent anything outside these facts." />
         <Field label="Published facts" hint="Examples: We are open Tuesday–Saturday. · Parking is available behind the building."><textarea rows={7} placeholder="Add approved facts…" {...register("facts")} /></Field>
         <Field label="Topics that need a human" hint="The agent will offer a handoff instead of guessing."><textarea rows={4} placeholder="Complex pricing&#10;Complaints&#10;Specialist availability" {...register("unknowns")} /></Field>
-      </Card>
-      <Card className="form-card">
+      </Card> : <Card className="form-card receptionist-source-card">
+        <SectionHeading title="What your receptionist knows" description="Business facts and documents have one source of truth, so live answers stay consistent." />
+        <div className="control-links">
+          <LinkButton to={workspacePath(client.id, "business")} variant="secondary">Services, hours & policies</LinkButton>
+          <LinkButton to={workspacePath(client.id, "knowledge")} variant="secondary">Knowledge documents</LinkButton>
+          <LinkButton to={workspacePath(client.id, "connections")} variant="secondary">Phone & calendar</LinkButton>
+        </div>
+      </Card>}
+      {isOperator && <Card className="form-card">
         <SectionHeading title="Services & operations" description="These fields control what the agent can offer and how calls are routed." />
         <Field label="Services" hint="One per line: Title | slug | duration minutes"><textarea rows={5} placeholder="Haircut & Style | haircut-style | 45" {...register("services")} /></Field>
         <div className="form-grid">
@@ -693,7 +725,7 @@ function AgentForm({ client, isNew = false }: { client: Client; isNew?: boolean 
           <Field label="Prices"><textarea rows={4} {...register("prices")} /></Field>
         </div>
         <Field label="Policies" hint="One approved policy per line"><textarea rows={5} {...register("policies")} /></Field>
-      </Card>
+      </Card>}
       <div className="sticky-save"><span>{canEdit ? isDirty ? "You have unsaved changes" : "All changes saved" : "Viewer access · read only"}</span>{canEdit && <Button disabled={save.isPending}>{save.isPending ? "Saving…" : "Save agent"} <Check size={16} /></Button>}</div>
       </fieldset>
     </form>
@@ -710,7 +742,9 @@ export function NewAgentPage() {
 }
 
 export function AgentDetailPage() {
-  const { id } = useParams();
+  const { id: routeId } = useParams();
+  const { activeClientId } = useClient();
+  const id = routeId || activeClientId;
   const queryClient = useQueryClient();
   const { push } = useToast();
   const { canEditWorkspace: canEdit, canPublishWorkspace: canPublish, isOperator } = usePermissions(id);
@@ -744,8 +778,8 @@ export function AgentDetailPage() {
   if (client.error) return <ErrorState error={client.error} onRetry={() => client.refetch()} />;
   return (
     <>
-      <Link className="back-link" to="/app/agents"><ArrowLeft size={15} /> All agents</Link>
-      <PageHeader eyebrow={canEdit ? "Receptionist editor" : "Receptionist details"} title={client.data?.role || "Voice receptionist"} description={`${client.data?.businessName} · ${client.data?.tone || "Warm and professional"}`} actions={<><Link className="button button-secondary button-md" to="/app/playground"><Play size={15} /> Test</Link>{canPublish && <Button onClick={() => publish.mutate()} disabled={publish.isPending || !client.data?.hasUnpublishedChanges && client.data?.published}>{publish.isPending ? "Publishing…" : "Publish version"} <UploadCloud size={15} /></Button>}{isOperator && <Button variant="secondary" onClick={() => provision.mutate()} disabled={provision.isPending || !client.data?.published}>{provision.isPending ? "Provisioning…" : client.data?.elevenlabsAgentId ? "Sync provider" : "Provision agent"}</Button>}</>} />
+      <Link className="back-link" to={workspacePath(id, "receptionist")}><ArrowLeft size={15} /> Receptionist overview</Link>
+      <PageHeader eyebrow={canEdit ? "Receptionist editor" : "Receptionist details"} title={client.data?.role || "AI receptionist"} description={`${client.data?.businessName} · ${client.data?.tone || "Warm and professional"}`} actions={<><Link className="button button-secondary button-md" to={workspacePath(id, "test")}><Play size={15} /> Test call</Link>{canPublish && <Button onClick={() => publish.mutate()} disabled={publish.isPending || !client.data?.hasUnpublishedChanges && client.data?.published}>{publish.isPending ? "Publishing…" : "Publish version"} <UploadCloud size={15} /></Button>}{isOperator && <Button variant="secondary" onClick={() => provision.mutate()} disabled={provision.isPending || !client.data?.published}>{provision.isPending ? "Provisioning…" : client.data?.elevenlabsAgentId ? "Sync provider" : "Provision agent"}</Button>}</>} />
       <div className="editor-layout">
         <div><AgentForm client={client.data!} /></div>
         <aside className="editor-aside">
@@ -772,15 +806,15 @@ export function PlaygroundPage() {
     return (
       <>
         <PageHeader
-          eyebrow="Agent playground"
-          title="Connect this workspace’s live agent"
-          description="The browser playground becomes available after a Robinexis operator provisions this workspace’s isolated ElevenLabs agent."
+          eyebrow="Test call"
+          title="Your receptionist is still being connected"
+          description="Testing becomes available as soon as Robinexis finishes the voice connection for this workspace."
         />
         <EmptyState
           icon={PhoneCall}
-          title="Voice agent not connected"
-          description="The workspace remains isolated and cannot borrow another client’s agent."
-          action={<LinkButton to="/app/agents">Review agent</LinkButton>}
+          title="Voice connection not ready"
+          description="Your business remains safely isolated while setup is completed."
+          action={<LinkButton to={workspacePath(activeClientId, "setup")}>Open setup</LinkButton>}
         />
       </>
     );
@@ -795,12 +829,23 @@ export function PlaygroundPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Agent playground"
-        title="Your receptionist, ready to talk"
+        eyebrow="Test call"
+        title="Hear your receptionist before customers do"
         description={`Test the same ${demoConfig.businessName} conversation your callers hear, without leaving Robinexis.`}
         actions={demoConfig.sharePath ? <Link className="button button-secondary button-md" to={demoConfig.sharePath} target="_blank">Open public demo <Link2 size={15} /></Link> : undefined}
       />
-      <ReceptionistCall compact config={demoConfig} />
+      <div className="receptionist-test-layout">
+        <ReceptionistCall config={demoConfig} />
+        <Card className="panel receptionist-test-brief">
+          <SectionHeading title="What to test" description="Try the questions your customers ask most often." />
+          <div className="team-list">
+            <div className="team-row"><CalendarCheck2 /><div><strong>Book an appointment</strong><small>{(client.data.services || []).slice(0, 2).map((service) => service.title).join(" or ") || "Ask about one of your services"}</small></div></div>
+            <div className="team-row"><Clock3 /><div><strong>Ask about opening hours</strong><small>{client.data.hours || "Your approved business hours"}</small></div></div>
+            <div className="team-row"><Users /><div><strong>Ask for a person</strong><small>{client.data.transferNumber ? "Confirm the handoff feels natural" : "See how the receptionist handles a human request"}</small></div></div>
+          </div>
+          <LinkButton to={workspacePath(activeClientId, "receptionist/edit")} variant="secondary">Improve receptionist</LinkButton>
+        </Card>
+      </div>
     </>
   );
 }
@@ -898,6 +943,7 @@ function CalendarContent({ clientId }: { clientId: string }) {
   const [cancelTarget, setCancelTarget] = useState<Booking | null>(null);
   const [rescheduleTarget, setRescheduleTarget] = useState<Booking | null>(null);
   const bookings = useQuery({ queryKey: ["bookings", clientId], queryFn: () => api.bookings(clientId), retry: false });
+  const client = useQuery({ queryKey: ["client", clientId], queryFn: () => api.client(clientId), retry: false });
   const slots = useQuery({
     queryKey: ["slots", clientId, eventSlug],
     queryFn: () => api.slots(clientId, eventSlug),
@@ -950,15 +996,15 @@ function CalendarContent({ clientId }: { clientId: string }) {
   const nextBooking = [...(bookings.data || [])].sort((left, right) => new Date(left.start).getTime() - new Date(right.start).getTime())[0];
   return (
     <>
-      <PageHeader eyebrow="Calendar" title="Bookings and availability in one view" description="Find customers, review the exact status returned by the calendar, and make confirmed changes." actions={<Link className="button button-secondary button-md" to="/app/calendar/settings"><Link2 size={15} /> Calendar settings</Link>} />
+      <PageHeader eyebrow="Bookings" title="Bookings and availability in one view" description="Find customers, review confirmed appointments, and make intentional changes." actions={<Link className="button button-secondary button-md" to={workspacePath(clientId, "bookings/settings")}><Link2 size={15} /> Booking rules</Link>} />
       <div className="calendar-summary">
         <Card><CalendarCheck2 /><div><strong>{bookings.data?.length || 0}</strong><span>Appointments returned</span></div></Card>
         <Card><Clock3 /><div><strong>{nextBooking ? formatDate(nextBooking.start, { day: "2-digit", month: "short" }) : "—"}</strong><span>Next appointment</span></div></Card>
         <Card><CalendarDays /><div><strong>{eventSlug ? slots.data?.length ?? "…" : "—"}</strong><span>{eventSlug ? "Available slots returned" : "Choose an event type"}</span></div></Card>
       </div>
       <Card className="panel availability-panel">
-        <SectionHeading title="Check live availability" description="Enter an existing calendar event-type slug; only slots returned by the API are shown." />
-        <div className="availability-controls"><Field label="Event type slug"><input value={eventSlug} onChange={(event) => setEventSlug(event.target.value)} placeholder="Your configured event type" /></Field><Button variant="secondary" onClick={() => slots.refetch()} disabled={!eventSlug.trim() || slots.isFetching}><RefreshCw size={15} /> {slots.isFetching ? "Checking…" : "Check slots"}</Button></div>
+        <SectionHeading title="Check live availability" description="Choose one of your bookable services. Robinexis only shows times returned by the connected calendar." />
+        <div className="availability-controls"><Field label="Service"><select value={eventSlug} onChange={(event) => setEventSlug(event.target.value)}><option value="">Choose a service</option>{(client.data?.services || []).map((service) => <option key={service.slug} value={service.slug}>{service.title} · {service.durationMinutes} min</option>)}</select></Field><Button variant="secondary" onClick={() => slots.refetch()} disabled={!eventSlug.trim() || slots.isFetching}><RefreshCw size={15} /> {slots.isFetching ? "Checking…" : "Check times"}</Button></div>
         {slots.error ? <ErrorState error={slots.error} /> : eventSlug && <div className="slot-grid">{(slots.data || []).slice(0, 8).map((slot) => <span key={slot.start}>{formatDate(slot.start)}</span>)}{!slots.isLoading && !slots.data?.length && <p className="muted">No slots were returned for this event type.</p>}</div>}
       </Card>
       <Card className={`panel ${canEdit ? "" : "calendar-readonly"}`}>
@@ -968,7 +1014,7 @@ function CalendarContent({ clientId }: { clientId: string }) {
           <label className="filter-control"><span className="sr-only">Filter booking status</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">All statuses</option>{statusOptions.map((value) => <option value={value} key={value}>{value.replaceAll("_", " ")}</option>)}</select></label>
           <label className="filter-control"><span className="sr-only">Filter booking time</span><select value={timeWindow} onChange={(event) => setTimeWindow(event.target.value)}><option value="all">All upcoming times</option><option value="today">Today</option><option value="week">Next 7 days</option></select></label>
         </div>
-        {bookings.isLoading ? <SkeletonRows count={5} /> : bookings.error ? <ErrorState error={bookings.error} onRetry={() => bookings.refetch()} /> : !bookings.data?.length ? <EmptyState icon={CalendarDays} title="No appointments returned" description="Connect a calendar and add service event types so your agent can offer real availability." action={<LinkButton to="/app/integrations" variant="secondary">Connect calendar</LinkButton>} /> : !grouped.length ? <EmptyState icon={Search} title="No matching bookings" description="Clear or broaden the customer, status, and time filters." action={<Button variant="secondary" onClick={() => { setSearch(""); setStatus(""); setTimeWindow("all"); }}>Clear filters</Button>} /> : (
+        {bookings.isLoading ? <SkeletonRows count={5} /> : bookings.error ? <ErrorState error={bookings.error} onRetry={() => bookings.refetch()} /> : !bookings.data?.length ? <EmptyState icon={CalendarDays} title="No appointments returned" description="Connect a calendar and add services so your receptionist can offer real availability." action={<LinkButton to={workspacePath(clientId, "connections")} variant="secondary">Connect calendar</LinkButton>} /> : !grouped.length ? <EmptyState icon={Search} title="No matching bookings" description="Clear or broaden the customer, status, and time filters." action={<Button variant="secondary" onClick={() => { setSearch(""); setStatus(""); setTimeWindow("all"); }}>Clear filters</Button>} /> : (
           <div className="agenda">{grouped.map(([day, items]) => <div className="agenda-day" key={day}><div className="agenda-date"><strong>{new Date(day).toLocaleDateString("en-GB", { day: "2-digit" })}</strong><span>{new Date(day).toLocaleDateString("en-GB", { month: "short", weekday: "short" })}</span></div><div>{items.map((booking) => <div className="booking-row" key={booking.uid}><span className="booking-time">{new Date(booking.start).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</span><i /><div><strong>{booking.attendeeName || "Customer name not supplied"}</strong><small>{booking.title || booking.attendeeEmail || "No booking details supplied"}</small></div>{booking.status ? <Badge tone={statusTone(booking.status)}>{booking.status.replaceAll("_", " ")}</Badge> : <Badge tone="neutral">Status unavailable</Badge>}<div className="row-actions"><Button size="sm" variant="ghost" onClick={() => setSelectedBooking(booking)}>Details</Button>{canEdit && <Button size="sm" variant="ghost" disabled={calendarAction.isPending} onClick={() => setRescheduleTarget(booking)}>Reschedule</Button>}{canEdit && <button aria-label={`Cancel appointment for ${booking.attendeeName || "customer"}`} className="icon-button danger-icon" disabled={calendarAction.isPending} onClick={() => setCancelTarget(booking)}><XCircle size={17} /></button>}</div></div>)}</div></div>)}</div>
         )}
       </Card>
@@ -1069,7 +1115,7 @@ function KnowledgeContent({ clientId }: { clientId: string }) {
       <div className={`knowledge-grid ${canEdit ? "" : "knowledge-readonly"}`}>
         <div>
           {adding && <Card className="form-card inline-create"><SectionHeading title="Add a knowledge source" description="Upload TXT, Markdown, or a text-based PDF (maximum 5 MB), or paste approved content. Never include credentials." /><form onSubmit={handleSubmit((values) => { if (!sourceFile && !values.content?.trim()) { push({ title: "Add some knowledge", message: "Choose a file or paste approved content.", tone: "error" }); return; } create.mutate(values); })}><div className="form-grid"><Field label="Title" error={errors.title?.message}><input placeholder="Services & pricing" {...register("title")} /></Field><Field label="Source label or URL" error={errors.source?.message}><input placeholder="Internal handbook" {...register("source")} /></Field></div><Field label="Upload source"><input type="file" accept=".txt,.md,.markdown,.pdf,text/plain,text/markdown,application/pdf" onChange={(event) => { const file = event.target.files?.[0] || null; if (file && file.size > 5 * 1024 * 1024) { push({ title: "File is too large", message: "Knowledge files are limited to 5 MB.", tone: "error" }); event.target.value = ""; setSourceFile(null); return; } setSourceFile(file); }} /></Field><Field label="Or paste content"><textarea rows={6} placeholder="Paste approved knowledge…" {...register("content")} /></Field><div className="form-actions"><Button variant="ghost" type="button" onClick={() => { setAdding(false); setSourceFile(null); }}>Cancel</Button><Button disabled={create.isPending}>{create.isPending ? "Indexing…" : "Add & index"}</Button></div></form></Card>}
-          <Card className="panel"><SectionHeading title="Sources" description={`${documents.data?.length || 0} document${documents.data?.length === 1 ? "" : "s"} available to your agent`} />{documents.isLoading ? <SkeletonRows count={5} /> : documents.error ? <ErrorState error={documents.error} onRetry={() => documents.refetch()} /> : !documents.data?.length ? <EmptyState icon={BookOpen} title="Your knowledge base is empty" description="Add a website page, service guide, or approved FAQ so your agent can answer with confidence." action={<Button onClick={() => setAdding(true)}><Plus size={15} /> Add first source</Button>} /> : <div className="document-list">{documents.data.map((document) => <div key={document.id}><span className="document-icon"><FileText /></span><div><strong>{document.title}</strong><small>{document.source || "Manual content"} · {document.chunkCount || 0} sections</small></div><Badge tone={statusTone(document.status)}>{document.status || "ready"}</Badge><button aria-label={`Delete ${document.title}`} className="icon-button danger-icon" onClick={() => setDeleteTarget({ id: document.id, title: document.title })}><Trash2 size={16} /></button></div>)}</div>}</Card>
+          <Card className="panel"><SectionHeading title="Sources" description={`${documents.data?.length || 0} document${documents.data?.length === 1 ? "" : "s"} available to your receptionist`} />{documents.isLoading ? <SkeletonRows count={5} /> : documents.error ? <ErrorState error={documents.error} onRetry={() => documents.refetch()} /> : !documents.data?.length ? <EmptyState icon={BookOpen} title="Your knowledge base is empty" description="Add a website page, service guide, or approved FAQ so your receptionist can answer with confidence." action={canEdit ? <Button onClick={() => setAdding(true)}><Plus size={15} /> Add first source</Button> : undefined} /> : <div className="document-list">{documents.data.map((document) => <div key={document.id}><span className="document-icon"><FileText /></span><div><strong>{document.title}</strong><small>{document.source || "Manual content"} · {document.chunkCount || 0} sections</small></div><Badge tone={statusTone(document.status)}>{document.status || "ready"}</Badge>{canEdit && <button aria-label={`Delete ${document.title}`} className="icon-button danger-icon" onClick={() => setDeleteTarget({ id: document.id, title: document.title })}><Trash2 size={16} /></button>}</div>)}</div>}</Card>
         </div>
         <aside><Card className="panel knowledge-test"><SectionHeading title="Test retrieval" description="Ask a factual question and inspect the matching source text." /><label className="search-field"><Search /><input value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder="What services do we offer?" /></label><Button className="full-button" disabled={!searchText || search.isPending} onClick={() => search.mutate()}>{search.isPending ? "Searching…" : "Search knowledge"} <Send size={15} /></Button>{search.data && <div className="search-results">{search.data.results.length ? search.data.results.map((result, index) => <div key={index}><Badge tone="accent">{Math.round((result.score || 0) * 100)}% match</Badge><p>{result.text}</p></div>) : <p className="muted">No matching knowledge found.</p>}</div>}</Card></aside>
       </div>
@@ -1091,7 +1137,7 @@ export function IntegrationsPage() {
 function IntegrationsContent({ clientId }: { clientId: string }) {
   const queryClient = useQueryClient();
   const { push } = useToast();
-  const { canEditWorkspace } = usePermissions(clientId);
+  const { canEditWorkspace, isOperator } = usePermissions(clientId);
   const [twilioApiKeySid, setTwilioApiKeySid] = useState("");
   const [twilioApiKeySecret, setTwilioApiKeySecret] = useState("");
   const [twilioAccountAuthToken, setTwilioAccountAuthToken] = useState("");
@@ -1193,16 +1239,18 @@ function IntegrationsContent({ clientId }: { clientId: string }) {
   // organisations, so the server reports which modes actually work.
   const calendarModes = calcomConnection.data?.availableModes || { oauth: false, managed: false, shared: true };
   const known = [
-    { id: "twilio", name: "Twilio", description: "You buy the inbound number. Paste it in the agent editor; Robinexis routes it to ElevenLabs", icon: PhoneCall },
-    { id: "calcom", name: "Cal.com", description: "Bookings land on the Robinexis calendar automatically. Each customer gets isolated event types.", icon: CalendarDays },
-    { id: "elevenlabs", name: "ElevenLabs", description: "Realtime conversation, interruption and voice", icon: Activity },
-    { id: "gemini", name: "Gemini", description: "Knowledge embeddings and semantic retrieval", icon: BookOpen },
-    { id: "database", name: "Postgres + pgvector", description: "Persistent clients, calls and indexed knowledge", icon: Database },
+    { id: "twilio", name: "Phone line", description: "Your verified business number and inbound call routing", icon: PhoneCall },
+    { id: "calcom", name: "Booking calendar", description: "Live availability and confirmed appointments for your services", icon: CalendarDays },
+    { id: "elevenlabs", name: "Managed voice", description: "Natural conversation, interruption handling and your selected voice", icon: Activity },
+    ...(isOperator ? [
+      { id: "gemini", name: "Knowledge retrieval", description: "Managed semantic search and embeddings", icon: BookOpen },
+      { id: "database", name: "Data platform", description: "Tenant-isolated calls and indexed knowledge", icon: Database },
+    ] : []),
   ];
   const byId = new Map((status.data || []).map((item) => [item.id.toLowerCase(), item]));
   return (
     <>
-      <PageHeader eyebrow="Integrations" title="Connect the tools behind the conversation" description="Robinexis keeps credentials server-side. This page shows connection health, never secret values." />
+      <PageHeader eyebrow="Phone & calendar" title="The connections behind every call" description="See what is ready, repair customer-facing connections, and keep credentials safely off the browser." />
       {status.error && <div className="notice notice-error"><div><XCircle /><span><strong>Connection status unavailable.</strong> {status.error.message}</span></div><button onClick={() => status.refetch()}>Retry</button></div>}
       <div className="integration-grid">{known.map(({ id, name, description, icon: Icon }) => { const item = byId.get(id); const connected = item?.connected || false; const needsSetup = !status.isLoading && !connected; return <Card className="integration-card" key={id}><div className={`integration-icon integration-${id}`}><Icon /></div><div><h3>{name}</h3><p>{item?.detail || description}</p></div><Badge tone={connected ? "success" : "neutral"}>{status.isLoading ? "Checking…" : connected ? "Connected" : "Needs setup"}</Badge>{needsSetup && (id === "calcom" && canEditWorkspace
         ? <Button type="button" variant="secondary" size="sm" disabled={repairCalendar.isPending} onClick={() => repairCalendar.mutate()}>{repairCalendar.isPending ? "Repairing…" : "Repair calendar"}</Button>
@@ -1251,8 +1299,8 @@ function IntegrationsContent({ clientId }: { clientId: string }) {
       </Card>}
       {canEditWorkspace && <Card className="form-card">
         <SectionHeading
-          title="Customer-owned Twilio"
-          description="Connect your Twilio account, then verify one owned number. Credentials are encrypted server-side and never returned."
+          title="Business phone line"
+          description="Connect the account that owns your number, then verify which line Robinexis should answer. Credentials stay encrypted."
         />
         {twilio.isLoading ? <LoadingState label="Checking Twilio connection…" /> : <>
           <div className="form-actions">
@@ -1408,37 +1456,42 @@ export function UsagePage() {
 function UsageContent({ clientId }: { clientId: string }) {
   const usage = useQuery({ queryKey: ["usage", clientId], queryFn: () => api.usage(clientId), retry: false });
   const client = useQuery({ queryKey: ["client", clientId], queryFn: () => api.client(clientId), retry: false });
-  if (usage.isLoading || client.isLoading) return <LoadingState label="Loading monthly usage…" />;
+  const billing = useQuery({ queryKey: ["billing-status", clientId], queryFn: () => api.billingStatus(clientId), retry: false });
+  const plans = useQuery({ queryKey: ["plans"], queryFn: api.plans, retry: false });
+  if (usage.isLoading || client.isLoading || billing.isLoading) return <LoadingState label="Loading plan usage…" />;
   if (usage.error || client.error) return <ErrorState error={usage.error || client.error} onRetry={() => { usage.refetch(); client.refetch(); }} />;
   const inbound = usage.data?.inboundMinutes || 0;
   const outbound = usage.data?.outboundMinutes || 0;
   const total = inbound + outbound;
-  const allowance = usage.data?.allocatedMinutes ?? client.data?.monthlyMinuteLimit;
-  const meteredUsed = usage.data?.usedMinutes ?? total;
-  const remaining = usage.data?.remainingMinutes ?? (allowance ? Math.max(0, allowance - meteredUsed) : undefined);
+  const allowance = usage.data?.periodAllocatedMinutes || usage.data?.includedMinutes || client.data?.monthlyMinuteLimit;
+  const meteredUsed = usage.data?.periodUsedMinutes ?? usage.data?.usedMinutes ?? total;
+  const remaining = usage.data?.periodRemainingMinutes ?? usage.data?.remainingMinutes ??
+    (allowance ? Math.max(0, allowance - meteredUsed) : undefined);
   const usagePercent = allowance ? Math.min(100, Math.round((meteredUsed / allowance) * 100)) : undefined;
+  const plan = plans.data?.items.find((item) => item.tier === usage.data?.plan);
 
   return (
     <>
-      <PageHeader eyebrow="Plan & usage" title="Your plan, allowance and voice usage" description={`Usage reported by the platform for ${usage.data?.month || "the current month"}.`} actions={<LinkButton to="/billing" variant="secondary">Manage billing</LinkButton>} />
+      <PageHeader eyebrow="Plan & usage" title="Know exactly what is included" description="Robinexis voice minutes are tenant-specific. Provider account credits are never mixed into your allowance." actions={<LinkButton to="/billing" variant="secondary">Manage billing</LinkButton>} />
       <div className="metrics-grid metrics-compact">
-        <MetricCard label="Current plan" value={usage.data?.plan ? usage.data.plan[0].toUpperCase() + usage.data.plan.slice(1) : "Not reported"} detail={client.data?.serviceStatus?.replaceAll("_", " ") || "Subscription status unavailable"} icon={CircleDollarSign} tone="lilac" />
-        <MetricCard label="Total minutes" value={total} detail={usage.data?.month || "Current month"} icon={Clock3} />
+        <MetricCard label="Current plan" value={plan?.name || (usage.data?.plan ? usage.data.plan[0].toUpperCase() + usage.data.plan.slice(1) : "Not reported")} detail={billing.data?.status?.replaceAll("_", " ") || "Subscription status unavailable"} icon={CircleDollarSign} tone="lilac" />
+        <MetricCard label="Minutes remaining" value={remaining ?? "—"} detail={usage.data?.resetAt ? `Resets ${formatDate(usage.data.resetAt, { dateStyle: "medium" })}` : "Current billing period"} icon={Clock3} tone="sage" />
         <MetricCard label="Inbound minutes" value={inbound} detail="Customer calls received" icon={PhoneCall} tone="sage" />
         <MetricCard label="Outbound minutes" value={outbound} detail="Platform-reported outbound usage" icon={Headphones} tone="lilac" />
       </div>
       <Card className="panel usage-detail-card">
-        <SectionHeading title="Monthly allowance" description={allowance ? `${meteredUsed} of ${allowance} allocated minutes used` : "No monthly minute allowance is configured for this workspace."} />
+        <SectionHeading title="Current billing-period allowance" description={allowance ? `${meteredUsed} of ${allowance} Robinexis voice minutes used` : "No plan allowance is configured for this workspace."} />
         {usagePercent !== undefined ? (
           <>
             <div className="usage-count"><strong>{usagePercent}%</strong><span>used</span></div>
             <div className="progress" aria-label={`${usagePercent}% of monthly voice allowance used`}><i style={{ width: `${usagePercent}%` }} /></div>
-            <p className="muted">{remaining} minutes remaining.</p>
+            <p className="muted">{remaining} minutes remain. This meter never includes usage from another workspace.</p>
           </>
         ) : (
           <div className="usage-unmetered"><ShieldCheck /><div><strong>Usage is still measured</strong><p>The API has not supplied a plan limit, so Robinexis won’t display a made-up allowance.</p></div></div>
         )}
       </Card>
+      {plan && <Card className="panel"><SectionHeading title={`${plan.name} plan limits`} description="Commercial limits for this workspace, separate from Robinexis provider accounts." /><dl className="detail-list"><div><dt>Included voice minutes</dt><dd>{plan.includedMinutes}</dd></div><div><dt>Locations</dt><dd>{plan.locationLimit ?? "Custom"}</dd></div><div><dt>Calendars</dt><dd>{plan.calendarLimit ?? "Custom"}</dd></div><div><dt>Billing period</dt><dd>{usage.data?.billingPeriodStart && usage.data?.billingPeriodEnd ? `${formatDate(usage.data.billingPeriodStart, { dateStyle: "medium" })} – ${formatDate(usage.data.billingPeriodEnd, { dateStyle: "medium" })}` : "Not reported"}</dd></div></dl></Card>}
     </>
   );
 }
@@ -1542,7 +1595,7 @@ export function SettingsPage() {
         <nav className="settings-nav"><Link className="active" to="/app/business"><Settings2 /> Business profile</Link><a href="#security"><ShieldCheck /> Security</a>{isOperator && <a href="#developer"><Code2 /> Developer</a>}</nav>
         <div>
           <Card className="form-card" id="business"><SectionHeading title="One business profile" description="Opening hours, services, prices and public details now live in one reviewable draft." /><div className="deferred-row"><Store /><div><strong>{client.data?.businessName}</strong><p>{client.data?.location || "No public location saved"}</p></div><LinkButton to="/app/business">Open business setup</LinkButton></div></Card>
-          <Card className="form-card" id="security"><SectionHeading title="Session security" description="The dashboard stores a short-lived access token for this tab only." /><div className="security-setting"><span><KeyRound /></span><div><strong>Supabase session</strong><p>A signed JWT is verified by the Railway API, then restricted to assigned workspaces and roles.</p></div><Badge tone="success">Protected</Badge></div></Card>
+          <Card className="form-card" id="security"><SectionHeading title="Secure sign-in" description="Your session is short-lived and restricted to the workspaces assigned to you." /><div className="security-setting"><span><KeyRound /></span><div><strong>Your login is protected</strong><p>Robinexis verifies every request and enforces your owner, manager or viewer access before returning workspace data.</p></div><Badge tone="success">Protected</Badge></div></Card>
           <Card className="form-card" id="data"><SectionHeading title="Your data" description="Exports and deletion are reviewed, tenant-scoped, and audited before any irreversible action." /><div className="row-actions"><Button variant="secondary" disabled={lifecycleRequest.isPending} onClick={() => lifecycleRequest.mutate("data_export")}>Request data export</Button><Button variant="ghost" disabled={lifecycleRequest.isPending} onClick={() => { if (window.confirm("Request operator review for permanent workspace deletion? No data is deleted immediately.")) lifecycleRequest.mutate("workspace_deletion"); }}>Request deletion review</Button></div></Card>
           {isOperator && <Card className="form-card" id="developer"><SectionHeading title="API environment" description="Production dashboard requests use the versioned Railway API." /><div className="code-line"><code>/api/v1</code><button className="icon-button" onClick={() => navigator.clipboard.writeText("/api/v1")}><Copy size={16} /></button></div></Card>}
         </div>

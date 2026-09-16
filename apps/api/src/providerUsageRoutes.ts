@@ -96,6 +96,22 @@ export async function providerUsagePortfolio(
     map.set(key, current);
     return map;
   }, new Map<string, ProviderUsagePortfolio["clients"][number]>());
+  const aggregateClients = [...clientTotals.values()].reduce((map, row) => {
+    const current = map.get(row.clientId) || {
+      clientId: row.clientId,
+      businessName: row.businessName,
+      providers: [],
+      usageMinutes: 0,
+      estimatedCostMinor: 0,
+      estimated: false,
+    };
+    if (!current.providers.includes(row.provider)) current.providers.push(row.provider);
+    current.usageMinutes += row.usageMinutes;
+    current.estimatedCostMinor += row.estimatedCostMinor;
+    current.estimated = true;
+    map.set(row.clientId, current);
+    return map;
+  }, new Map<string, ProviderUsagePortfolio["clientTotals"][number]>());
   const accountSnapshots = (await Promise.all(
     providers.map((provider) => store.getLatestProviderAccountSnapshot(provider)),
   )).filter((item): item is ProviderAccountSnapshot => Boolean(item)).map((item) => ({
@@ -115,6 +131,9 @@ export async function providerUsagePortfolio(
     },
     providers: providerTotals,
     clients: [...clientTotals.values()].sort((a, b) => b.estimatedCostMinor - a.estimatedCostMinor),
+    clientTotals: [...aggregateClients.values()]
+      .map((item) => ({ ...item, providers: [...item.providers].sort() }))
+      .sort((a, b) => b.estimatedCostMinor - a.estimatedCostMinor),
     accountSnapshots,
   };
 }

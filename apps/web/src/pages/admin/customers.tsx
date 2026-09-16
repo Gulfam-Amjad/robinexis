@@ -3,10 +3,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ChevronRight, Plus, RefreshCw, Search, ShieldAlert, Store, Users } from "lucide-react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api, formatDate, initials } from "../../lib/api";
-import { filterClients, validateServiceAction } from "../../lib/admin";
+import { filterClients } from "../../lib/admin";
 import { useClient, useToast } from "../../state";
 import { Badge, Button, Card, EmptyState, ErrorState, LinkButton, LoadingState, PageHeader, SectionHeading, statusTone } from "../../components/ui";
 import { CreditAdjustmentDialog } from "./credit-adjustment-dialog";
+import { ServiceActionDialog } from "./service-action-dialog";
 import type { ProviderBenchmarkMetrics } from "@robinexis/api-contracts";
 
 export function AdminCustomersPage() {
@@ -83,6 +84,7 @@ export function AdminCustomerDetailPage() {
   const [preparedDeploymentId, setPreparedDeploymentId] = useState<string>();
   const [baselineBenchmark, setBaselineBenchmark] = useState("");
   const [candidateBenchmark, setCandidateBenchmark] = useState("");
+  const [serviceDialog, setServiceDialog] = useState<"suspend" | "reactivate">();
   const customer = useQuery({ queryKey: ["client", id], queryFn: () => api.client(id!), enabled: Boolean(id), retry: false });
   const summary = useQuery({ queryKey: ["admin-summary"], queryFn: api.adminSummary, retry: false });
   const control = useQuery({ queryKey: ["admin-control-plane"], queryFn: api.adminControlPlane, retry: false });
@@ -179,6 +181,7 @@ export function AdminCustomerDetailPage() {
       api.setServiceStatus(id!, action, reason),
     onSuccess: async () => {
       await Promise.all([customer.refetch(), queryClient.invalidateQueries({ queryKey: ["clients"] })]);
+      setServiceDialog(undefined);
       push({ title: "Service status updated", tone: "success" });
     },
     onError: (mutationError) => push({ title: "Status update failed", message: mutationError.message, tone: "error" }),
@@ -188,7 +191,7 @@ export function AdminCustomerDetailPage() {
   if (customer.error || !customer.data) return <ErrorState error={customer.error || new Error("Customer not found")} onRetry={() => customer.refetch()} />;
   const client = customer.data;
   const usage = summary.data?.clients.find((item) => item.clientId === id);
-  const providerCost = providerUsage.data?.clients?.find((item) => item.clientId === id);
+  const providerCost = providerUsage.data?.clientTotals?.find((item) => item.clientId === id);
   const resources = control.data?.resources.filter((item) => item.clientId === id) || [];
   const openWorkspace = () => {
     setActiveClientId(client.id);
@@ -209,13 +212,7 @@ export function AdminCustomerDetailPage() {
           <div><dt>Used this month</dt><dd>{usage ? `${Math.round(usage.usedMinutes)} minutes` : "Unavailable"}</dd></div>
           <div><dt>Customer allowance remaining</dt><dd>{usage ? `${Math.round(usage.remainingMinutes)} minutes` : "Unavailable"}</dd></div>
         </dl>
-        <div className="row-actions"><Button variant="secondary" disabled={serviceAction.isPending} onClick={() => {
-          const action = client.serviceStatus === "paused" ? "reactivate" : "suspend";
-          const reason = window.prompt(`Reason to ${action} ${client.businessName}? This is added to the audit log.`)?.trim();
-          const confirmation = reason ? window.prompt(`Type CONFIRM ${client.businessName} to continue.`) || "" : "";
-          const validation = validateServiceAction(reason || "", confirmation, client.businessName);
-          if (!validation.reasonError && !validation.confirmationError) serviceAction.mutate({ action, reason: validation.reason });
-        }}>{client.serviceStatus === "paused" ? "Reactivate service" : "Suspend service"}</Button><LinkButton to={`/admin/setup/${client.id}`} variant="secondary">Setup console</LinkButton></div>
+        <div className="row-actions"><Button variant="secondary" disabled={serviceAction.isPending} onClick={() => setServiceDialog(client.serviceStatus === "paused" ? "reactivate" : "suspend")}>{client.serviceStatus === "paused" ? "Reactivate service" : "Suspend service"}</Button><LinkButton to={`/admin/setup/${client.id}`} variant="secondary">Setup console</LinkButton></div>
       </Card>
       <Card className="panel">
         <SectionHeading title="Voice provider assignment" description="Operator-only guarded deployment control." />
@@ -223,7 +220,7 @@ export function AdminCustomerDetailPage() {
           <div><dt>Assigned pipeline</dt><dd>{client.voicePipeline || "Not assigned"}</dd></div>
           <div><dt>Deployment state</dt><dd>{client.voicePipeline === "livekit-cascade" ? providerHealth.data?.status || "Unavailable" : client.elevenlabsAgentId ? "Configured" : "Unavailable"}</dd></div>
           <div><dt>Provider health</dt><dd><Badge tone={providerHealth.data?.status === "healthy" ? "success" : "warning"}>{providerHealth.data?.status || "Unavailable"}</Badge></dd></div>
-          <div><dt>Estimated provider cost</dt><dd>{providerCost ? `£${(providerCost.estimatedCostMinor / 100).toFixed(2)} · ${providerCost.usageMinutes.toFixed(1)} min` : "Unavailable"}</dd></div>
+          <div><dt>Estimated provider cost</dt><dd>{providerCost ? `£${(providerCost.estimatedCostMinor / 100).toFixed(2)} · ${providerCost.usageMinutes.toFixed(1)} min · ${providerCost.providers.join(" + ")}` : "Unavailable"}</dd></div>
         </dl>
         <div className="stack">
           <label>Target provider
@@ -312,6 +309,7 @@ export function AdminCustomerDetailPage() {
       {audit.isLoading ? <LoadingState label="Loading customer audit…" /> : audit.error ? <ErrorState error={audit.error} onRetry={() => audit.refetch()} /> : audit.data?.length ? <div className="team-list">{audit.data.slice(0, 10).map((entry) => <div className="team-row" key={entry.id}><Store /><div><strong>{entry.action.replaceAll(".", " ").replaceAll("_", " ")}</strong><small>{entry.actorId} · {formatDate(entry.createdAt)}</small></div></div>)}</div> : <EmptyState icon={Store} title="No audit actions" description="Audited operator and billing actions will appear here." />}
     </Card>
     <CreditAdjustmentDialog customerName={client.businessName} open={searchParams.get("adjust") === "credits"} busy={adjustment.isPending} onClose={() => setSearchParams({}, { replace: true })} onSubmit={(minutes, reason) => adjustment.mutate({ minutes, reason })} />
+    <ServiceActionDialog customerName={client.businessName} action={serviceDialog} busy={serviceAction.isPending} onClose={() => setServiceDialog(undefined)} onSubmit={(action, reason) => serviceAction.mutate({ action, reason })} />
   </>;
 }
 

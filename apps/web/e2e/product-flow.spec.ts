@@ -308,19 +308,19 @@ test("all operator areas render against their backend contracts", async ({ page 
   });
   await openWorkspaceSession(page);
   const routes = [
-    ["/app/setup", "Know exactly what is ready"],
+    ["/app/setup", "Four steps to a receptionist you can trust"],
     ["/app/business", "One source of truth for every call"],
-    ["/app/agents", "Your reception team"],
+    ["/app/agents", "One receptionist, fully briefed"],
     [`/app/agents/${client.id}`, "AI receptionist"],
-    ["/app/playground", "Your receptionist, ready to talk"],
+    ["/app/playground", "Hear your receptionist before customers do"],
     ["/app/calls", "Every conversation, accounted for"],
     ["/app/analytics", "Know what’s happening on the phone"],
     ["/app/calendar", "Bookings and availability in one view"],
     ["/app/calendar/settings", "Control when and how bookings happen"],
     ["/app/phone", "Ownership, routing and health"],
-    ["/app/usage", "Your plan, allowance and voice usage"],
+    ["/app/usage", "Know exactly what is included"],
     ["/app/knowledge", "Give your agent the right answers"],
-    ["/app/integrations", "Connect the tools behind the conversation"],
+    ["/app/integrations", "The connections behind every call"],
     ["/app/team", "The people behind Demo Salon"],
     ["/admin/billing", "A plan that grows with every call"],
     ["/app/settings", "The business behind the voice"],
@@ -389,6 +389,11 @@ test("operator triages requests, replays billing, and adjusts allowance with aud
     actions.push(`credit:${body.minutes}:${body.reason}`);
     await route.fulfill({ json: { appended: true, remainingMinutes: 113 } });
   });
+  await page.route("**/api/v1/clients/*/service-status", async (route) => {
+    const body = route.request().postDataJSON();
+    actions.push(`service:${body.action}:${body.reason}`);
+    await route.fulfill({ json: { client: { ...client, serviceStatus: "paused" } } });
+  });
 
   await page.goto("/admin");
   await page.getByRole("button", { name: "Start" }).click();
@@ -403,6 +408,12 @@ test("operator triages requests, replays billing, and adjusts allowance with aud
   await dialog.getByLabel("Audit reason").fill("Customer goodwill");
   await dialog.getByRole("button", { name: "Record adjustment" }).click();
   await expect.poll(() => actions).toContain("credit:25:Customer goodwill");
+  await page.getByRole("button", { name: "Suspend service" }).click();
+  const serviceDialog = page.getByRole("dialog", { name: "Suspend customer service" });
+  await serviceDialog.getByLabel("Audit reason").fill("Requested by account owner");
+  await serviceDialog.getByLabel(`Type CONFIRM ${client.businessName}`).fill(`CONFIRM ${client.businessName}`);
+  await serviceDialog.getByRole("button", { name: "Suspend service" }).click();
+  await expect.poll(() => actions).toContain("service:suspend:Requested by account owner");
 });
 
 test("operator stores quality evidence before LiveKit preflight", async ({ page }) => {
@@ -472,17 +483,17 @@ test("salon owners see only their workspace experience", async ({ page }) => {
   await expect(page.getByText("Salon owner", { exact: true })).toBeVisible();
   await expect(page.getByText("Demo Salon", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("link", { name: "Campaigns" })).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "Plan & usage" })).toHaveAttribute("href", "/app/usage");
+  await expect(page.getByRole("link", { name: "Plan & usage" })).toHaveAttribute("href", "/app/w/client_demo/usage");
   await expect(page.getByRole("link", { name: "Operator admin" })).toHaveCount(0);
 
   await page.goto("/app/team");
   await expect(page.locator("#main-content").getByText("owner@demo-salon.test", { exact: true })).toBeVisible({ timeout: 15_000 });
 
   await page.goto("/app/billing");
-  await expect(page).toHaveURL(/\/app$/);
+  await expect(page).toHaveURL(/\/app\/w\/client_demo$/);
 
   await page.goto("/admin");
-  await expect(page).toHaveURL(/\/app$/);
+  await expect(page).toHaveURL(/\/app\/w\/client_demo$/);
 });
 
 test("past-due salon deep links are redirected to billing recovery", async ({ page }) => {

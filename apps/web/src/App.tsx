@@ -1,5 +1,5 @@
-import { lazy, Suspense } from "react";
-import { Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
+import { lazy, Suspense, useEffect } from "react";
+import { Navigate, Outlet, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { AppShell } from "./components/layout";
 import { Button, EmptyState, LinkButton } from "./components/ui";
 import { AUTH_REQUIRED } from "./lib/auth";
@@ -11,7 +11,8 @@ import {
   SOPHIE_DEMO_PATH,
 } from "./lib/routing";
 import { strayAuthCallback } from "./lib/supabase";
-import { useSession } from "./state";
+import { workspacePath } from "./lib/navigation";
+import { useClient, useSession } from "./state";
 
 const LandingPage = lazy(() => import("./pages/public").then((m) => ({ default: m.LandingPage })));
 const LoginPage = lazy(() => import("./pages/public").then((m) => ({ default: m.LoginPage })));
@@ -28,6 +29,7 @@ const controlPlanePages = () => import("./pages/app/control-planes");
 const adminOperationsPages = () => import("./pages/admin/operations");
 const adminCustomerPages = () => import("./pages/admin/customers");
 const adminUsagePages = () => import("./pages/admin/usage-cost");
+const AlertsPage = lazy(() => import("./pages/app/alerts").then((m) => ({ default: m.AlertsPage })));
 
 const OverviewPage = lazy(() => appPages().then((m) => ({ default: m.OverviewPage })));
 const SetupPage = lazy(() => controlPlanePages().then((m) => ({ default: m.SetupPage })));
@@ -113,6 +115,40 @@ function DashboardRoute() {
   return <Navigate to={dashboardPath(actor)} replace />;
 }
 
+function WorkspaceRouteScope() {
+  const { workspaceId } = useParams();
+  const { clients, activeClientId, setActiveClientId, isLoading } = useClient();
+  const decodedId = workspaceId ? decodeURIComponent(workspaceId) : undefined;
+  const allowed = clients.some((client) => client.id === decodedId);
+  useEffect(() => {
+    if (allowed && decodedId && decodedId !== activeClientId) setActiveClientId(decodedId);
+  }, [activeClientId, allowed, decodedId, setActiveClientId]);
+  if (isLoading) return <div className="not-found">Loading workspace…</div>;
+  if (!allowed) return <Navigate to={workspacePath(clients[0]?.id)} replace />;
+  if (activeClientId !== decodedId) return <div className="not-found">Opening workspace…</div>;
+  return <Outlet />;
+}
+
+function LegacyWorkspaceRedirect() {
+  const { "*": legacy = "" } = useParams();
+  const { clients, activeClientId, isLoading } = useClient();
+  if (isLoading) return <div className="not-found">Loading workspace…</div>;
+  const clientId = activeClientId || clients[0]?.id;
+  if (!clientId) return <Navigate to="/dashboard" replace />;
+  const parts = legacy.split("/").filter(Boolean);
+  const first = parts[0] || "";
+  const suffix =
+    first === "agents" ? `receptionist${parts.length > 1 ? "/edit" : ""}` :
+    first === "playground" ? "test" :
+    first === "calendar" ? `bookings${parts[1] === "settings" ? "/settings" : ""}` :
+    first === "analytics" ? "insights" :
+    first === "integrations" ? "connections" :
+    first === "phone" ? "connections/phone" :
+    first === "billing" || first === "onboarding" ? "" :
+    legacy;
+  return <Navigate to={workspacePath(clientId, suffix)} replace />;
+}
+
 function NotFoundPage() {
   return (
     <div className="not-found">
@@ -146,31 +182,30 @@ export default function App() {
           <Route path="/upgrade" element={<Navigate to="/billing" replace />} />
           <Route element={<RequireWorkspace />}>
             <Route element={<RequireSubscription />}>
-            <Route path="/app" element={<AppShell />}>
-              <Route index element={<OverviewPage />} />
-              <Route path="setup" element={<SetupPage />} />
-              <Route path="business" element={<BusinessPage />} />
-              <Route path="phone" element={<PhonePage />} />
-              <Route path="agents" element={<AgentsPage />} />
-              <Route path="agents/:id" element={<AgentDetailPage />} />
-              <Route path="playground" element={<PlaygroundPage />} />
-              <Route path="calls" element={<CallsPage />} />
-              <Route path="calls/:id" element={<CallDetailPage />} />
-              <Route path="analytics" element={<AnalyticsPage />} />
-              <Route path="calendar" element={<CalendarPage />} />
-              <Route path="calendar/settings" element={<CalendarSettingsPage />} />
-              <Route path="usage" element={<UsagePage />} />
-              <Route path="knowledge" element={<KnowledgePage />} />
-              <Route path="integrations" element={<IntegrationsPage />} />
-              <Route path="team" element={<TeamPage />} />
-              <Route path="settings" element={<SettingsPage />} />
-              <Route path="support" element={<SupportPage />} />
-              <Route element={<RequireOperator />}>
-                <Route path="onboarding" element={<Navigate to="/admin/clients/new" replace />} />
-                <Route path="agents/new" element={<Navigate to="/admin/agents/new" replace />} />
-                <Route path="billing" element={<Navigate to="/admin/billing" replace />} />
+              <Route path="/app/w/:workspaceId" element={<WorkspaceRouteScope />}>
+                <Route element={<AppShell />}>
+                  <Route index element={<OverviewPage />} />
+                  <Route path="setup" element={<SetupPage />} />
+                  <Route path="business" element={<BusinessPage />} />
+                  <Route path="connections" element={<IntegrationsPage />} />
+                  <Route path="connections/phone" element={<PhonePage />} />
+                  <Route path="receptionist" element={<AgentsPage />} />
+                  <Route path="receptionist/edit" element={<AgentDetailPage />} />
+                  <Route path="test" element={<PlaygroundPage />} />
+                  <Route path="calls" element={<CallsPage />} />
+                  <Route path="calls/:id" element={<CallDetailPage />} />
+                  <Route path="insights" element={<AnalyticsPage />} />
+                  <Route path="bookings" element={<CalendarPage />} />
+                  <Route path="bookings/settings" element={<CalendarSettingsPage />} />
+                  <Route path="usage" element={<UsagePage />} />
+                  <Route path="knowledge" element={<KnowledgePage />} />
+                  <Route path="team" element={<TeamPage />} />
+                  <Route path="alerts" element={<AlertsPage />} />
+                  <Route path="settings" element={<SettingsPage />} />
+                  <Route path="support" element={<SupportPage />} />
+                </Route>
               </Route>
-            </Route>
+              <Route path="/app/*" element={<LegacyWorkspaceRedirect />} />
             </Route>
             <Route element={<RequireOperator />}>
               <Route path="/admin" element={<AppShell />}>

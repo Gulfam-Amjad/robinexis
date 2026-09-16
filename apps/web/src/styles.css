@@ -259,7 +259,7 @@ svg { flex: 0 0 auto; }
 .form-disclaimer { color: var(--faint); text-align: center; }
 
 .app-frame { background: #f0f0f0; display: flex; min-height: 100vh; }
-.sidebar { background: var(--nav); color: #e5e5e5; display: flex; flex-direction: column; height: 100vh; padding: 23px 16px 18px; position: fixed; width: 252px; z-index: 50; }
+.sidebar { background: var(--nav); color: #e5e5e5; display: flex; flex-direction: column; height: 100vh; overflow-y: auto; padding: 23px 16px 18px; position: fixed; scrollbar-width: thin; width: 252px; z-index: 50; }
 .sidebar-head { align-items: center; display: flex; justify-content: space-between; padding: 0 8px 21px; }
 .sidebar .logo-mark { height: 31px; width: 31px; }
 .sidebar .logo { font-size: 19px; }
@@ -346,6 +346,22 @@ svg { flex: 0 0 auto; }
 .service-editor-list { display: grid; gap: 12px; }
 .service-editor-row { align-items: end; border: 1px solid var(--line); border-radius: 13px; display: grid; gap: 12px; grid-template-columns: minmax(180px, 1.5fr) minmax(150px, 1fr) minmax(130px, .65fr) auto; padding: 14px; }
 .service-editor-row .field { margin: 0; }
+.today-hero { align-items: center; background: var(--nav); border: 1px solid #333; color: #fff; display: grid; gap: 24px; grid-template-columns: minmax(250px, 1.1fr) minmax(240px, 1fr) auto; margin-bottom: 22px; overflow: hidden; padding: 25px; position: relative; }
+.today-hero::before { background: radial-gradient(circle, rgba(9,254,148,.22), transparent 65%); content: ""; height: 230px; pointer-events: none; position: absolute; right: -70px; top: -110px; width: 230px; }
+.today-hero-status { align-items: center; display: flex; gap: 15px; min-width: 0; }
+.today-hero-status .status-orb { background: #303030; color: var(--accent); height: 50px; width: 50px; }
+.today-hero-status .status-orb.live { box-shadow: 0 0 0 7px rgba(9,254,148,.09); }
+.today-hero-status small, .today-hero-greeting small { color: #a3a3a3; display: block; font-size: 10px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+.today-hero h2 { font-family: var(--font-display); font-size: clamp(22px, 2vw, 29px); font-weight: 500; letter-spacing: -.025em; margin: 3px 0; }
+.today-hero p { color: #c8c8c8; font-size: 12px; line-height: 1.55; margin: 0; }
+.today-hero-greeting { border-left: 1px solid #3b3b3b; padding-left: 24px; }
+.today-hero-greeting p { color: #ededed; font-size: 13px; margin-top: 6px; }
+.chart-wrap-compact { height: 220px; }
+.capacity-values { color: var(--muted); display: flex; flex-wrap: wrap; font-size: 11px; gap: 14px; justify-content: space-between; margin-top: 10px; }
+.provider-capacity { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 18px; }
+.receptionist-source-card { background: var(--cream); }
+.receptionist-test-layout { display: grid; gap: 18px; grid-template-columns: minmax(0, 1.45fr) minmax(280px, .55fr); }
+.receptionist-test-brief { align-self: start; position: sticky; top: 90px; }
 .panel { padding: 21px; }
 .section-heading { align-items: center; display: flex; gap: 14px; justify-content: space-between; margin-bottom: 19px; }
 .section-heading > div:first-child { min-width: 0; }
@@ -713,7 +729,10 @@ fieldset:disabled input, fieldset:disabled textarea, fieldset:disabled select { 
   .notice { align-items: flex-start; flex-wrap: wrap; gap: 10px; }
   .notice > div { align-items: flex-start; min-width: min(100%, 260px); }
   .section-heading { align-items: flex-start; }
-  .overview-grid, .editor-layout, .playground-layout, .call-detail-grid, .knowledge-grid, .billing-grid { grid-template-columns: 1fr; }
+  .overview-grid, .editor-layout, .playground-layout, .call-detail-grid, .knowledge-grid, .billing-grid, .receptionist-test-layout { grid-template-columns: 1fr; }
+  .receptionist-test-brief { position: static; }
+  .today-hero { grid-template-columns: 1fr; }
+  .today-hero-greeting { border-left: 0; border-top: 1px solid #3b3b3b; padding-left: 0; padding-top: 18px; }
   .service-editor-row { grid-template-columns: 1fr 1fr; }
   .editor-aside { grid-template-columns: repeat(2, 1fr); }
   .knowledge-test { position: static; }
@@ -735,6 +754,7 @@ fieldset:disabled input, fieldset:disabled textarea, fieldset:disabled select { 
 
 @media (max-width: 600px) {
   .dashboard-next-action { align-items: stretch; flex-direction: column; }
+  .today-hero { padding: 20px; }
   .dashboard-next-action .button { width: 100%; }
   .service-editor-row { grid-template-columns: 1fr; }
 }

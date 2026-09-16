@@ -195,6 +195,14 @@ export interface ProviderUsagePortfolio {
     usageMinutes: number;
     estimatedCostMinor: number;
   }>;
+  clientTotals: Array<{
+    clientId: string;
+    businessName: string;
+    providers: ActiveVoiceProvider[];
+    usageMinutes: number;
+    estimatedCostMinor: number;
+    estimated: boolean;
+  }>;
   accountSnapshots: Array<{
     provider: ActiveVoiceProvider;
     status: "healthy" | "degraded" | "unavailable";
@@ -575,6 +583,13 @@ export interface Usage {
   allocatedMinutes?: number;
   usedMinutes?: number;
   remainingMinutes?: number;
+  billingPeriodStart?: string;
+  billingPeriodEnd?: string;
+  resetAt?: string;
+  includedMinutes?: number;
+  periodAllocatedMinutes?: number;
+  periodUsedMinutes?: number;
+  periodRemainingMinutes?: number;
 }
 
 export interface TimeseriesPoint {

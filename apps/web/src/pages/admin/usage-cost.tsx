@@ -24,6 +24,11 @@ export function AdminUsageCostPage() {
   const data = summary.data!;
   const providerData = providerUsage.data;
   const elevenLabsAccount = providerData?.accountSnapshots.find((item) => item.provider === "elevenlabs-convai");
+  const characterUsage = Number(elevenLabsAccount?.usage.characters);
+  const characterLimit = Number(elevenLabsAccount?.limits.characterLimit);
+  const hasCharacterCapacity = Number.isFinite(characterUsage) && Number.isFinite(characterLimit) && characterLimit > 0;
+  const charactersRemaining = hasCharacterCapacity ? Math.max(0, characterLimit - characterUsage) : undefined;
+  const characterPercent = hasCharacterCapacity ? Math.min(100, Math.round((characterUsage / characterLimit) * 100)) : undefined;
 
   return <>
     <PageHeader eyebrow="Platform · Finance" title="Usage and cost" description="Customer minute allowance is reported separately from shared provider spend." />
@@ -37,6 +42,7 @@ export function AdminUsageCostPage() {
         icon={WalletCards}
         tone="peach"
       />
+      <MetricCard label="Shared voice capacity" value={charactersRemaining !== undefined ? charactersRemaining.toLocaleString("en-GB") : "Unavailable"} detail="ElevenLabs characters remaining across Robinexis" icon={RefreshCw} tone={charactersRemaining !== undefined && characterLimit && charactersRemaining / characterLimit < 0.1 ? "peach" : "sage"} />
     </div>
     <div className="overview-grid">
       <Card className="panel">
@@ -51,13 +57,13 @@ export function AdminUsageCostPage() {
               <thead><tr><th>Customer</th><th>Plan</th><th>Used</th><th>Remaining allowance</th><th>Provider cost</th><th>Failed calls this month</th></tr></thead>
               <tbody>{filtered.map((client) => {
                 const usage = data.clients.find((item) => item.clientId === client.id);
-                const provider = providerData?.clients?.find((item) => item.clientId === client.id);
+                const provider = providerData?.clientTotals?.find((item) => item.clientId === client.id);
                 return <tr key={client.id}>
                   <td data-label="Customer"><Link to={`/admin/customers/${client.id}`}><strong>{client.businessName}</strong><small className="block">{client.slug}</small></Link></td>
                   <td data-label="Plan" className="capitalize">{usage?.plan || "Unavailable"}</td>
                   <td data-label="Used">{usage ? `${Math.round(usage.usedMinutes)} min` : "Unavailable"}</td>
                   <td data-label="Remaining allowance">{usage ? `${Math.round(usage.remainingMinutes)} min` : "Unavailable"}</td>
-                  <td data-label="Provider cost">{provider ? `£${(provider.estimatedCostMinor / 100).toFixed(2)} · ${provider.provider}` : "Unavailable"}</td>
+                  <td data-label="Provider cost">{provider ? `£${(provider.estimatedCostMinor / 100).toFixed(2)} estimated · ${provider.providers.join(" + ")}` : "Unavailable"}</td>
                   <td data-label="Failed calls this month">{usage?.failedCalls ?? "Unavailable"}</td>
                 </tr>;
               })}</tbody>
@@ -79,10 +85,17 @@ export function AdminUsageCostPage() {
             </Badge>
             <h3>ElevenLabs account snapshot</h3>
             <p>{elevenLabsAccount
-              ? `Verified ${new Date(elevenLabsAccount.capturedAt).toLocaleString("en-GB")}. Tier: ${String(elevenLabsAccount.limits.tier || "not reported")}; characters: ${String(elevenLabsAccount.usage.characters ?? "not reported")} / ${String(elevenLabsAccount.limits.characterLimit ?? "not reported")}.`
+              ? `Verified ${new Date(elevenLabsAccount.capturedAt).toLocaleString("en-GB")}. Shared Robinexis tier: ${String(elevenLabsAccount.limits.tier || "not reported")}. This capacity is not allocated to individual customers.`
               : "No verified account snapshot has been captured."}</p>
             {refreshAccount.error && <p role="alert">Account endpoint unavailable. No account values were inferred.</p>}
           </div>
+          {characterPercent !== undefined && <div className="provider-capacity">
+            <div className="usage-count"><strong>{characterPercent}%</strong><span>of shared character capacity used</span></div>
+            <div className="progress" aria-label={`${characterPercent}% of shared ElevenLabs character capacity used`}><i style={{ width: `${characterPercent}%` }} /></div>
+            <div className="capacity-values"><span>{characterUsage.toLocaleString("en-GB")} used</span><span>{charactersRemaining?.toLocaleString("en-GB")} remaining</span><span>{characterLimit.toLocaleString("en-GB")} limit</span></div>
+            {typeof elevenLabsAccount?.usage.nextResetAt === "string" && <p className="muted">Resets {new Date(elevenLabsAccount.usage.nextResetAt).toLocaleString("en-GB")}.</p>}
+            {charactersRemaining !== undefined && characterLimit && charactersRemaining / characterLimit < 0.1 && <p className="inline-notice" role="alert">Shared voice capacity is below 10%. Review the ElevenLabs subscription before customer calls are affected.</p>}
+          </div>}
         </>}
         <dl className="detail-list">
           {(providerData?.providers || []).map((provider) => <div key={provider.provider}>

@@ -3145,15 +3145,27 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
     const client = await requireClient(ctx, id);
     if (!client) return true;
     const month = url.searchParams.get("month") || new Date().toISOString().slice(0, 7);
-    const usage = await store.getUsage(id, month);
-    const ledger = await store.listCreditLedger(id);
+    const [usage, ledger, subscription] = await Promise.all([
+      store.getUsage(id, month),
+      store.listCreditLedger(id),
+      store.getCurrentSubscription(id),
+    ]);
+    const plan = subscription?.planTier || (isPlanTier(client.subscribedProduct) ? client.subscribedProduct : "starter");
+    const monthStart = `${month}-01T00:00:00.000Z`;
+    const monthEnd = new Date(`${month}-01T00:00:00.000Z`);
+    monthEnd.setUTCMonth(monthEnd.getUTCMonth() + 1);
+    const billingPeriodStart = subscription?.currentPeriodStart || monthStart;
+    const billingPeriodEnd = subscription?.currentPeriodEnd || monthEnd.toISOString();
+    const periodLedger = ledger.filter((entry) =>
+      entry.createdAt >= billingPeriodStart && entry.createdAt < billingPeriodEnd
+    );
     const remainingMinutes = ledger.reduce((sum, entry) => sum + entry.minutes, 0);
-    const allocatedMinutes = ledger
-      .filter((entry) => entry.kind === "grant" || entry.kind === "purchase")
+    const periodAllocatedMinutes = periodLedger
+      .filter((entry) => entry.kind !== "usage" && entry.minutes > 0)
       .reduce((sum, entry) => sum + entry.minutes, 0);
-    const usedMinutes = Math.abs(
-      ledger
-        .filter((entry) => entry.kind === "usage")
+    const periodUsedMinutes = Math.abs(
+      periodLedger
+        .filter((entry) => entry.kind === "usage" && entry.minutes < 0)
         .reduce((sum, entry) => sum + entry.minutes, 0),
     );
     send(res, 200, {
@@ -3163,9 +3175,16 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       inboundMinutes: 0,
       outboundMinutes: 0,
       }),
-      plan: isPlanTier(client.subscribedProduct) ? client.subscribedProduct : "starter",
-      allocatedMinutes,
-      usedMinutes,
+      plan,
+      billingPeriodStart,
+      billingPeriodEnd,
+      resetAt: billingPeriodEnd,
+      includedMinutes: planDefinition(plan).includedMinutes,
+      periodAllocatedMinutes,
+      periodUsedMinutes,
+      periodRemainingMinutes: Math.max(0, remainingMinutes),
+      allocatedMinutes: periodAllocatedMinutes,
+      usedMinutes: periodUsedMinutes,
       remainingMinutes: Math.max(0, remainingMinutes),
     });
     return true;

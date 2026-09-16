@@ -228,6 +228,59 @@ describe("product route tenant authorization", () => {
     expect(other).toMatchObject({ status: 404, body: { error: "client_not_found" } });
   });
 
+  it("reports tenant usage for the current billing period without shared provider data", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    const now = new Date();
+    const start = new Date(now.getTime() - 86_400_000).toISOString();
+    const end = new Date(now.getTime() + 29 * 86_400_000).toISOString();
+    await store.upsertSubscription({
+      id: "subscription_period_usage",
+      clientId: BLADES_HAIR_ID,
+      provider: "stripe",
+      planTier: "starter",
+      status: "active",
+      currentPeriodStart: start,
+      currentPeriodEnd: end,
+      cancelAtPeriodEnd: false,
+      metadata: {},
+      createdAt: start,
+      updatedAt: now.toISOString(),
+    });
+    await store.appendCreditLedgerEntry({
+      id: "period_grant",
+      clientId: BLADES_HAIR_ID,
+      kind: "grant",
+      minutes: 300,
+      referenceType: "stripe_subscription_period",
+      referenceId: "period_current",
+      createdAt: now.toISOString(),
+    });
+    await store.appendCreditLedgerEntry({
+      id: "period_usage",
+      clientId: BLADES_HAIR_ID,
+      kind: "usage",
+      minutes: -24,
+      referenceType: "call",
+      referenceId: "call_period",
+      createdAt: now.toISOString(),
+    });
+
+    const response = await request(store, salonActor, `/api/v1/usage?clientId=${BLADES_HAIR_ID}`);
+    expect(response).toMatchObject({
+      status: 200,
+      body: {
+        plan: "starter",
+        billingPeriodStart: start,
+        billingPeriodEnd: end,
+        periodAllocatedMinutes: 300,
+        periodUsedMinutes: 24,
+      },
+    });
+    expect(response.body).not.toHaveProperty("accountSnapshots");
+    expect(response.body).not.toHaveProperty("providerCost");
+  });
+
   it("returns not found instead of exposing another tenant or its calls", async () => {
     const store = new MemoryStore();
     await seedStore(store);

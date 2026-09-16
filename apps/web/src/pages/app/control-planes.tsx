@@ -1,16 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity, AlertTriangle, BookOpen, Bot, CalendarDays, CheckCircle2, Clock3,
-  ExternalLink, PhoneCall, Plus, RefreshCw, ShieldCheck, Trash2, Users, XCircle,
+  PhoneCall, Plus, RefreshCw, ShieldCheck, Trash2, Users, XCircle,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import type { Client } from "@robinexis/api-contracts";
 import { api, formatDate } from "../../lib/api";
 import { usePermissions } from "../../lib/permissions";
+import { workspacePath } from "../../lib/navigation";
 import { useClient, useToast } from "../../state";
 import {
-  Badge, Button, Card, EmptyState, ErrorState, Field, LinkButton,
+  Badge, Button, Card, ConfirmDialog, EmptyState, ErrorState, Field, LinkButton,
   LoadingState, MetricCard, PageHeader, SectionHeading, SkeletonRows, statusTone,
 } from "../../components/ui";
 
@@ -47,6 +48,7 @@ function SetupControl({ clientId }: { clientId: string }) {
   const integrations = useQuery({ queryKey: ["integrations", clientId], queryFn: () => api.integrations(clientId), retry: false });
   const notifications = useQuery({ queryKey: ["notification-status", clientId], queryFn: () => api.notificationStatus(clientId), retry: false });
   const usage = useQuery({ queryKey: ["usage", clientId], queryFn: () => api.usage(clientId), retry: false });
+  const [activationOpen, setActivationOpen] = useState(false);
   const latest = runs.data?.items[0];
   const readiness = latest?.output?.readinessReport;
   const blockers = readiness?.hardGaps || (latest?.error ? [latest.error] : []);
@@ -59,6 +61,7 @@ function SetupControl({ clientId }: { clientId: string }) {
         queryClient.invalidateQueries({ queryKey: ["clients"] }),
       ]);
       push({ title: "Receptionist activated", message: "The readiness-passed version is now active.", tone: "success" });
+      setActivationOpen(false);
     },
     onError: (error) => push({ title: "Activation blocked", message: error.message, tone: "error" }),
   });
@@ -68,11 +71,11 @@ function SetupControl({ clientId }: { clientId: string }) {
   const readyConnections = integrations.data?.filter((item) => item.connected).length || 0;
   const status = client.onboardingStatus || "details_required";
   return <>
-    <PageHeader eyebrow="Setup" title="Know exactly what is ready" description="Follow setup progress, resolve blockers, test the staged receptionist, then let the workspace owner activate it." actions={<Button variant="secondary" onClick={() => { setup.refetch(); runs.refetch(); integrations.refetch(); }}><RefreshCw size={15} /> Retry checks</Button>} />
+    <PageHeader eyebrow="Go-live checklist" title="Four steps to a receptionist you can trust" description="Review your business, connect the customer-facing tools, make a test call, then approve the exact version that goes live." actions={<Button variant="secondary" onClick={() => { setup.refetch(); runs.refetch(); integrations.refetch(); }}><RefreshCw size={15} /> Refresh status</Button>} />
     <div className="metrics-grid metrics-compact">
       <MetricCard label="Setup status" value={status.replaceAll("_", " ")} detail={client.onboardingEta ? `Target ${formatDate(client.onboardingEta)}` : "Latest saved state"} icon={Clock3} tone="peach" />
-      <MetricCard label="Readiness" value={readiness ? readiness.passed ? "Passed" : "Blocked" : "Not run"} detail={readiness?.generatedAt ? formatDate(readiness.generatedAt) : "Waiting for isolated tests"} icon={ShieldCheck} tone={readiness?.passed ? "sage" : "cream"} />
-      <MetricCard label="Connections" value={`${readyConnections}/${integrations.data?.length || 0}`} detail={integrations.error ? "Health unavailable" : "Provider health checks"} icon={Activity} />
+      <MetricCard label="Readiness" value={readiness ? readiness.passed ? "Passed" : "Needs attention" : "Waiting"} detail={readiness?.generatedAt ? formatDate(readiness.generatedAt) : "No test completed yet"} icon={ShieldCheck} tone={readiness?.passed ? "sage" : "cream"} />
+      <MetricCard label="Connections" value={`${readyConnections}/${integrations.data?.length || 0}`} detail={integrations.error ? "Status unavailable" : "Phone, calendar and voice"} icon={Activity} />
       <MetricCard label="Updates" value={notifications.data?.failed ? "Needs attention" : notifications.data?.pending ? "Sending" : "Delivered"} detail={notifications.data?.lastDeliveryAt ? formatDate(notifications.data.lastDeliveryAt) : "Lifecycle notification status"} icon={Activity} tone={notifications.data?.failed ? "peach" : "sage"} />
       <MetricCard label={`${usage.data?.plan || "Plan"} allowance`} value={`${usage.data?.remainingMinutes ?? 0} min`} detail={`${usage.data?.usedMinutes ?? 0} used this period`} icon={Clock3} tone={(usage.data?.remainingMinutes ?? 0) > 0 ? "sage" : "peach"} />
     </div>
@@ -102,17 +105,18 @@ function SetupControl({ clientId }: { clientId: string }) {
       <Card className="panel">
         <SectionHeading title="Next actions" description={canEditWorkspace ? "Complete the missing configuration without exposing provider credentials." : "Viewer access is read-only."} />
         <div className="control-links">
-          <LinkButton to="/app/business" variant="secondary">Review business profile</LinkButton>
-          <LinkButton to="/app/phone" variant="secondary">Check phone</LinkButton>
-          <LinkButton to="/app/calendar/settings" variant="secondary">Check calendar</LinkButton>
-          <LinkButton to="/app/playground" variant="secondary">Test receptionist</LinkButton>
+          <LinkButton to={workspacePath(clientId, "business")} variant="secondary">Review business profile</LinkButton>
+          <LinkButton to={workspacePath(clientId, "connections")} variant="secondary">Check phone & calendar</LinkButton>
+          <LinkButton to={workspacePath(clientId, "bookings/settings")} variant="secondary">Review booking rules</LinkButton>
+          <LinkButton to={workspacePath(clientId, "test")} variant="secondary">Make a test call</LinkButton>
         </div>
         {latest && <p className="muted capitalize">Provisioning {latest.status} · {(latest.step || "queued").replaceAll("_", " ")} · {formatDate(latest.updatedAt)}</p>}
         {canActivateWorkspace
-          ? <Button disabled={!readiness?.passed || activate.isPending || status === "active"} onClick={() => activate.mutate()}>{activate.isPending ? "Activating…" : status === "active" ? "Already active" : "Activate receptionist"}</Button>
+          ? <Button disabled={!readiness?.passed || activate.isPending || status === "active"} onClick={() => setActivationOpen(true)}>{status === "active" ? "Already live" : "Turn on phone receptionist"}</Button>
           : <p className="muted"><ShieldCheck size={14} /> Only the workspace owner can activate. Managers can edit and publish; viewers can review.</p>}
       </Card>
     </div>
+    <ConfirmDialog open={activationOpen} title="Turn on the phone receptionist?" description="The readiness-tested version will become active for this workspace. Future draft edits will not change live calls until they are approved again." confirmLabel="Turn on receptionist" busy={activate.isPending} onClose={() => setActivationOpen(false)} onConfirm={() => activate.mutate()} />
   </>;
 }
 
@@ -448,7 +452,7 @@ function PhoneControl({ clientId }: { clientId: string }) {
     <div className="metrics-grid metrics-compact">
       <MetricCard label="Provider health" value={connection.data?.status.replaceAll("_", " ") || "Unknown"} detail={connection.data?.accountSidMasked || "No account returned"} icon={Activity} tone={connected ? "sage" : "peach"} />
       <MetricCard label="Inbound number" value={connection.data?.selectedPhoneNumber || item.inboundNumbers?.[0] || "Not assigned"} detail={item.phoneAcquisitionMode === "customer_oauth" ? "Customer owned" : "Robinexis managed"} icon={PhoneCall} />
-      <MetricCard label="Call forwarding" value="Not available" detail="Forwarding verification is not implemented" icon={ExternalLink} />
+      <MetricCard label="Human transfer" value={item.transferNumber ? "Configured" : "Not configured"} detail={item.transferNumber ? "Approved fallback destination" : "Add a number for calls that need your team"} icon={Users} tone={item.transferNumber ? "sage" : "cream"} />
     </div>
     <Card className="form-card">
       <SectionHeading title="Human transfer" description="Calls can transfer only to this approved destination. Saving changes creates a draft." />
