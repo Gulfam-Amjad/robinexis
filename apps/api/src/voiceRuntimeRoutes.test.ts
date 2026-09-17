@@ -88,8 +88,8 @@ describe("alternate voice runtime API contracts", () => {
       toolHistory: [{ name: "get_business_info", input: {}, result: { ok: true }, at: "2026-09-16T10:00:10.000Z" }],
       latency: { llmTtftMs: 120 },
       usage: {
-        livekit: { roomSeconds: 60 },
-        stt: { provider: "deepgram", audioSeconds: 20 },
+        livekit: { roomSeconds: 60.5 },
+        stt: { provider: "deepgram", audioSeconds: 20.25 },
         llm: { provider: "groq", inputTokens: 50, outputTokens: 20 },
         tts: { provider: "elevenlabs", characters: 100, audioSeconds: 15 },
       },
@@ -107,6 +107,8 @@ describe("alternate voice runtime API contracts", () => {
     const events = await store.listProviderUsageCostEvents(BLADES_HAIR_ID);
     expect(events).toHaveLength(4);
     expect(events.map((event) => event.costMinor)).toEqual([1, 1, 70, 1]);
+    expect(events.map((event) => event.usageQuantity)).toEqual([61, 20, 70, 100]);
+    expect(events[0]?.metadata.rawQuantity).toBe(60.5);
     expect(events.every((event) => event.metadata.estimated === true)).toBe(true);
 
     const altered = Buffer.from(JSON.stringify({ ...payload, callId: "call_forged" }));
