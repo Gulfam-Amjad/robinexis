@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, AlertTriangle, CheckCircle2, Clock3, CreditCard, RefreshCw, ShieldCheck, Users } from "lucide-react";
+import { Activity, AlertTriangle, CheckCircle2, Clock3, CreditCard, Network, RefreshCw, ShieldCheck, Users } from "lucide-react";
 import { Link } from "react-router-dom";
 import { api, formatDate } from "../../lib/api";
 import { useToast } from "../../state";
@@ -42,6 +42,13 @@ export function AdminOperationsPage() {
       <MetricCard label="Resource issues" value={unhealthy.length} detail={`${data.resources.length} resources tracked`} icon={ShieldCheck} />
       <MetricCard label="Customer requests" value={pendingRequests.length} detail="Pending operator review" icon={Users} tone="lilac" />
     </div>
+    <Card className="panel routing-entry-card">
+      <div>
+        <span className="metric-icon"><Network /></span>
+        <div><span className="eyebrow">Voice infrastructure</span><h2>Premium and Cost Saver routing</h2><p>See every customer’s active provider, readiness, spend and rollback position from one control center.</p></div>
+      </div>
+      <Link className="button button-primary button-md" to="/admin/voice-routing">Open voice routing</Link>
+    </Card>
     {summary.error && <p className="inline-notice" role="status">Commercial summary is unavailable. Operational health below remains current.</p>}
     <div className="overview-grid">
       <Card className="panel">

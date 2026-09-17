@@ -11,6 +11,7 @@ import {
   LogOut,
   Menu,
   MessageSquareText,
+  Network,
   PhoneCall,
   PlugZap,
   Search,
@@ -35,6 +36,7 @@ import { Badge } from "./ui";
 const adminNavigation = [
   { label: "Operations", to: "/admin", icon: LayoutDashboard, end: true },
   { label: "Customers", to: "/admin/customers", icon: Users },
+  { label: "Voice routing", to: "/admin/voice-routing", icon: Network },
   { label: "Usage & cost", to: "/admin/usage-cost", icon: CircleDollarSign },
   { label: "Control plane", to: "/admin/control-plane", icon: ListChecks },
   { label: "Add customer", to: "/admin/clients/new", icon: Users },

@@ -7,6 +7,7 @@ const client = {
   published: false,
   serviceStatus: "trialing",
   elevenlabsAgentId: "agent_test_demo",
+  voicePipeline: "elevenlabs-convai",
   monthlyMinuteLimit: 100,
 };
 
@@ -341,6 +342,13 @@ test("operator admin is isolated under the admin route", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Operations dashboard" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Operator admin" })).toHaveCount(0);
   await expect(page.getByText("Provisioning queue", { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("link", { name: "Voice routing", exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "Open voice routing" }).click();
+  await expect(page).toHaveURL(/\/admin\/voice-routing$/);
+  await expect(page.getByRole("heading", { name: "Voice routing" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "ElevenLabs Premium" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Cost Saver" })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Manage routing/ })).toBeVisible();
 
   await page.goto("/admin/control-plane");
   await expect(page.getByRole("heading", { name: "Platform control plane" })).toBeVisible();
@@ -423,8 +431,8 @@ test("operator stores quality evidence before LiveKit preflight", async ({ page 
     if (request.url().endsWith("/provider-switch/start")) startRequests.push(request.url());
   });
   await page.goto(`/admin/customers/${client.id}`);
-  await page.getByRole("button", { name: "1. Prepare staged deployment" }).click();
-  await expect(page.getByText("2. Benchmark launch gate")).toBeVisible();
+  await page.getByRole("button", { name: "Prepare Cost Saver" }).click();
+  await page.getByText("Enter benchmark evidence").click();
 
   const metrics = JSON.stringify({
     totalCostMinor: 7_500,
@@ -438,14 +446,34 @@ test("operator stores quality evidence before LiveKit preflight", async ({ page 
     failedCalls: 20,
     bargeInPassed: true,
   });
-  await page.getByLabel("Baseline benchmark JSON").fill(metrics.replace("7500", "10000"));
-  await page.getByLabel("Candidate benchmark JSON").fill(metrics);
-  await page.getByRole("button", { name: "Evaluate and store gate" }).click();
+  await page.getByLabel("Premium baseline JSON").fill(metrics.replace("7500", "10000"));
+  await page.getByLabel("Cost Saver candidate JSON").fill(metrics);
+  await page.getByRole("button", { name: "Evaluate quality gate" }).click();
   await expect(page.getByText("Quality gate passed")).toBeVisible();
   expect(startRequests).toEqual([]);
 
-  await page.getByRole("button", { name: /Run safe-switch preflight/ }).click();
+  await page.getByRole("button", { name: /Run final preflight/ }).click();
   await expect(page.getByText("Ready to switch")).toBeVisible();
+});
+
+test("protected tenants remain visibly locked in voice routing", async ({ page }) => {
+  await openWorkspaceSession(page);
+  const blades = {
+    ...client,
+    id: "client_blades_hair",
+    slug: "blades-hair",
+    businessName: "Blades Hair",
+    published: true,
+  };
+  await page.route("**/api/v1/clients", (route) => route.fulfill({ json: { items: [client, blades] } }));
+  await page.route("**/api/v1/clients/client_blades_hair", (route) => route.fulfill({
+    json: { ...blades, role: "AI receptionist", tone: "Warm", publishedFacts: [], services: [] },
+  }));
+  await page.goto("/admin/voice-routing");
+  await expect(page.getByText("Protected tenant")).toBeVisible();
+  await page.getByRole("link", { name: /Manage routing/ }).last().click();
+  await expect(page.getByText("Blades is protected.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Prepare Cost Saver" })).toBeDisabled();
 });
 
 test("viewer control planes are read-only on mobile", async ({ page }) => {
@@ -493,6 +521,8 @@ test("salon owners see only their workspace experience", async ({ page }) => {
   await expect(page).toHaveURL(/\/app\/w\/client_demo$/);
 
   await page.goto("/admin");
+  await expect(page).toHaveURL(/\/app\/w\/client_demo$/);
+  await page.goto("/admin/voice-routing");
   await expect(page).toHaveURL(/\/app\/w\/client_demo$/);
 });
 

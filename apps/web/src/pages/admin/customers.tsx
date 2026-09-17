@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ChevronRight, Plus, RefreshCw, Search, ShieldAlert, Store, Users } from "lucide-react";
+import { ArrowLeft, ChevronRight, Plus, Search, Store, Users } from "lucide-react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api, formatDate, initials } from "../../lib/api";
 import { filterClients } from "../../lib/admin";
@@ -8,7 +8,7 @@ import { useClient, useToast } from "../../state";
 import { Badge, Button, Card, EmptyState, ErrorState, LinkButton, LoadingState, PageHeader, SectionHeading, statusTone } from "../../components/ui";
 import { CreditAdjustmentDialog } from "./credit-adjustment-dialog";
 import { ServiceActionDialog } from "./service-action-dialog";
-import type { ProviderBenchmarkMetrics } from "@robinexis/api-contracts";
+import { ProviderSwitchPanel } from "../../components/admin/provider-switch-panel";
 
 export function AdminCustomersPage() {
   const { clients, isLoading, error, setActiveClientId } = useClient();
@@ -69,7 +69,6 @@ export function AdminCustomersPage() {
     </Card>
   </>;
 }
-
 export function AdminCustomerDetailPage() {
   const { id } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -77,23 +76,10 @@ export function AdminCustomerDetailPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { push } = useToast();
-  const [switchTarget, setSwitchTarget] = useState<"elevenlabs-convai" | "livekit-cascade">("livekit-cascade");
-  const [switchConfirmation, setSwitchConfirmation] = useState("");
-  const [switchOperationId, setSwitchOperationId] = useState<string>();
-  const [preparedTarget, setPreparedTarget] = useState<string>();
-  const [preparedDeploymentId, setPreparedDeploymentId] = useState<string>();
-  const [baselineBenchmark, setBaselineBenchmark] = useState("");
-  const [candidateBenchmark, setCandidateBenchmark] = useState("");
   const [serviceDialog, setServiceDialog] = useState<"suspend" | "reactivate">();
   const customer = useQuery({ queryKey: ["client", id], queryFn: () => api.client(id!), enabled: Boolean(id), retry: false });
   const summary = useQuery({ queryKey: ["admin-summary"], queryFn: api.adminSummary, retry: false });
   const control = useQuery({ queryKey: ["admin-control-plane"], queryFn: api.adminControlPlane, retry: false });
-  const providerHealth = useQuery({
-    queryKey: ["provider-health", id],
-    queryFn: () => api.providerHealth(id!),
-    enabled: Boolean(id),
-    retry: false,
-  });
   const providerUsage = useQuery({
     queryKey: ["provider-usage"],
     queryFn: () => api.providerUsage(),
@@ -104,68 +90,6 @@ export function AdminCustomerDetailPage() {
     queryFn: () => api.adminAudit(id),
     enabled: Boolean(id),
     retry: false,
-  });
-  const launchGate = useQuery({
-    queryKey: ["provider-launch-gate", id, preparedDeploymentId],
-    queryFn: () => api.providerLaunchGate(id!, preparedDeploymentId!),
-    enabled: Boolean(id && preparedDeploymentId && switchTarget === "livekit-cascade"),
-    retry: false,
-  });
-  const switchStatus = useQuery({
-    queryKey: ["provider-switch-status", id, switchOperationId],
-    queryFn: () => api.providerSwitchStatus(id!, switchOperationId),
-    enabled: Boolean(id && switchOperationId),
-    retry: false,
-    refetchInterval: (query) => ["in_progress", "rollback_in_progress"].includes(query.state.data?.status || "") ? 1_500 : false,
-  });
-  const switchPreview = useMutation({
-    mutationFn: () => api.previewProviderSwitch(id!, switchTarget),
-    onError: (mutationError) => push({ title: "Preflight blocked", message: mutationError.message, tone: "error" }),
-  });
-  const prepareProvider = useMutation({
-    mutationFn: () => api.prepareProviderDeployment(id!, switchTarget),
-    onSuccess: (deployment) => {
-      setPreparedTarget(deployment.provider);
-      setPreparedDeploymentId(deployment.deploymentId);
-      switchPreview.reset();
-      push({ title: "Staged deployment prepared", message: "No live routing was changed.", tone: "success" });
-    },
-    onError: (mutationError) => push({ title: "Preparation failed", message: mutationError.message, tone: "error" }),
-  });
-  const evaluateGate = useMutation({
-    mutationFn: () => api.evaluateProviderLaunchGate(id!, {
-      deploymentId: preparedDeploymentId!,
-      candidateProvider: switchTarget,
-      source: "manual",
-      baseline: parseBenchmark(baselineBenchmark),
-      candidate: parseBenchmark(candidateBenchmark),
-    }),
-    onSuccess: async () => {
-      await launchGate.refetch();
-      switchPreview.reset();
-      push({ title: "Quality gate evaluated", message: "Benchmark evidence was stored without changing live routing.", tone: "success" });
-    },
-    onError: (mutationError) => push({ title: "Quality gate failed", message: mutationError.message, tone: "error" }),
-  });
-  const providerSwitch = useMutation({
-    mutationFn: () => api.startProviderSwitch(id!, {
-      toProvider: switchTarget,
-      idempotencyKey: crypto.randomUUID(),
-      confirmation: switchConfirmation,
-    }),
-    onSuccess: (operation) => {
-      setSwitchOperationId(operation.id);
-      push({ title: operation.status === "live" ? "Provider is live" : "Provider switch started", tone: "success" });
-    },
-    onError: (mutationError) => push({ title: "Provider switch failed", message: mutationError.message, tone: "error" }),
-  });
-  const rollbackSwitch = useMutation({
-    mutationFn: (operationId: string) => api.rollbackProviderSwitch(id!, operationId, switchConfirmation),
-    onSuccess: (operation) => {
-      setSwitchOperationId(operation.id);
-      push({ title: "Rollback requested", tone: "success" });
-    },
-    onError: (mutationError) => push({ title: "Rollback failed", message: mutationError.message, tone: "error" }),
   });
   const adjustment = useMutation({
     mutationFn: ({ minutes, reason }: { minutes: number; reason: string }) => api.adjustCredits(id!, minutes, reason, crypto.randomUUID()),
@@ -214,89 +138,7 @@ export function AdminCustomerDetailPage() {
         </dl>
         <div className="row-actions"><Button variant="secondary" disabled={serviceAction.isPending} onClick={() => setServiceDialog(client.serviceStatus === "paused" ? "reactivate" : "suspend")}>{client.serviceStatus === "paused" ? "Reactivate service" : "Suspend service"}</Button><LinkButton to={`/admin/setup/${client.id}`} variant="secondary">Setup console</LinkButton></div>
       </Card>
-      <Card className="panel">
-        <SectionHeading title="Voice provider assignment" description="ElevenLabs Premium remains the safe default. Cost Saver keeps ElevenLabs TTS but moves listening, reasoning, and turn handling to LiveKit. Blades remains protected." />
-        <dl className="detail-list">
-          <div><dt>Assigned pipeline</dt><dd>{client.voicePipeline || "Not assigned"}</dd></div>
-          <div><dt>Deployment state</dt><dd>{client.voicePipeline === "livekit-cascade" ? providerHealth.data?.status || "Unavailable" : client.elevenlabsAgentId ? "Configured" : "Unavailable"}</dd></div>
-          <div><dt>Provider health</dt><dd><Badge tone={providerHealth.data?.status === "healthy" ? "success" : "warning"}>{providerHealth.data?.status || "Unavailable"}</Badge></dd></div>
-          <div><dt>Estimated provider cost</dt><dd>{providerCost ? `£${(providerCost.estimatedCostMinor / 100).toFixed(2)} · ${providerCost.usageMinutes.toFixed(1)} min · ${providerCost.providers.join(" + ")}` : "Unavailable"}</dd></div>
-        </dl>
-        <div className="stack">
-          <label>Target provider
-            <select value={switchTarget} onChange={(event) => {
-              setSwitchTarget(event.target.value as typeof switchTarget);
-              setPreparedTarget(undefined);
-              setPreparedDeploymentId(undefined);
-              switchPreview.reset();
-            }}>
-              <option value="livekit-cascade">Cost Saver · Deepgram + Groq + ElevenLabs TTS</option>
-              <option value="elevenlabs-convai">ElevenLabs Premium · ConvAI</option>
-            </select>
-          </label>
-          <ol className="muted">
-            <li>Prepare an isolated staged deployment from the published tenant configuration.</li>
-            <li>Run read-only provider and routing preflight.</li>
-            <li>Type the confirmation and switch.</li>
-          </ol>
-          <Button variant="secondary" disabled={prepareProvider.isPending} onClick={() => prepareProvider.mutate()}>
-            1. Prepare staged deployment
-          </Button>
-          {switchTarget === "livekit-cascade" && preparedDeploymentId && <div className="stack">
-            <strong>2. Benchmark launch gate</strong>
-            <p className="muted">Enter or paste JSON benchmark evidence. Evaluation stores an immutable operator audit and never routes calls.</p>
-            <label>Baseline benchmark JSON
-              <textarea rows={10} value={baselineBenchmark} onChange={(event) => setBaselineBenchmark(event.target.value)} placeholder="Paste measured baseline JSON" />
-            </label>
-            <label>Candidate benchmark JSON
-              <textarea rows={10} value={candidateBenchmark} onChange={(event) => setCandidateBenchmark(event.target.value)} placeholder="Paste measured candidate JSON" />
-            </label>
-            <Button variant="secondary" disabled={evaluateGate.isPending} onClick={() => evaluateGate.mutate()}>
-              Evaluate and store gate
-            </Button>
-            {launchGate.data && <div className="inline-notice" role="status">
-              <strong>{launchGate.data.passed ? "Quality gate passed" : "Quality gate blocked"}</strong>
-              <small>Evaluated {formatDate(launchGate.data.evaluatedAt)}</small>
-              <ul>{launchGate.data.checks.map((check) =>
-                <li key={check.key}>{check.passed ? "✓" : "×"} {check.detail}</li>)}</ul>
-            </div>}
-          </div>}
-          <Button
-            variant="secondary"
-            disabled={switchPreview.isPending || preparedTarget !== switchTarget}
-            onClick={() => switchPreview.mutate()}
-          >
-            <ShieldAlert size={15} /> 3. Run safe-switch preflight
-          </Button>
-          {switchPreview.data && <div className="inline-notice" role="status">
-            <strong>{switchPreview.data.status === "ready" ? "Ready to switch" : "Switch blocked"}</strong>
-            <ul>{switchPreview.data.checks.map((check) => <li key={check.key}>{check.passed ? "✓" : "×"} {check.detail}</li>)}</ul>
-          </div>}
-          {switchPreview.data?.status === "ready" && <>
-            <label>Type <strong>SWITCH {client.businessName}</strong>
-              <input value={switchConfirmation} onChange={(event) => setSwitchConfirmation(event.target.value)} />
-            </label>
-            <Button
-              disabled={providerSwitch.isPending || switchConfirmation !== `SWITCH ${client.businessName}`}
-              onClick={() => providerSwitch.mutate()}
-            >4. Start provider switch</Button>
-          </>}
-          {switchStatus.data && <div className="inline-notice" role="status">
-            <strong>Status: {switchStatus.data.status.replaceAll("_", " ")}</strong>
-            {switchStatus.data.error && <p>{switchStatus.data.error}</p>}
-          </div>}
-          {switchStatus.data?.rollbackAvailable && <>
-            <label>Type <strong>ROLLBACK {client.businessName}</strong>
-              <input value={switchConfirmation} onChange={(event) => setSwitchConfirmation(event.target.value)} />
-            </label>
-            <Button
-              variant="secondary"
-              disabled={rollbackSwitch.isPending || switchConfirmation !== `ROLLBACK ${client.businessName}`}
-              onClick={() => rollbackSwitch.mutate(switchStatus.data!.id)}
-            ><RefreshCw size={15} /> Roll back provider</Button>
-          </>}
-        </div>
-      </Card>
+      <ProviderSwitchPanel client={client} providerCost={providerCost} />
     </div>
     <Card className="panel">
       <SectionHeading title="Provider resources" description="Sanitized operator inventory. Credentials and provider resource identifiers remain server-side." />
@@ -311,10 +153,4 @@ export function AdminCustomerDetailPage() {
     <CreditAdjustmentDialog customerName={client.businessName} open={searchParams.get("adjust") === "credits"} busy={adjustment.isPending} onClose={() => setSearchParams({}, { replace: true })} onSubmit={(minutes, reason) => adjustment.mutate({ minutes, reason })} />
     <ServiceActionDialog customerName={client.businessName} action={serviceDialog} busy={serviceAction.isPending} onClose={() => setServiceDialog(undefined)} onSubmit={(action, reason) => serviceAction.mutate({ action, reason })} />
   </>;
-}
-
-function parseBenchmark(value: string): ProviderBenchmarkMetrics {
-  const parsed = JSON.parse(value) as ProviderBenchmarkMetrics;
-  if (!parsed || typeof parsed !== "object") throw new Error("Benchmark must be a JSON object.");
-  return parsed;
 }
