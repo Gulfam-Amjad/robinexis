@@ -3,13 +3,17 @@ export interface VoiceRuntimeEnv {
   livekitApiKey: string;
   livekitApiSecret: string;
   deepgramApiKey: string;
-  googleApiKey: string;
-  cartesiaApiKey: string;
+  llmProvider: "groq" | "google";
+  groqApiKey?: string;
+  googleApiKey?: string;
+  groqModel: string;
+  geminiModel: string;
+  elevenLabsApiKey: string;
+  elevenLabsVoiceId: string;
+  elevenLabsTtsModel: string;
   apiBaseUrl: string;
   internalSecret: string;
   signingSecret: string;
-  cartesiaVoiceId: string;
-  geminiModel: string;
 }
 
 const REQUIRED = {
@@ -17,8 +21,8 @@ const REQUIRED = {
   LIVEKIT_API_KEY: "livekitApiKey",
   LIVEKIT_API_SECRET: "livekitApiSecret",
   DEEPGRAM_API_KEY: "deepgramApiKey",
-  GOOGLE_API_KEY: "googleApiKey",
-  CARTESIA_API_KEY: "cartesiaApiKey",
+  ELEVENLABS_API_KEY: "elevenLabsApiKey",
+  ELEVENLABS_VOICE_ID: "elevenLabsVoiceId",
   VOICE_RUNTIME_API_BASE_URL: "apiBaseUrl",
   VOICE_RUNTIME_INTERNAL_SECRET: "internalSecret",
   VOICE_RUNTIME_SIGNING_SECRET: "signingSecret",
@@ -28,15 +32,38 @@ export function loadVoiceRuntimeEnv(env: NodeJS.ProcessEnv = process.env): Voice
   if (env.VOICE_RUNTIME_ENABLED !== "true") {
     throw new Error("voice_runtime_disabled");
   }
-  const missing = Object.keys(REQUIRED).filter((name) => !env[name]?.trim());
+  const llmProvider = env.VOICE_LLM_PROVIDER?.trim().toLowerCase() || "groq";
+  if (llmProvider !== "groq" && llmProvider !== "google") {
+    throw new Error("invalid_voice_llm_provider");
+  }
+  const providerKey = llmProvider === "groq" ? "GROQ_API_KEY" : "GOOGLE_API_KEY";
+  const missing = [
+    ...Object.keys(REQUIRED).filter((name) => !env[name]?.trim()),
+    ...(!env[providerKey]?.trim() ? [providerKey] : []),
+  ];
   if (missing.length) throw new Error(`missing_voice_runtime_env:${missing.join(",")}`);
 
   const values = Object.fromEntries(
     Object.entries(REQUIRED).map(([name, key]) => [key, env[name]!.trim()]),
-  ) as unknown as Omit<VoiceRuntimeEnv, "cartesiaVoiceId" | "geminiModel">;
+  ) as unknown as Pick<
+    VoiceRuntimeEnv,
+    | "livekitUrl"
+    | "livekitApiKey"
+    | "livekitApiSecret"
+    | "deepgramApiKey"
+    | "elevenLabsApiKey"
+    | "elevenLabsVoiceId"
+    | "apiBaseUrl"
+    | "internalSecret"
+    | "signingSecret"
+  >;
   return {
     ...values,
-    cartesiaVoiceId: env.CARTESIA_VOICE_ID?.trim() || "9626c31c-bec5-4cca-baa8-f8ba9e84c8bc",
+    llmProvider,
+    groqApiKey: env.GROQ_API_KEY?.trim() || undefined,
+    googleApiKey: env.GOOGLE_API_KEY?.trim() || undefined,
+    groqModel: env.GROQ_LLM_MODEL?.trim() || "openai/gpt-oss-120b",
     geminiModel: env.GEMINI_LLM_MODEL?.trim() || "gemini-2.5-flash",
+    elevenLabsTtsModel: env.ELEVENLABS_TTS_MODEL?.trim() || "eleven_flash_v2_5",
   };
 }

@@ -24,6 +24,8 @@ export interface AgentConfigInput {
   toolIds?: readonly string[];
   transfer?: HumanTransferInput;
   noTransferFallbackPrompt?: string;
+  /** Premium tenants (Blades) keep the live voice model and longer silence. */
+  costOptimized?: boolean;
 }
 
 export interface TransferToNumberTool {
@@ -57,9 +59,25 @@ export interface ElevenLabsAgentConfig {
       };
     };
     tts?: {
-      voice_id: string;
+      voice_id?: string;
+      model_id?: string;
+    };
+    turn?: {
+      turn_timeout: number;
+      silence_end_call_timeout: number;
+    };
+    conversation?: {
+      max_duration_seconds: number;
     };
   };
+}
+
+export const COST_SAVING_TTS_MODEL = "eleven_flash_v2_5";
+
+export function elevenLabsTtsModel(costOptimized: boolean): string | undefined {
+  if (!costOptimized) return undefined;
+  const configured = process.env.ELEVENLABS_TTS_MODEL?.trim();
+  return configured || COST_SAVING_TTS_MODEL;
 }
 
 export interface BuiltAgentConfig {
@@ -154,6 +172,9 @@ export function buildElevenLabsAgentConfig(input: AgentConfigInput): BuiltAgentC
   let builtInTools: ElevenLabsAgentConfig["conversation_config"]["agent"]["prompt"]["built_in_tools"];
   let fallbackPrompt: string | undefined;
 
+  const costOptimized = input.costOptimized !== false;
+  const ttsModel = elevenLabsTtsModel(costOptimized);
+
   if (input.transfer) {
     assertE164(input.transfer.phoneNumber);
     if (
@@ -219,7 +240,20 @@ export function buildElevenLabsAgentConfig(input: AgentConfigInput): BuiltAgentC
             ...(builtInTools ? { built_in_tools: builtInTools } : {}),
           },
         },
-        ...(input.voiceId ? { tts: { voice_id: input.voiceId } } : {}),
+        ...(input.voiceId || ttsModel
+          ? {
+              tts: {
+                ...(input.voiceId ? { voice_id: input.voiceId } : {}),
+                ...(ttsModel ? { model_id: ttsModel } : {}),
+              },
+            }
+          : {}),
+        ...(costOptimized
+          ? {
+              turn: { turn_timeout: 7, silence_end_call_timeout: 12 },
+              conversation: { max_duration_seconds: 480 },
+            }
+          : {}),
       },
     },
     ...(fallbackPrompt ? { fallbackPrompt } : {}),

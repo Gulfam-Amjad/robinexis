@@ -55,7 +55,14 @@ describe("buildElevenLabsAgentConfig", () => {
       "production",
       `external-operation:${operationKey}`,
     ]);
-    expect(result.agentConfig.conversation_config.tts).toEqual({ voice_id: "voice_123" });
+    expect(result.agentConfig.conversation_config.tts).toEqual({
+      voice_id: "voice_123",
+      model_id: "eleven_flash_v2_5",
+    });
+    expect(result.agentConfig.conversation_config.turn).toEqual({
+      turn_timeout: 7,
+      silence_end_call_timeout: 12,
+    });
     expect(agent.language).toBe("en");
     expect(tool?.params.transfers).toEqual([
       {
@@ -70,6 +77,20 @@ describe("buildElevenLabsAgentConfig", () => {
       'agent_message exactly "A caller needs human assistance."',
     );
     expect(agent.prompt.prompt).toContain("Call transfer_to_number immediately");
+  });
+
+  it("leaves premium tenants on the live voice model without cheap timeouts", () => {
+    const result = buildElevenLabsAgentConfig({
+      name: "Blades receptionist",
+      firstMessage: "Hello",
+      systemPrompt: "Help.",
+      externalOperationKey: operationKey,
+      voiceId: "voice_blades",
+      costOptimized: false,
+    });
+    expect(result.agentConfig.conversation_config.tts).toEqual({ voice_id: "voice_blades" });
+    expect(result.agentConfig.conversation_config.turn).toBeUndefined();
+    expect(result.agentConfig.conversation_config.conversation).toBeUndefined();
   });
 
   it("honours an explicit condition and transfer type", () => {

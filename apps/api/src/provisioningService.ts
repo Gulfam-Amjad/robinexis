@@ -702,6 +702,7 @@ async function provisionClientAgentAttempt(
             `Robinexis receptionist transfer for ${client.businessName}. Listen for a concise summary of who is calling and why.`,
         }
       : undefined,
+    costOptimized: client.id !== BLADES_HAIR_ID,
   });
 
   let providerAgentId = agent.providerAgentId || String(output.elevenlabsAgentId || "");

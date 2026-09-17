@@ -3,6 +3,7 @@ import type { ProviderLaunchGateInput } from "@robinexis/api-contracts";
 import {
   ElevenLabsManagementClient,
   ElevenLabsVoiceProviderAdapter,
+  LiveKitSipProvisioningClient,
   LiveKitVoiceProviderAdapter,
   TwilioVoiceRoutingClient,
 } from "@robinexis/integrations";
@@ -42,9 +43,18 @@ export async function handleProviderSwitchRoute(
     process.env.TWILIO_ACCOUNT_SID || "",
     process.env.TWILIO_AUTH_TOKEN || "",
   );
+  const liveKitSip = process.env.LIVEKIT_URL &&
+    process.env.LIVEKIT_API_KEY &&
+    process.env.LIVEKIT_API_SECRET
+    ? new LiveKitSipProvisioningClient(
+      process.env.LIVEKIT_URL,
+      process.env.LIVEKIT_API_KEY,
+      process.env.LIVEKIT_API_SECRET,
+    )
+    : undefined;
   const service = new ProviderSwitchService(ctx.store, {
     "elevenlabs-convai": new ElevenLabsVoiceProviderAdapter(elevenLabs, routing),
-    "livekit-cascade": new LiveKitVoiceProviderAdapter(routing),
+    "livekit-cascade": new LiveKitVoiceProviderAdapter(routing, liveKitSip),
   });
 
   try {

@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import {
   BLADES_HAIR_ID,
   isAiServiceEnabled,
@@ -48,11 +48,20 @@ export function voiceToolClientId(
 export async function voiceToolClientIdForRequest(
   store: PlatformStore,
   header: string | string[] | undefined,
+  tenantHeader?: string | string[],
 ): Promise<string | undefined> {
   const legacy = voiceToolClientId(header);
   if (legacy) return legacy;
   const value = Array.isArray(header) ? header[0] || "" : header || "";
   if (!value) return undefined;
+  const tenantId = Array.isArray(tenantHeader) ? tenantHeader[0] || "" : tenantHeader || "";
+  const runtimeSecret = process.env.VOICE_RUNTIME_INTERNAL_SECRET || "";
+  if (tenantId && runtimeSecret) {
+    const expected = createHmac("sha256", runtimeSecret)
+      .update(`voice-tool:${tenantId}`)
+      .digest("base64url");
+    if (safeEqual(value, expected) && await store.getPublishedClient(tenantId)) return tenantId;
+  }
   const hash = createHash("sha256").update(value).digest("hex");
   const agent = await store.getAgentInstanceByVoiceCredentialHash(hash);
   return agent?.status === "active" ? agent.clientId : undefined;

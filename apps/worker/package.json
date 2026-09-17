@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsup",
-    "start": "node dist/index.js",
+    "start": "node ../../scripts/start-worker-runtime.mjs",
     "start:source": "tsx src/index.ts"
   },
   "dependencies": {

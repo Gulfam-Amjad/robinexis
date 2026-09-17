@@ -91,14 +91,16 @@ Do not restore this during an ordinary API rollback. If an emergency audio rollb
 
 The current voice rollback is safer: select the previous ElevenLabs agent version and leave Twilio routing unchanged.
 
-## Alternate LiveKit runtime (build-only, disabled)
+## Alternate LiveKit runtime (disabled until gated)
 
 `apps/voice-runtime` is an isolated LiveKit Agents worker for the `livekit-cascade`
-provider. It is not part of the active Railway IaC, is not deployed, and does not
-change Twilio, ElevenLabs, or production dispatch. It exits before creating a
-worker unless `VOICE_RUNTIME_ENABLED=true`.
+provider. On the free two-resource Railway plan it runs as a separately
+supervised process inside the existing `@robinexis/worker` service. The normal
+worker remains independent; if either process fails Railway restarts the
+service. It does not change Twilio, ElevenLabs, or production dispatch merely by
+starting, and it exits before connecting unless `VOICE_RUNTIME_ENABLED=true`.
 
-If an operator later creates a separate sandbox Railway service, use:
+For local verification use:
 
 ```bash
 npm install
@@ -107,8 +109,9 @@ npm test -w @robinexis/voice-runtime
 npm run start -w @robinexis/voice-runtime
 ```
 
-Copy only the alternate-runtime variables documented in `.env.example` to that
-service. Set `VOICE_RUNTIME_API_BASE_URL` to the authenticated API origin. The
+Copy only the alternate-runtime variables documented in `.env.example` to the
+Railway worker service (or a future dedicated runtime service). Set
+`VOICE_RUNTIME_API_BASE_URL` to the authenticated API origin. The
 API and runtime share `VOICE_RUNTIME_INTERNAL_SECRET` for published-config reads
 and `VOICE_RUNTIME_SIGNING_SECRET` for timestamped HMAC-SHA256 post-call events.
 Tenant voice-tool credentials remain server-bound in `VOICE_TOOL_SECRETS_JSON`;
@@ -135,11 +138,11 @@ latency, transcript, and tool history to
 log/transcript upload are disabled; application logs redact secrets and call
 content.
 
-Before any sandbox test, create a dedicated LiveKit dispatch with no production
-phone number attached, verify `VOICE_RUNTIME_ENABLED=false` produces a non-zero
-exit, then explicitly enable only that sandbox service. Roll back by disabling
-the variable and removing the sandbox dispatch. Production routing remains on
-Twilio → ElevenLabs until a separate cutover is approved.
+Preparing a LiveKit deployment creates/reuses a tenant-bound SIP inbound trunk
+and unique-room dispatch rule but does not change Twilio. Before any phone test,
+run a LiveKit room dispatch with no production number attached. Roll back the
+runtime by setting `VOICE_RUNTIME_ENABLED=false`; production routing remains
+Twilio → ElevenLabs until the audited provider switch is explicitly confirmed.
 
 ## Dual-provider quality rollout
 

@@ -215,7 +215,7 @@ export function AdminCustomerDetailPage() {
         <div className="row-actions"><Button variant="secondary" disabled={serviceAction.isPending} onClick={() => setServiceDialog(client.serviceStatus === "paused" ? "reactivate" : "suspend")}>{client.serviceStatus === "paused" ? "Reactivate service" : "Suspend service"}</Button><LinkButton to={`/admin/setup/${client.id}`} variant="secondary">Setup console</LinkButton></div>
       </Card>
       <Card className="panel">
-        <SectionHeading title="Voice provider assignment" description="Operator-only guarded deployment control." />
+        <SectionHeading title="Voice provider assignment" description="ElevenLabs Premium remains the safe default. Cost Saver keeps ElevenLabs TTS but moves listening, reasoning, and turn handling to LiveKit. Blades remains protected." />
         <dl className="detail-list">
           <div><dt>Assigned pipeline</dt><dd>{client.voicePipeline || "Not assigned"}</dd></div>
           <div><dt>Deployment state</dt><dd>{client.voicePipeline === "livekit-cascade" ? providerHealth.data?.status || "Unavailable" : client.elevenlabsAgentId ? "Configured" : "Unavailable"}</dd></div>
@@ -230,8 +230,8 @@ export function AdminCustomerDetailPage() {
               setPreparedDeploymentId(undefined);
               switchPreview.reset();
             }}>
-              <option value="livekit-cascade">LiveKit cascade</option>
-              <option value="elevenlabs-convai">ElevenLabs ConvAI</option>
+              <option value="livekit-cascade">Cost Saver · Deepgram + Groq + ElevenLabs TTS</option>
+              <option value="elevenlabs-convai">ElevenLabs Premium · ConvAI</option>
             </select>
           </label>
           <ol className="muted">

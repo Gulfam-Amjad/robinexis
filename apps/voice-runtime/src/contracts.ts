@@ -2,6 +2,7 @@ import type { ClientConfig } from "@robinexis/database";
 
 export interface RuntimeConfig {
   client: ClientConfig;
+  deploymentId: string;
   promptVersionId: string;
   toolSecret: string;
 }
@@ -23,8 +24,8 @@ export interface ToolHistoryItem {
 export interface NormalizedUsage {
   livekit: { roomSeconds: number };
   stt: { provider: "deepgram"; audioSeconds: number };
-  llm: { provider: "google"; inputTokens: number; outputTokens: number };
-  tts: { provider: "cartesia"; characters: number; audioSeconds: number };
+  llm: { provider: "groq" | "google"; inputTokens: number; outputTokens: number };
+  tts: { provider: "elevenlabs"; characters: number; audioSeconds: number };
 }
 
 export interface PostCallPayload {

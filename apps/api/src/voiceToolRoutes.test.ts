@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { createHash } from "node:crypto";
+import { afterEach, describe, expect, it } from "vitest";
+import { createHash, createHmac } from "node:crypto";
 import { BLADES_HAIR_ID, MemoryStore, seedStore } from "@robinexis/database";
 import { FakeCalendar } from "@robinexis/integrations";
 import {
@@ -9,6 +9,12 @@ import {
   voiceToolClientId,
   voiceToolClientIdForRequest,
 } from "./voiceToolRoutes.js";
+
+const oldRuntimeSecret = process.env.VOICE_RUNTIME_INTERNAL_SECRET;
+afterEach(() => {
+  if (oldRuntimeSecret === undefined) delete process.env.VOICE_RUNTIME_INTERNAL_SECRET;
+  else process.env.VOICE_RUNTIME_INTERNAL_SECRET = oldRuntimeSecret;
+});
 
 describe("ElevenLabs voice tool routes", () => {
   it("requires a non-empty shared secret", () => {
@@ -62,6 +68,21 @@ describe("ElevenLabs voice tool routes", () => {
 
     await expect(voiceToolClientIdForRequest(store, secret)).resolves.toBe("client_second");
     await expect(voiceToolClientIdForRequest(store, "wrong")).resolves.toBeUndefined();
+  });
+
+  it("accepts a runtime-derived credential only with its bound published tenant", async () => {
+    process.env.VOICE_RUNTIME_INTERNAL_SECRET = "runtime-internal";
+    const store = new MemoryStore();
+    await seedStore(store);
+    const credential = createHmac("sha256", "runtime-internal")
+      .update(`voice-tool:${BLADES_HAIR_ID}`)
+      .digest("base64url");
+    await expect(
+      voiceToolClientIdForRequest(store, credential, BLADES_HAIR_ID),
+    ).resolves.toBe(BLADES_HAIR_ID);
+    await expect(
+      voiceToolClientIdForRequest(store, credential, "client_second"),
+    ).resolves.toBeUndefined();
   });
 
   it("returns only calendar slots for a supported Blades service", async () => {

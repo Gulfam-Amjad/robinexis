@@ -45,11 +45,18 @@ export function verifyVoiceRuntimeSignature(
 export async function runtimeConfigFor(
   store: PlatformStore,
   tenantId: string,
+  deploymentId: string,
 ): Promise<Result> {
+  if (!deploymentId) return { status: 400, body: { error: "deployment_id_required" } };
   const client = await store.getPublishedClient(tenantId);
   if (!client) return { status: 404, body: { error: "published_tenant_not_found" } };
-  const deployment = await store.getActiveProviderDeployment(tenantId);
-  if (!deployment || deployment.provider !== "livekit-cascade" || client.voicePipeline !== "livekit-cascade") {
+  const deployment = (await store.listProviderDeployments(tenantId))
+    .find((item) => item.id === deploymentId);
+  const staged = deployment?.provider === "livekit-cascade" && deployment.status === "staged";
+  const active = deployment?.provider === "livekit-cascade" &&
+    deployment.status === "active" &&
+    client.voicePipeline === "livekit-cascade";
+  if (!deployment || (!staged && !active)) {
     return { status: 403, body: { error: "livekit_not_active_for_tenant" } };
   }
   const toolSecret = toolSecretFor(client);
@@ -69,10 +76,15 @@ function toolSecretFor(client: ClientConfig): string | undefined {
   if (process.env.VOICE_TOOL_SECRET && client.id === BLADES_HAIR_ID) return process.env.VOICE_TOOL_SECRET;
   try {
     const secrets = JSON.parse(process.env.VOICE_TOOL_SECRETS_JSON || "{}") as Record<string, string>;
-    return secrets[client.id] || undefined;
+    if (secrets[client.id]) return secrets[client.id];
   } catch {
-    return undefined;
+    // Fall through to the runtime-derived tenant credential.
   }
+  const runtimeSecret = process.env.VOICE_RUNTIME_INTERNAL_SECRET;
+  if (!runtimeSecret) return undefined;
+  return createHmac("sha256", runtimeSecret)
+    .update(`voice-tool:${client.id}`)
+    .digest("base64url");
 }
 
 export async function ingestVoiceRuntimePostCall(
@@ -161,13 +173,59 @@ export async function ingestVoiceRuntimePostCall(
 }
 
 function usageEvents(payload: RuntimePostCall): ProviderUsageCostEvent[] {
-  const values: Array<[string, number, ProviderUsageCostEvent["usageUnit"], Record<string, unknown>]> = [
-    ["livekit", payload.usage.livekit.roomSeconds, "seconds", {}],
-    ["stt", payload.usage.stt.audioSeconds, "seconds", { provider: payload.usage.stt.provider }],
-    ["llm", payload.usage.llm.inputTokens + payload.usage.llm.outputTokens, "tokens", payload.usage.llm],
-    ["tts", payload.usage.tts.characters, "characters", payload.usage.tts],
+  const livekitRate = rate("LIVEKIT_COST_PER_MINUTE_PENCE");
+  const sttRate = rate("DEEPGRAM_COST_PER_MINUTE_PENCE");
+  const llmInputRate = rate(
+    payload.usage.llm.provider === "groq"
+      ? "GROQ_INPUT_COST_PER_MILLION_TOKENS_PENCE"
+      : "GEMINI_INPUT_COST_PER_MILLION_TOKENS_PENCE",
+  );
+  const llmOutputRate = rate(
+    payload.usage.llm.provider === "groq"
+      ? "GROQ_OUTPUT_COST_PER_MILLION_TOKENS_PENCE"
+      : "GEMINI_OUTPUT_COST_PER_MILLION_TOKENS_PENCE",
+  );
+  const ttsRate = rate("ELEVENLABS_TTS_COST_PER_MILLION_CHARACTERS_PENCE");
+  const values: Array<[
+    string,
+    number,
+    ProviderUsageCostEvent["usageUnit"],
+    number,
+    Record<string, unknown>,
+  ]> = [
+    [
+      "livekit",
+      payload.usage.livekit.roomSeconds,
+      "seconds",
+      perMinuteCost(payload.usage.livekit.roomSeconds, livekitRate),
+      { ratePerMinutePence: livekitRate },
+    ],
+    [
+      "stt",
+      payload.usage.stt.audioSeconds,
+      "seconds",
+      perMinuteCost(payload.usage.stt.audioSeconds, sttRate),
+      { provider: payload.usage.stt.provider, ratePerMinutePence: sttRate },
+    ],
+    [
+      "llm",
+      payload.usage.llm.inputTokens + payload.usage.llm.outputTokens,
+      "tokens",
+      Math.round(
+        payload.usage.llm.inputTokens * llmInputRate / 1_000_000 +
+        payload.usage.llm.outputTokens * llmOutputRate / 1_000_000,
+      ),
+      { ...payload.usage.llm, inputRatePerMillionPence: llmInputRate, outputRatePerMillionPence: llmOutputRate },
+    ],
+    [
+      "tts",
+      payload.usage.tts.characters,
+      "characters",
+      Math.round(payload.usage.tts.characters * ttsRate / 1_000_000),
+      { ...payload.usage.tts, ratePerMillionCharactersPence: ttsRate },
+    ],
   ];
-  return values.map(([component, quantity, unit, metadata]) => ({
+  return values.map(([component, quantity, unit, costMinor, metadata]) => ({
     id: `usage_${createHash("sha256").update(`${payload.callId}:${component}`).digest("hex").slice(0, 24)}`,
     clientId: payload.tenantId,
     provider: "livekit-cascade",
@@ -176,11 +234,25 @@ function usageEvents(payload: RuntimePostCall): ProviderUsageCostEvent[] {
     occurredAt: payload.endedAt,
     usageQuantity: quantity,
     usageUnit: unit,
-    costMinor: 0,
+    costMinor,
     currency: "GBP",
-    metadata: { component, ...metadata },
+    metadata: {
+      component,
+      estimated: true,
+      rateConfigured: Object.values(metadata).some((value) => typeof value === "number" && value > 0),
+      ...metadata,
+    },
     createdAt: payload.endedAt,
   }));
+}
+
+function rate(name: string): number {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+function perMinuteCost(seconds: number, ratePerMinutePence: number): number {
+  return Math.round(seconds / 60 * ratePerMinutePence);
 }
 
 function expectedCallId(tenantId: string, providerJobId: string): string {
@@ -221,7 +293,7 @@ type RuntimePostCall = {
   usage: {
     livekit: { roomSeconds: number };
     stt: { provider: "deepgram"; audioSeconds: number };
-    llm: { provider: "google"; inputTokens: number; outputTokens: number };
-    tts: { provider: "cartesia"; characters: number; audioSeconds: number };
+    llm: { provider: "groq" | "google"; inputTokens: number; outputTokens: number };
+    tts: { provider: "elevenlabs"; characters: number; audioSeconds: number };
   };
 };

@@ -30,13 +30,15 @@ export {
   reconcileStripe,
 } from "./stripe.js";
 export {
+  cheapVoiceDefaultEnabled,
+  defaultVoicePipeline,
   featureOperationallyAvailable,
   isPlanTier,
   planCatalog,
   planDefinition,
   planHasFeature,
 } from "./plans.js";
-export type { PlanDefinition, PlanFeature, PlanTier } from "./plans.js";
+export type { DefaultVoicePipeline, PlanDefinition, PlanFeature, PlanTier } from "./plans.js";
 export { inCallingWindow, COMPLIANCE_NOTES } from "./compliance.js";
 export { placeOutboundCall, twilioClient, validateTwilioWebhook } from "./twilioOutbound.js";
 export {
@@ -128,10 +130,19 @@ export type {
   ProviderAdapterContext,
   ProviderAdapterHealth,
   ProviderRouteSnapshot,
+  LiveKitSipProvisioner,
   TwilioVoiceRoute,
   TwilioVoiceRouting,
   VoiceProviderAdapter,
 } from "./voiceProviderAdapters.js";
+export {
+  LIVEKIT_RUNTIME_AGENT_NAME,
+  LiveKitSipProvisioningClient,
+} from "./liveKitSipProvisioning.js";
+export type {
+  LiveKitSipRoute,
+  LiveKitSipRouteInput,
+} from "./liveKitSipProvisioning.js";
 export {
   FirecrawlWebsiteClient,
   WEBSITE_EXTRACTOR_VERSION,

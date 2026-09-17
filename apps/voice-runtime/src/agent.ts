@@ -1,7 +1,8 @@
 import { defineAgent, AgentSessionEventTypes, voice } from "@livekit/agents";
-import * as cartesia from "@livekit/agents-plugin-cartesia";
 import * as deepgram from "@livekit/agents-plugin-deepgram";
+import * as elevenlabs from "@livekit/agents-plugin-elevenlabs";
 import * as google from "@livekit/agents-plugin-google";
+import * as openai from "@livekit/agents-plugin-openai";
 import { compilePrompt, redactSensitiveText } from "@robinexis/brain";
 import type { PostCallPayload, TranscriptItem } from "./contracts.js";
 import { loadVoiceRuntimeEnv } from "./env.js";
@@ -15,13 +16,14 @@ export default defineAgent({
   entry: async (ctx) => {
     const env = loadVoiceRuntimeEnv();
     const metadata = parseJobMetadata(ctx.job.metadata);
-    const callId = stableCallId(metadata);
+    const providerJobId = ctx.job.id;
+    const callId = stableCallId(metadata.tenantId, providerJobId);
     const api = new RuntimeApiClient(
       env.apiBaseUrl,
       env.internalSecret,
       env.signingSecret,
     );
-    const config = await api.getPublishedConfig(metadata.tenantId);
+    const config = await api.getPublishedConfig(metadata.tenantId, metadata.deploymentId);
     const startedAt = new Date();
     const toolHistory: PostCallPayload["toolHistory"] = [];
     const latency: PostCallPayload["latency"] = {};
@@ -35,16 +37,23 @@ export default defineAgent({
         smartFormat: true,
         redact: ["pci"],
       }),
-      llm: new google.LLM({
-        apiKey: env.googleApiKey,
-        model: env.geminiModel,
-        toolChoice: "auto",
-      }),
-      tts: new cartesia.TTS({
-        apiKey: env.cartesiaApiKey,
-        model: "sonic-3",
-        voice: env.cartesiaVoiceId,
+      llm: env.llmProvider === "groq"
+        ? openai.LLM.withGroq({
+          apiKey: env.groqApiKey,
+          model: env.groqModel,
+          temperature: 0.2,
+        })
+        : new google.LLM({
+          apiKey: env.googleApiKey!,
+          model: env.geminiModel,
+          toolChoice: "auto",
+        }),
+      tts: new elevenlabs.TTS({
+        apiKey: env.elevenLabsApiKey,
+        model: env.elevenLabsTtsModel,
+        voiceId: env.elevenLabsVoiceId,
         language: "en",
+        enableLogging: false,
       }),
       maxToolSteps: 5,
     });
@@ -60,7 +69,7 @@ export default defineAgent({
         provider: "livekit-cascade",
         callId,
         tenantId: metadata.tenantId,
-        providerJobId: metadata.providerJobId,
+        providerJobId,
         direction: metadata.direction,
         objective: metadata.objective,
         promptVersionId: config.promptVersionId,
@@ -70,7 +79,7 @@ export default defineAgent({
         transcript: transcriptFromSession(session),
         toolHistory,
         latency,
-        usage: normalizedUsage(session.usage.modelUsage, durationSeconds),
+        usage: normalizedUsage(session.usage.modelUsage, durationSeconds, env.llmProvider),
       };
       try {
         await api.sendPostCall(payload);
@@ -92,6 +101,7 @@ export default defineAgent({
         }),
         tools: createToolBridge({
           apiBaseUrl: env.apiBaseUrl,
+          tenantId: metadata.tenantId,
           toolSecret: config.toolSecret,
           callId,
           history: toolHistory,

@@ -132,19 +132,38 @@ export class ProviderSwitchService {
       status: "staged",
       config: input.provider === "elevenlabs-convai"
         ? await this.elevenLabsPreparation(client, existing)
-        : this.liveKitPreparation(client, input.livekit, existing),
+        : await this.liveKitPreparation(client, input.livekit, existing),
       createdAt: existing?.createdAt || now,
       updatedAt: now,
     };
     if (input.provider === "livekit-cascade") {
       deployment.providerDeploymentId = input.livekit?.providerDeploymentId ||
         existing?.providerDeploymentId ||
-        process.env.LIVEKIT_DEPLOYMENT_ID;
+        process.env.LIVEKIT_DEPLOYMENT_ID ||
+        deployment.id;
     }
-    const health = await this.adapters[input.provider].health(
+    let health = await this.adapters[input.provider].health(
       this.context(client, deployment, `prepare:${deployment.id}`),
     );
     if (!health.healthy) throw new Error(`provider_prepare_preflight_failed:${health.checks.filter((item) => !item.passed).map((item) => item.key).join(",")}`);
+    if (input.provider === "livekit-cascade") {
+      if (!deployment.config.suspendVoiceUrl && health.routeSnapshot?.route) {
+        deployment.config = {
+          ...deployment.config,
+          suspendVoiceUrl: health.routeSnapshot.route,
+        };
+      }
+      const provisioned = await this.adapters[input.provider].provision(
+        this.context(client, deployment, `prepare:${deployment.id}:sip`),
+      );
+      deployment.providerDeploymentId = provisioned.providerDeploymentId;
+      health = await this.adapters[input.provider].health(
+        this.context(client, deployment, `prepare:${deployment.id}:post-sip`),
+      );
+      if (!health.healthy) {
+        throw new Error(`provider_prepare_preflight_failed:${health.checks.filter((item) => !item.passed).map((item) => item.key).join(",")}`);
+      }
+    }
     await this.store.upsertProviderDeployment(deployment);
     await this.store.appendOperatorAudit({
       id: newId("audit_"),
@@ -568,6 +587,7 @@ export class ProviderSwitchService {
           humanOperatorSummaryMessage: "Incoming caller requesting assistance.",
         },
       } : {}),
+      costOptimized: client.id !== BLADES_HAIR_ID,
     });
     return {
       ...existing?.config,
@@ -580,36 +600,43 @@ export class ProviderSwitchService {
     };
   }
 
-  private liveKitPreparation(
+  private async liveKitPreparation(
     client: ClientConfig,
     provided: PrepareProviderInput["livekit"],
     existing?: ProviderDeployment,
   ) {
+    const twilioEndpoint = (await this.store.listPhoneEndpoints(client.id)).find((item) =>
+      item.provider === "twilio" && item.status === "active" && item.direction !== "outbound");
     const phoneNumberId = provided?.phoneNumberId ||
       String(existing?.config.phoneNumberId || "") ||
+      twilioEndpoint?.providerEndpointId ||
       process.env.LIVEKIT_PHONE_NUMBER_ID ||
       "";
     const ingressKind = provided?.ingressKind ||
       (process.env.LIVEKIT_SIP_URI ? "sip_uri" : "twilio_voice_url");
     const providerDeploymentId = provided?.providerDeploymentId ||
       existing?.providerDeploymentId ||
-      process.env.LIVEKIT_DEPLOYMENT_ID;
-    if (!providerDeploymentId) throw new Error("livekit_deployment_id_missing");
+      process.env.LIVEKIT_DEPLOYMENT_ID ||
+      existing?.id ||
+      `livekit-${client.id}`;
+    const twilioVoiceUrl = liveKitTwilioVoiceUrl(client.id, provided);
     return {
       ...existing?.config,
       tenantId: client.id,
       promptVersionId: client.promptVersionId,
       phoneNumberId,
-      suspendVoiceUrl: provided?.suspendVoiceUrl || process.env.LIVEKIT_SUSPEND_VOICE_URL,
+      suspendVoiceUrl: provided?.suspendVoiceUrl ||
+        process.env.LIVEKIT_SUSPEND_VOICE_URL ||
+        process.env.ELEVENLABS_TWILIO_VOICE_URL,
       ingress: ingressKind === "sip_uri"
         ? {
           kind: "sip_uri",
           sipUri: provided?.sipUri || process.env.LIVEKIT_SIP_URI,
-          twilioVoiceUrl: provided?.twilioVoiceUrl || process.env.LIVEKIT_TWILIO_VOICE_URL,
+          twilioVoiceUrl,
         }
         : {
           kind: "twilio_voice_url",
-          voiceUrl: provided?.voiceUrl || process.env.LIVEKIT_TWILIO_VOICE_URL,
+          voiceUrl: twilioVoiceUrl,
         },
       preparedFromPublishedConfig: true,
       providerDeploymentId,
@@ -638,6 +665,28 @@ export class ProviderSwitchService {
       rollbackAvailable: operation.status === "succeeded" && Boolean(operation.rollbackSnapshotId),
     };
   }
+}
+
+function liveKitTwilioVoiceUrl(
+  tenantId: string,
+  provided: PrepareProviderInput["livekit"],
+): string | undefined {
+  const explicit = provided?.twilioVoiceUrl || provided?.voiceUrl;
+  if (explicit) return explicit;
+  const configured = process.env.LIVEKIT_TWILIO_VOICE_URL?.trim();
+  if (configured) {
+    if (configured.includes("{tenantId}")) {
+      return configured.replaceAll("{tenantId}", encodeURIComponent(tenantId));
+    }
+    const url = new URL(configured);
+    url.searchParams.set("tenantId", tenantId);
+    return url.toString();
+  }
+  const base = process.env.API_PUBLIC_BASE_URL?.trim();
+  if (!base) return undefined;
+  const url = new URL("/webhooks/twilio/livekit-inbound", base);
+  url.searchParams.set("tenantId", tenantId);
+  return url.toString();
 }
 
 function activeProvider(deployment?: ProviderDeployment): ActiveVoiceProvider | undefined {

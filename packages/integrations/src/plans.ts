@@ -140,3 +140,16 @@ export function featureOperationallyAvailable(feature: PlanFeature): boolean {
   }
   return true;
 }
+
+export type DefaultVoicePipeline = "elevenlabs-convai" | "livekit-cascade";
+
+/** Cheap cascade is only the Starter default when the LiveKit runtime is actually on. */
+export function cheapVoiceDefaultEnabled(): boolean {
+  return process.env.CHEAP_VOICE_DEFAULT_ENABLED === "true"
+    && process.env.VOICE_RUNTIME_ENABLED === "true";
+}
+
+export function defaultVoicePipeline(tier: PlanTier): DefaultVoicePipeline {
+  if (cheapVoiceDefaultEnabled() && tier === "starter") return "livekit-cascade";
+  return "elevenlabs-convai";
+}

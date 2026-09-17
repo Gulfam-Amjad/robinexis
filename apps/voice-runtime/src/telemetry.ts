@@ -1,7 +1,11 @@
 import type { AgentMetrics, ModelUsage } from "@livekit/agents";
 import type { NormalizedUsage, PostCallPayload } from "./contracts.js";
 
-export function normalizedUsage(modelUsage: Array<Partial<ModelUsage>>, durationSeconds: number): NormalizedUsage {
+export function normalizedUsage(
+  modelUsage: Array<Partial<ModelUsage>>,
+  durationSeconds: number,
+  llmProvider: "groq" | "google" = "groq",
+): NormalizedUsage {
   const stt = modelUsage.filter((item) => item.type === "stt_usage");
   const llm = modelUsage.filter((item) => item.type === "llm_usage");
   const tts = modelUsage.filter((item) => item.type === "tts_usage");
@@ -12,12 +16,12 @@ export function normalizedUsage(modelUsage: Array<Partial<ModelUsage>>, duration
       audioSeconds: sum(stt, "audioDurationMs") / 1000,
     },
     llm: {
-      provider: "google",
+      provider: llmProvider,
       inputTokens: sum(llm, "inputTokens"),
       outputTokens: sum(llm, "outputTokens"),
     },
     tts: {
-      provider: "cartesia",
+      provider: "elevenlabs",
       characters: sum(tts, "charactersCount"),
       audioSeconds: sum(tts, "audioDurationMs") / 1000,
     },

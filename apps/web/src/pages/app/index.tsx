@@ -831,7 +831,7 @@ export function PlaygroundPage() {
       <PageHeader
         eyebrow="Test call"
         title="Hear your receptionist before customers do"
-        description={`Test the same ${demoConfig.businessName} conversation your callers hear, without leaving Robinexis.`}
+        description={`Test the same ${demoConfig.businessName} conversation your callers hear. Keep tests short — this uses the live voice connection.`}
         actions={demoConfig.sharePath ? <Link className="button button-secondary button-md" to={demoConfig.sharePath} target="_blank">Open public demo <Link2 size={15} /></Link> : undefined}
       />
       <div className="receptionist-test-layout">
@@ -844,6 +844,7 @@ export function PlaygroundPage() {
             <div className="team-row"><Users /><div><strong>Ask for a person</strong><small>{client.data.transferNumber ? "Confirm the handoff feels natural" : "See how the receptionist handles a human request"}</small></div></div>
           </div>
           <LinkButton to={workspacePath(activeClientId, "receptionist/edit")} variant="secondary">Improve receptionist</LinkButton>
+          <p className="muted">Finish the test as soon as you have heard enough. Long playground calls burn the same voice minutes as a real customer.</p>
         </Card>
       </div>
     </>

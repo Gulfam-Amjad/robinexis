@@ -4,7 +4,7 @@ import {
   type PlatformStore,
   type UserProfile,
 } from "@robinexis/database";
-import { calcomSharedAccountEnabled, planDefinition, type PlanTier } from "@robinexis/integrations";
+import { calcomSharedAccountEnabled, defaultVoicePipeline, planDefinition, type PlanTier } from "@robinexis/integrations";
 import type { AuthenticatedActor } from "./auth.js";
 
 export function writableClientId(actor: AuthenticatedActor): string | undefined {
@@ -112,7 +112,7 @@ async function uniqueSkeletonClient(
     email,
     transferNumber: "",
     voiceId: process.env.ELEVENLABS_VOICE_ID || "",
-    voicePipeline: "elevenlabs-convai",
+    voicePipeline: defaultVoicePipeline(plan),
     services: [],
     staff: [],
     policies: [],

@@ -238,6 +238,8 @@ export class ElevenLabsVoiceProviderAdapter implements VoiceProviderAdapter {
 type LiveKitTelephonyConfig = {
   phoneNumberId?: string;
   suspendVoiceUrl?: string;
+  sipTrunkId?: string;
+  sipDispatchRuleId?: string;
   ingress?: {
     kind?: "twilio_voice_url" | "sip_uri";
     voiceUrl?: string;
@@ -246,16 +248,26 @@ type LiveKitTelephonyConfig = {
   };
 };
 
+export interface LiveKitSipProvisioner {
+  ensureInboundRoute(input: {
+    tenantId: string;
+    deploymentId: string;
+    phoneNumber: string;
+  }): Promise<{ trunkId: string; dispatchRuleId: string; sipUri: string }>;
+}
+
 export class LiveKitVoiceProviderAdapter implements VoiceProviderAdapter {
   readonly provider = "livekit-cascade" as const;
 
-  constructor(private readonly routing: TwilioVoiceRouting) {}
+  constructor(
+    private readonly routing: TwilioVoiceRouting,
+    private readonly sip?: LiveKitSipProvisioner,
+  ) {}
 
   private config(context: ProviderAdapterContext): Required<Pick<LiveKitTelephonyConfig, "ingress" | "phoneNumberId">> {
     const config = context.deployment.config as LiveKitTelephonyConfig;
     const ingress = config.ingress;
     if (!config.phoneNumberId) throw new Error("livekit_phone_number_id_missing");
-    if (!validHttps(config.suspendVoiceUrl)) throw new Error("livekit_suspend_voice_url_invalid");
     if (!ingress?.kind) throw new Error("livekit_ingress_missing");
     if (ingress.kind === "twilio_voice_url" && !validHttps(ingress.voiceUrl)) {
       throw new Error("livekit_twilio_voice_url_invalid");
@@ -291,10 +303,17 @@ export class LiveKitVoiceProviderAdapter implements VoiceProviderAdapter {
             : "Twilio VoiceUrl is readable and will be snapshotted before switching.",
       });
       if (config.ingress.kind === "sip_uri") {
+        const deploymentConfig = context.deployment.config as LiveKitTelephonyConfig;
+        const provisioned = Boolean(
+          deploymentConfig.sipTrunkId &&
+          deploymentConfig.sipDispatchRuleId,
+        );
         checks.push({
           key: "external_sip_ingress",
-          passed: false,
-          detail: "External SIP ingress cannot be independently verified by this adapter.",
+          passed: provisioned,
+          detail: provisioned
+            ? "LiveKit SIP trunk and dispatch rule identifiers are persisted."
+            : "LiveKit SIP trunk or dispatch rule identifier is missing.",
         });
       }
     } catch (error) {
@@ -315,9 +334,29 @@ export class LiveKitVoiceProviderAdapter implements VoiceProviderAdapter {
   }
 
   async provision(context: ProviderAdapterContext) {
-    this.config(context);
-    if (!context.deployment.providerDeploymentId) throw new Error("livekit_deployment_id_missing");
-    return { providerDeploymentId: context.deployment.providerDeploymentId };
+    const { phoneNumberId } = this.config(context);
+    if (!this.sip) {
+      if (!context.deployment.providerDeploymentId) throw new Error("livekit_deployment_id_missing");
+      return { providerDeploymentId: context.deployment.providerDeploymentId };
+    }
+    const route = await this.routing.inspect(phoneNumberId);
+    if (!route.phoneNumber) throw new Error("twilio_phone_number_missing");
+    const provisioned = await this.sip.ensureInboundRoute({
+      tenantId: context.client.id,
+      deploymentId: context.deployment.id,
+      phoneNumber: route.phoneNumber,
+    });
+    const config = context.deployment.config as LiveKitTelephonyConfig;
+    const twilioVoiceUrl = config.ingress?.twilioVoiceUrl || config.ingress?.voiceUrl;
+    config.sipTrunkId = provisioned.trunkId;
+    config.sipDispatchRuleId = provisioned.dispatchRuleId;
+    config.ingress = {
+      ...config.ingress,
+      kind: "sip_uri",
+      sipUri: provisioned.sipUri,
+      twilioVoiceUrl,
+    };
+    return { providerDeploymentId: provisioned.dispatchRuleId };
   }
 
   async route(context: ProviderAdapterContext): Promise<ProviderRouteSnapshot> {
@@ -337,6 +376,7 @@ export class LiveKitVoiceProviderAdapter implements VoiceProviderAdapter {
   async suspend(context: ProviderAdapterContext) {
     const config = context.deployment.config as LiveKitTelephonyConfig;
     const { phoneNumberId } = this.config(context);
+    if (!validHttps(config.suspendVoiceUrl)) throw new Error("livekit_suspend_voice_url_invalid");
     await this.routing.setVoiceUrl(phoneNumberId, config.suspendVoiceUrl!);
     const suspended = await this.routing.inspect(phoneNumberId);
     if (suspended.voiceUrl !== config.suspendVoiceUrl) throw new Error("livekit_suspend_verification_failed");

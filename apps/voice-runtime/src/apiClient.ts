@@ -13,9 +13,10 @@ export class RuntimeApiClient {
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
-  async getPublishedConfig(tenantId: string): Promise<RuntimeConfig> {
+  async getPublishedConfig(tenantId: string, deploymentId: string): Promise<RuntimeConfig> {
+    const query = new URLSearchParams({ deploymentId });
     const response = await this.fetchImpl(
-      `${this.baseUrl.replace(/\/$/, "")}/internal/voice-runtime/config/${encodeURIComponent(tenantId)}`,
+      `${this.baseUrl.replace(/\/$/, "")}/internal/voice-runtime/config/${encodeURIComponent(tenantId)}?${query}`,
       { headers: { "x-voice-runtime-secret": this.internalSecret } },
     );
     if (!response.ok) throw new Error(`runtime_config_failed:${response.status}`);

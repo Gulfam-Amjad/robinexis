@@ -11,12 +11,14 @@ const builds = {
   api: ["run", "build:api"],
   worker: ["run", "build:worker"],
   web: ["run", "build:web"],
+  "voice-runtime": ["run", "typecheck:voice-runtime"],
 };
 
 const starts = {
   api: ["run", "start", "-w", "@robinexis/api"],
-  worker: ["run", "start", "-w", "@robinexis/worker"],
+  worker: ["run", "start:worker-runtime"],
   web: ["run", "start", "-w", "@robinexis/web"],
+  "voice-runtime": ["run", "start", "-w", "@robinexis/voice-runtime"],
 };
 
 const artifacts = {
@@ -89,6 +91,7 @@ function inferService() {
   if (builds[explicit]) return explicit;
   const name = (process.env.RAILWAY_SERVICE_NAME || "").toLowerCase();
   if (name.includes("worker")) return "worker";
+  if (name.includes("voice-runtime") || name.includes("voice_runtime")) return "voice-runtime";
   if (name.includes("web")) return "web";
   if (name.includes("api")) return "api";
   return "";
@@ -123,7 +126,7 @@ if (action === "predeploy") {
 
 if (!service) {
   console.error(
-    "railway.mjs: cannot tell which service to build. Set RAILWAY_BUILD_TARGET to api, worker, or web.",
+    "railway.mjs: cannot tell which service to build. Set RAILWAY_BUILD_TARGET to api, worker, web, or voice-runtime.",
   );
   process.exit(1);
 }
@@ -132,6 +135,7 @@ console.log(`railway.mjs: ${action} ${service}`);
 
 function ensureBuilt() {
   const artifact = artifacts[service];
+  if (!artifact) return;
   if (artifact && existsSync(path.join(root, artifact))) return;
   if (restoreStash() && artifact && existsSync(path.join(root, artifact))) return;
   console.error(`railway.mjs: ${artifact} missing and stash empty — refusing to tsup at runtime (OOM on hobby)`);
@@ -146,6 +150,9 @@ if (action === "start") {
 
 ensureInstall();
 run(builds[service]);
+if (service === "worker" && process.env.VOICE_RUNTIME_ENABLED === "true") {
+  run(["run", "typecheck:voice-runtime"]);
+}
 if (service === "api") {
   run(["run", "build:migrate"]);
   cpSync(

@@ -70,6 +70,18 @@ const services = {
     CALCOM_API_KEY: value("CALCOM_API_KEY"),
     CALCOM_USERNAME: value("CALCOM_USERNAME", "admin"),
     VOICE_TOOL_SECRET: value("VOICE_TOOL_SECRET"),
+    VOICE_TOOL_SECRETS_JSON: value("VOICE_TOOL_SECRETS_JSON", "{}"),
+    VOICE_RUNTIME_INTERNAL_SECRET: value("VOICE_RUNTIME_INTERNAL_SECRET"),
+    VOICE_RUNTIME_SIGNING_SECRET: value("VOICE_RUNTIME_SIGNING_SECRET"),
+    PROVIDER_SWITCH_ENABLED: value("PROVIDER_SWITCH_ENABLED", "false"),
+    PROVIDER_SWITCH_ROUTING_ENABLED: value("PROVIDER_SWITCH_ROUTING_ENABLED", "false"),
+    PROVIDER_QUALITY_EVALUATION_ENABLED: value("PROVIDER_QUALITY_EVALUATION_ENABLED", "false"),
+    CHEAP_VOICE_DEFAULT_ENABLED: value("CHEAP_VOICE_DEFAULT_ENABLED", "false"),
+    LIVEKIT_DEPLOYMENT_ID: value("LIVEKIT_DEPLOYMENT_ID", ""),
+    LIVEKIT_PHONE_NUMBER_ID: value("LIVEKIT_PHONE_NUMBER_ID", ""),
+    LIVEKIT_TWILIO_VOICE_URL: value("LIVEKIT_TWILIO_VOICE_URL", ""),
+    LIVEKIT_SIP_URI: value("LIVEKIT_SIP_URI", ""),
+    LIVEKIT_SUSPEND_VOICE_URL: value("LIVEKIT_SUSPEND_VOICE_URL", ""),
     WEB_ORIGIN: value("WEB_ORIGIN", "https://app.robinexis.com,https://robinexis-pink.vercel.app"),
     ADMIN_EMAILS: value("ADMIN_EMAILS"),
     SUPABASE_URL: supabaseUrl(),
@@ -84,6 +96,43 @@ const services = {
     RAILWAY_BUILD_TARGET: "worker",
     WORKER_POLL_MS: value("WORKER_POLL_MS", "15000"),
     DATA_RETENTION_DAYS: value("DATA_RETENTION_DAYS", "90"),
+    VOICE_RUNTIME_ENABLED: value("VOICE_RUNTIME_ENABLED", "false"),
+    VOICE_RUNTIME_API_BASE_URL: value("VOICE_RUNTIME_API_BASE_URL", "https://api.robinexis.com"),
+    VOICE_RUNTIME_INTERNAL_SECRET: value("VOICE_RUNTIME_INTERNAL_SECRET"),
+    VOICE_RUNTIME_SIGNING_SECRET: value("VOICE_RUNTIME_SIGNING_SECRET"),
+    LIVEKIT_URL: value("LIVEKIT_URL"),
+    LIVEKIT_API_KEY: value("LIVEKIT_API_KEY"),
+    LIVEKIT_API_SECRET: value("LIVEKIT_API_SECRET"),
+    DEEPGRAM_API_KEY: value("DEEPGRAM_API_KEY"),
+    VOICE_LLM_PROVIDER: value("VOICE_LLM_PROVIDER", "groq"),
+    GROQ_API_KEY: value("GROQ_API_KEY"),
+    GROQ_LLM_MODEL: value("GROQ_LLM_MODEL", "openai/gpt-oss-120b"),
+    GOOGLE_API_KEY: value("GOOGLE_API_KEY", ""),
+    GEMINI_LLM_MODEL: value("GEMINI_LLM_MODEL", "gemini-2.5-flash"),
+    ELEVENLABS_API_KEY: value("ELEVENLABS_API_KEY"),
+    ELEVENLABS_VOICE_ID: value("ELEVENLABS_VOICE_ID"),
+    ELEVENLABS_TTS_MODEL: value("ELEVENLABS_TTS_MODEL", "eleven_flash_v2_5"),
+  },
+  "voice-runtime": {
+    NODE_ENV: "production",
+    NODE_VERSION: "24",
+    RAILWAY_BUILD_TARGET: "voice-runtime",
+    VOICE_RUNTIME_ENABLED: "true",
+    VOICE_RUNTIME_API_BASE_URL: value("VOICE_RUNTIME_API_BASE_URL", "https://api.robinexis.com"),
+    VOICE_RUNTIME_INTERNAL_SECRET: value("VOICE_RUNTIME_INTERNAL_SECRET"),
+    VOICE_RUNTIME_SIGNING_SECRET: value("VOICE_RUNTIME_SIGNING_SECRET"),
+    LIVEKIT_URL: value("LIVEKIT_URL"),
+    LIVEKIT_API_KEY: value("LIVEKIT_API_KEY"),
+    LIVEKIT_API_SECRET: value("LIVEKIT_API_SECRET"),
+    DEEPGRAM_API_KEY: value("DEEPGRAM_API_KEY"),
+    VOICE_LLM_PROVIDER: value("VOICE_LLM_PROVIDER", "groq"),
+    GROQ_API_KEY: value("GROQ_API_KEY"),
+    GROQ_LLM_MODEL: value("GROQ_LLM_MODEL", "openai/gpt-oss-120b"),
+    GOOGLE_API_KEY: value("GOOGLE_API_KEY", ""),
+    GEMINI_LLM_MODEL: value("GEMINI_LLM_MODEL", "gemini-2.5-flash"),
+    ELEVENLABS_API_KEY: value("ELEVENLABS_API_KEY"),
+    ELEVENLABS_VOICE_ID: value("ELEVENLABS_VOICE_ID"),
+    ELEVENLABS_TTS_MODEL: value("ELEVENLABS_TTS_MODEL", "eleven_flash_v2_5"),
   },
 };
 
@@ -105,7 +154,7 @@ for (const [name, vars] of Object.entries(services)) {
 }
 writeFileSync(path.join(outDir, "vercel.env"), serialize(vercel));
 
-console.log("railway-vars: wrote .railway-vars/{api,worker,vercel}.env");
+console.log("railway-vars: wrote .railway-vars/{api,worker,voice-runtime,vercel}.env");
 console.log("Paste each file into the matching service's Variables -> Raw Editor (ENV tab).");
 if (missing.size) {
   console.log("\nStill needs a real value (left empty):");

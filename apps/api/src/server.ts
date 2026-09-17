@@ -34,6 +34,7 @@ import {
   voiceRuntimeAuthorized,
 } from "./voiceRuntimeRoutes.js";
 import { initializeBackendTelemetry } from "./telemetry.js";
+import { liveKitInboundTwiml } from "./liveKitTelephonyRoutes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 loadEnv({ path: path.resolve(__dirname, "../../../.env") });
@@ -191,7 +192,11 @@ const server = http.createServer(async (req, res) => {
         send(res, 401, { error: "unauthorized" });
         return;
       }
-      const result = await runtimeConfigFor(store, decodeURIComponent(runtimeConfigMatch[1]));
+      const result = await runtimeConfigFor(
+        store,
+        decodeURIComponent(runtimeConfigMatch[1]),
+        url.searchParams.get("deploymentId") || "",
+      );
       send(res, result.status, result.body);
       return;
     }
@@ -204,6 +209,21 @@ const server = http.createServer(async (req, res) => {
         String(req.headers["x-voice-runtime-signature"] || ""),
       );
       send(res, result.status, result.body);
+      return;
+    }
+    if (url.pathname === "/webhooks/twilio/livekit-inbound" && req.method === "POST") {
+      const raw = await readRaw(req);
+      const form = new URLSearchParams(raw.toString());
+      const params = Object.fromEntries(form.entries());
+      const signature = String(req.headers["x-twilio-signature"] ?? "");
+      const signedUrl = `${process.env.API_PUBLIC_BASE_URL || `https://${req.headers.host}`}${url.pathname}${url.search}`;
+      if (!validateTwilioWebhook(signature, signedUrl, params)) {
+        send(res, 403, { error: "invalid_signature" });
+        return;
+      }
+      const tenantId = url.searchParams.get("tenantId") || "";
+      const result = await liveKitInboundTwiml(store, tenantId);
+      send(res, result.status, result.body, "application/xml");
       return;
     }
     if (url.pathname === "/webhooks/twilio/number-status" && req.method === "POST") {
@@ -318,6 +338,7 @@ const server = http.createServer(async (req, res) => {
       const authorizedClientId = await voiceToolClientIdForRequest(
         store,
         req.headers["x-voice-tool-secret"],
+        req.headers["x-voice-tool-tenant"],
       );
       if (!authorizedClientId) {
         send(res, 401, { ok: false, error: "unauthorized" });

@@ -4,6 +4,7 @@ import type { ToolHistoryItem } from "./contracts.js";
 
 export interface ToolBridgeOptions {
   apiBaseUrl: string;
+  tenantId: string;
   toolSecret: string;
   callId: string;
   history: ToolHistoryItem[];
@@ -37,6 +38,7 @@ export function createToolBridge(options: ToolBridgeOptions): FunctionTool<any>[
             headers: {
               "content-type": "application/json",
               "x-voice-tool-secret": options.toolSecret,
+              "x-voice-tool-tenant": options.tenantId,
             },
             body: JSON.stringify(input),
           },
