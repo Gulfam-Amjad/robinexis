@@ -67,8 +67,8 @@ CREATE TABLE IF NOT EXISTS call_notes (
 CREATE TABLE IF NOT EXISTS usage_counters (
   client_id TEXT NOT NULL,
   month TEXT NOT NULL,
-  inbound_minutes INT NOT NULL DEFAULT 0,
-  outbound_minutes INT NOT NULL DEFAULT 0,
+  inbound_minutes NUMERIC(12,4) NOT NULL DEFAULT 0,
+  outbound_minutes NUMERIC(12,4) NOT NULL DEFAULT 0,
   PRIMARY KEY (client_id, month)
 );
 
