@@ -1,8 +1,11 @@
 import { spawn } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const commands = [
-  { executable: process.execPath, args: ["apps/worker/dist/index.js"] },
+  { executable: process.execPath, args: [path.join(root, "apps/worker/dist/index.js")] },
 ];
 if (process.env.VOICE_RUNTIME_ENABLED === "true") {
   commands.push({
@@ -12,6 +15,7 @@ if (process.env.VOICE_RUNTIME_ENABLED === "true") {
 }
 
 const children = commands.map(({ executable, args }) => spawn(executable, args, {
+  cwd: root,
   stdio: "inherit",
   env: process.env,
   shell: process.platform === "win32",
