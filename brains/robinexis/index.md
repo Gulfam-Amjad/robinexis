@@ -16,7 +16,7 @@ The catalogue of this brain. Every page below is a link + one-line summary. **Re
 ## Production
 
 - [[brains/robinexis/outputs/production/PLATFORM|PLATFORM]] — self-hosted Twilio + Groq + ElevenLabs TTS platform; live ElevenLabs salon agent is fallback only.
-- [[brains/robinexis/wiki/source-2026-08-29-production-architecture|Production architecture confirmation]] — Groq/Groq/ElevenLabs runtime and publishing constraints.
+- [[brains/robinexis/wiki/source-2026-08-29-production-architecture|Production architecture confirmation]] — ElevenLabs Premium plus the dark LiveKit/Deepgram/Groq/ElevenLabs Cost Saver runtime and publishing constraints.
 
 ## Sources
 *(one summary page per ingested raw document)*

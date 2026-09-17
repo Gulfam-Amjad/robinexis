@@ -62,3 +62,4 @@ Grep the recent history with: `grep "^## \[" log.md | tail -10`
 - All nine greeting, rushed-caller, facts, disclosure, phone and booking-tool gates passed across the final staging runs.
 - Verified Cal.com booking `dVokNc7HjqvjyA8w87Kw4H` was idempotent across duplicate requests, then cancelled immediately.
 - Removed the Railway raw-audio/WebSocket/Groq gateway and outbound worker route from the active codebase. Railway gateway service `652fb60c-b080-4129-a2f8-806ed68046a0` remains preserved with its deployment stopped and GitHub source disconnected; API `/health` and authenticated booking REST tools remain active.
+## [2026-09-17] deploy | Added dark Cost Saver runtime: LiveKit + Deepgram STT + Groq brain + ElevenLabs Flash TTS; room/config/post-call tests passed, while Blades routing and cheap defaults remain off because no sandbox Twilio number exists
