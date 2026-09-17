@@ -10,6 +10,7 @@ const required = [
   "LIVEKIT_URL",
   "LIVEKIT_API_KEY",
   "LIVEKIT_API_SECRET",
+  "VOICE_RUNTIME_INTERNAL_SECRET",
 ];
 const missing = [
   ...required.filter((name) => !process.env[name]?.trim()),
@@ -52,6 +53,30 @@ try {
      VALUES ($1, $2, 'livekit-cascade', 'staged', '{}'::jsonb, now(), now())`,
     [deploymentId, tenantId],
   );
+  const apiBaseUrl = process.env.API_PUBLIC_BASE_URL || "https://api.robinexis.com";
+  const configResponse = await fetch(
+    `${apiBaseUrl}/internal/voice-runtime/config/${encodeURIComponent(tenantId)}?deploymentId=${encodeURIComponent(deploymentId)}`,
+    { headers: { "x-voice-runtime-secret": process.env.VOICE_RUNTIME_INTERNAL_SECRET } },
+  );
+  if (!configResponse.ok) throw new Error(`runtime_config_smoke_failed:${configResponse.status}`);
+  const runtimeConfig = await configResponse.json();
+  const toolResponse = await fetch(`${apiBaseUrl}/api/v1/voice-tools/get-business-info`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-voice-tool-secret": runtimeConfig.toolSecret,
+      "x-voice-tool-tenant": tenantId,
+    },
+    body: JSON.stringify({
+      conversationId: `call_tool_smoke_${suffix}`,
+      topic: "hours",
+    }),
+  });
+  const toolBody = await toolResponse.text();
+  if (toolResponse.status === 401 || toolResponse.status === 404) {
+    throw new Error(`runtime_tool_smoke_failed:${toolResponse.status}:${toolBody.slice(0, 300)}`);
+  }
+  const toolStatus = toolResponse.ok ? "ok" : `authorized_business_block_${toolResponse.status}`;
   await rooms.createRoom({
     name: roomName,
     emptyTimeout: 120,
@@ -87,7 +112,7 @@ try {
       `SELECT payload FROM call_sessions
        WHERE client_id = $1
          AND updated_at >= $2::timestamptz
-         AND payload->>'provider' = 'livekit-cascade'
+         AND payload->'collected'->>'provider' = 'livekit-cascade'
        ORDER BY updated_at DESC LIMIT 1`,
       [tenantId, startedAt],
     );
@@ -99,6 +124,8 @@ try {
     tenantId,
     roomName,
     agentParticipants: participants.length,
+    configAuth: "ok",
+    providerTool: toolStatus,
     callId: call.id,
     callStatus: call.status,
   }));
