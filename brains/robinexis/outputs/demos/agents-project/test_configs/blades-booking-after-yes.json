@@ -1,0 +1,32 @@
+{
+  "name": "Blades booking only after yes",
+  "type": "tool",
+  "chat_history": [
+    {
+      "message": "You have read back the returned Tuesday 8 September 3pm slot for full-head highlights from £135 with anyone, for Gultham Amjad on 07446 860 675, and asked for confirmation. Yes, please book it.",
+      "role": "user",
+      "time_in_call_secs": 9
+    }
+  ],
+  "success_condition": "The agent calls blades_create_booking only after the caller's yes and passes callerConfirmed=true with the known slot, name and mobile.",
+  "success_examples": [
+    {
+      "type": "success",
+      "response": "Lovely, I'll book that now."
+    }
+  ],
+  "failure_examples": [
+    {
+      "type": "failure",
+      "response": "Would you like to confirm?"
+    }
+  ],
+  "tool_call_parameters": {
+    "parameters": [],
+    "referenced_tool": {
+      "id": "tool_2601m1c3133bfty8z3sd8fyt7aaf",
+      "type": "webhook"
+    },
+    "verify_absence": false
+  }
+}

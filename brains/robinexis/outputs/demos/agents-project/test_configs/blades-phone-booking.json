@@ -1,0 +1,34 @@
+{
+  "name": "Blades phone booking",
+  "type": "llm",
+  "chat_history": [
+    {
+      "message": "I've chosen Tuesday at 3pm for a standard appointment with anyone; you've already checked that slot.",
+      "role": "user",
+      "time_in_call_secs": 1
+    },
+    {
+      "message": "Lovely. May I take your full name and mobile?",
+      "role": "agent",
+      "time_in_call_secs": 2
+    },
+    {
+      "message": "Gultham Amjad, zero three four two, four four three, two four one one. I don't want to give an email.",
+      "role": "user",
+      "time_in_call_secs": 8
+    }
+  ],
+  "success_condition": "The agent accepts the complete Pakistan mobile without demanding email, repeats all digits once in natural groups, and asks for explicit booking confirmation without mentioning E.164, area code or a US +1 example.",
+  "success_examples": [
+    {
+      "type": "success",
+      "response": "Thank you—that's zero three four two, four four three, two four one one. Shall I confirm Tuesday at 3pm for you?"
+    }
+  ],
+  "failure_examples": [
+    {
+      "type": "failure",
+      "response": "I need a full number with area code, for example +1 555 123 4567, and your email before I can continue."
+    }
+  ]
+}

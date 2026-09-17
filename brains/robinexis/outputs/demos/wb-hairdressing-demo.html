@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WB Hairdressing — Demo</title>
+<style>
+  :root { --ink:#1b1f24; --muted:#7c848d; --line:#e6e9ed; --accent:#9a7b4f; --bg:#f4f2ee; --band:#ece6dc; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+         color:var(--ink); background:var(--bg); -webkit-font-smoothing:antialiased; }
+  .hero { background:linear-gradient(160deg,#e8e1d4 0%,#f4f2ee 62%); padding:56px 24px 30px; text-align:center; }
+  .wrap { max-width:740px; margin:0 auto; padding:0 24px 150px; }
+  .hero .wrap { padding-bottom:0; }
+  .tag { font-size:12px; letter-spacing:.22em; text-transform:uppercase; color:var(--accent); font-weight:600; }
+  h1 { font-size:42px; margin:10px 0 6px; letter-spacing:-.015em; font-weight:600; }
+  .sub { font-style:italic; color:var(--muted); margin:0 0 6px; font-size:17px; }
+  .quote { color:var(--ink); font-size:15px; max-width:480px; margin:14px auto 0; line-height:1.5; opacity:.78; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:16px; padding:24px 26px; margin-top:16px;
+          box-shadow:0 1px 0 rgba(0,0,0,.02); }
+  h2 { font-size:13px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted);
+       margin:0 0 16px; font-weight:600; }
+  .pills { display:flex; flex-wrap:wrap; gap:9px; }
+  .pill { background:var(--band); border:1px solid #ddd2bf; color:#6d5735; border-radius:999px;
+          padding:7px 15px; font-size:14.5px; }
+  .row { display:flex; justify-content:space-between; align-items:baseline;
+         padding:11px 0; border-bottom:1px solid #f1eeea; font-size:16px; gap:16px; }
+  .row:last-child { border-bottom:0; }
+  .row span:first-child { color:var(--muted); }
+  .hours { display:grid; grid-template-columns:1fr auto; gap:8px 16px; font-size:16px; }
+  .hours .d { color:var(--muted); }
+  .hours .closed { color:#b06a63; }
+  .note { background:#f1eae0; border:1px solid #e4d8c4; border-radius:16px;
+          padding:18px 22px; font-size:14.5px; line-height:1.6; color:#65503a; margin-top:18px; }
+  .note b { color:#54432f; }
+  a { color:inherit; }
+  footer { text-align:center; color:var(--muted); font-size:13px; margin-top:28px; }
+</style>
+</head>
+<body>
+  <div class="hero">
+    <div class="wrap">
+      <div class="tag">WB Hairdressing</div>
+      <h1>London's Square Mile</h1>
+      <p class="sub">The city's friendliest hair salon</p>
+      <p class="quote">The number one go-to salon in the Square Mile — men's &amp; ladies' cutting, styling and grooming, with a complimentary shoe shine while you wait.</p>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="card">
+      <h2>Services</h2>
+      <div class="pills">
+        <span class="pill">Men's Cuts &amp; Trims</span>
+        <span class="pill">Ladies' Cuts</span>
+        <span class="pill">Restyling</span>
+        <span class="pill">Colour</span>
+        <span class="pill">Blowdry</span>
+        <span class="pill">Updos</span>
+        <span class="pill">Beard Shaping</span>
+        <span class="pill">Grey Coverage</span>
+        <span class="pill">Aesthetic Treatments</span>
+        <span class="pill">Shoe Shine</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Men's — priced by service</h2>
+      <div class="row"><span>Cut, wash &amp; finish</span><span>£40</span></div>
+      <div class="row"><span>Cut, wash, finish &amp; beard trim</span><span>£60</span></div>
+      <div class="row"><span>Cut, finish &amp; camouflage (grey coverage)</span><span>£65</span></div>
+      <div class="row"><span>Clipper cut — No.1</span><span>£20</span></div>
+      <div class="row"><span>Clipper cut — No.2</span><span>£25</span></div>
+      <div class="row"><span>Clipper cut &amp; beard trim</span><span>£40</span></div>
+      <div class="row"><span>Back &amp; sides only</span><span>£30</span></div>
+      <div class="row"><span>Beard trimming</span><span>£20</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Ladies' — priced by hair length</h2>
+      <div class="row"><span>Blow dry — short / medium / long</span><span>£40 · £50 · £60</span></div>
+      <div class="row"><span>Cut &amp; blow dry — short / medium / long</span><span>£70 · £80 · £90</span></div>
+      <div class="row"><span>Fringe trim (free with a blow dry)</span><span>£20</span></div>
+      <div class="row"><span>Hair up — from / full</span><span>£60 · £80</span></div>
+      <div class="row"><span>Intensive treatment (Olaplex &amp; masks)</span><span>£50</span></div>
+      <p style="color:var(--muted);font-size:13.5px;margin:14px 0 0;line-height:1.5;">Ladies' services take longer for longer, thicker hair — short ~45 mins, medium ~1 hr, long ~1 hr 15. Colour is priced on the day.</p>
+    </div>
+
+    <div class="card">
+      <h2>Opening Hours</h2>
+      <div class="hours">
+        <span class="d">Monday – Friday</span><span>8am – 7pm</span>
+        <span class="d">Saturday – Sunday</span><span class="closed">Closed</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Find Us</h2>
+      <div class="row"><span>Address</span><span>Unit 4 Citypoint, 1 Ropemaker Street, London EC2Y 9HR</span></div>
+      <div class="row"><span>Phone</span><span>020 7628 6565</span></div>
+      <div class="row"><span>Nearest</span><span>Moorgate · Bank · Liverpool Street</span></div>
+      <div class="row"><span>Booking</span><span>Online via Fresha, or by phone</span></div>
+    </div>
+
+    <div class="note">
+      <b>Try the voice agent →</b> tap the widget in the corner and talk to it like a customer.
+      Ask what services they offer, book a men's cut for Thursday morning, or see what happens
+      when you call after they've closed for the evening. It only knows what's published on this
+      page — it won't invent prices or availability.
+    </div>
+
+    <footer>Voice agent demo built by Robinexis</footer>
+  </div>
+
+  <elevenlabs-convai agent-id="agent_3201kyj62sn7f83ry55cae883qws"></elevenlabs-convai>
+  <script src="https://unpkg.com/@elevenlabs/convai-widget-embed" async type="text/javascript"></script>
+</body>
+</html>

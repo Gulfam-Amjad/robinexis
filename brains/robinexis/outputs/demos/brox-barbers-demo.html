@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brox Barbers — Demo</title>
+<style>
+  :root { --ink:#14171a; --muted:#767d84; --line:#e7e9ec; --accent:#b08d57; --bg:#f6f4f1; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+         color:var(--ink); background:var(--bg); -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:740px; margin:0 auto; padding:48px 24px 150px; }
+  .tag { font-size:12px; letter-spacing:.16em; text-transform:uppercase; color:var(--accent); font-weight:600; }
+  h1 { font-size:36px; margin:8px 0 4px; letter-spacing:-.02em; }
+  .sub { font-style:italic; color:var(--muted); margin:0 0 8px; }
+  .rating { color:var(--muted); font-size:15px; margin-bottom:28px; }
+  .rating b { color:var(--ink); }
+  .card { background:#fff; border:1px solid var(--line); border-radius:14px; padding:22px 24px; margin-bottom:16px; }
+  h2 { font-size:13px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted);
+       margin:0 0 14px; font-weight:600; }
+  .row { display:flex; justify-content:space-between; align-items:baseline;
+         padding:10px 0; border-bottom:1px solid #f2f0ec; font-size:16px; gap:16px; }
+  .row:last-child { border-bottom:0; }
+  .row span:last-child { text-align:right; color:var(--muted); font-size:15px; }
+  .price { font-weight:600; white-space:nowrap; color:var(--ink)!important; font-size:15px; }
+  .note { background:#f8f2e9; border:1px solid #eaddc2; border-radius:14px;
+          padding:16px 20px; font-size:14.5px; line-height:1.55; color:#5c4a2c; }
+  a { color:inherit; }
+  footer { text-align:center; color:var(--muted); font-size:13px; margin-top:26px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="tag">City of London</div>
+    <h1>Brox Barbers</h1>
+    <p class="sub">Expert men's barbering · Fenchurch Street, EC3</p>
+    <div class="rating">Sharp, clean finishes · <b>Walk-ins welcome, booking recommended</b></div>
+
+    <div class="card">
+      <h2>Pricing</h2>
+      <div class="row"><span>Hair cut</span><span class="price">£33</span></div>
+      <div class="row"><span>Skin fade</span><span class="price">£37</span></div>
+      <div class="row"><span>Buzz cut</span><span class="price">£23</span></div>
+      <div class="row"><span>Beard trim</span><span class="price">£23</span></div>
+      <div class="row"><span>Hair &amp; beard</span><span class="price">£56</span></div>
+      <div class="row"><span>Full service</span><span class="price">£74</span></div>
+      <div class="row"><span>Threading</span><span class="price">£12</span></div>
+      <div class="row"><span>Hot wax</span><span class="price">£12</span></div>
+      <div class="row"><span>Face mask</span><span class="price">£12</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Find Us</h2>
+      <div class="row"><span>Location</span><span>Fenchurch Street, City of London</span></div>
+      <div class="row"><span>Nearest stations</span><span>Bank · Tower Hill</span></div>
+      <div class="row"><span>Phone</span><span>020 7623 1474</span></div>
+      <div class="row"><span>Email</span><span>broxbarbers@gmail.com</span></div>
+    </div>
+
+    <div class="note">
+      <b>Try the voice agent →</b> tap the widget in the corner and talk to it like a customer.
+      Ask what a skin fade costs, book a hair &amp; beard for Thursday, or ask where they are.
+      It only knows what's published here — it quotes the real prices but won't invent
+      opening hours or availability.
+    </div>
+
+    <footer>Voice agent demo built by Robinexis</footer>
+  </div>
+
+  <elevenlabs-convai agent-id="agent_0001kyj4r6vte97brttbdm61tw4f"></elevenlabs-convai>
+  <script src="https://unpkg.com/@elevenlabs/convai-widget-embed" async type="text/javascript"></script>
+</body>
+</html>

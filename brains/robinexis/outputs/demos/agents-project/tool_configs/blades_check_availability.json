@@ -1,0 +1,51 @@
+{
+  "type": "webhook",
+  "name": "blades_check_availability",
+  "description": "Check Blades Hair's live Cal.com diary. Always use this before offering an appointment time. Offer only slots returned by this tool.",
+  "response_timeout_secs": 8,
+  "disable_interruptions": false,
+  "interruption_mode": "allow",
+  "force_pre_tool_speech": false,
+  "pre_tool_speech": "auto",
+  "tool_error_handling_mode": "auto",
+  "execution_mode": "immediate",
+  "assignments": [],
+  "dynamic_variables": {
+    "dynamic_variable_placeholders": {}
+  },
+  "api_schema": {
+    "kind": "webhook",
+    "url": "https://robinexisapi-production-3836.up.railway.app/api/v1/voice-tools/check-availability",
+    "method": "POST",
+    "request_headers": {
+      "Content-Type": "application/json",
+      "x-voice-tool-secret": {
+        "secret_id": "eNg0wv6GeHSD9kDcT9J7"
+      }
+    },
+    "request_body_schema": {
+      "type": "object",
+      "description": "Requested service and date range.",
+      "properties": {
+        "eventTypeSlug": {
+          "type": "string",
+          "enum": ["15min", "30min"],
+          "description": "15min for consultation/short visit; 30min for standard appointment."
+        },
+        "start": {
+          "type": "string",
+          "description": "ISO 8601 start of the requested search range."
+        },
+        "end": {
+          "type": "string",
+          "description": "ISO 8601 end of the requested search range, no more than 14 days after start."
+        },
+        "conversationId": {
+          "type": "string",
+          "dynamic_variable": "system__conversation_id"
+        }
+      },
+      "required": ["eventTypeSlug", "start", "end", "conversationId"]
+    }
+  }
+}

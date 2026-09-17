@@ -1,0 +1,51 @@
+{
+  "name": "Blades availability tool",
+  "type": "tool",
+  "chat_history": [
+    {
+      "message": "Can I have a standard 30-minute appointment next Tuesday afternoon?",
+      "role": "user",
+      "time_in_call_secs": 1
+    }
+  ],
+  "success_condition": "The agent calls blades_check_availability before offering any time.",
+  "success_examples": [
+    {
+      "type": "success",
+      "response": "Certainly—let me check Tuesday afternoon for you."
+    }
+  ],
+  "failure_examples": [
+    {
+      "type": "failure",
+      "response": "Yes, I can book you at 3pm without checking."
+    }
+  ],
+  "tool_call_parameters": {
+    "parameters": [
+      {
+        "path": "eventTypeSlug",
+        "eval": {
+          "type": "anything"
+        }
+      },
+      {
+        "path": "start",
+        "eval": {
+          "type": "anything"
+        }
+      },
+      {
+        "path": "end",
+        "eval": {
+          "type": "anything"
+        }
+      }
+    ],
+    "referenced_tool": {
+      "id": "tool_1601m1c1vbdheaptfewv2sxnb9q4",
+      "type": "webhook"
+    },
+    "verify_absence": false
+  }
+}

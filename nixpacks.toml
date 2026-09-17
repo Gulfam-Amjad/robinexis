@@ -1,0 +1,17 @@
+[variables]
+NIXPACKS_NODE_VERSION = "24"
+# Keep npm's cache off the Railway bind-mount at node_modules/.cache.
+# npm ci rmdirs that mount and fails with EBUSY (errno -16).
+NPM_CONFIG_CACHE = "/tmp/npm-cache"
+
+[phases.install]
+cmds = ["npm install --include=dev --no-audit --no-fund"]
+
+# Nixpacks recopies the git tree after build, which drops dist/. Start
+# rebuilds if needed; keep the compiled trees in the build cache too.
+[phases.build]
+cacheDirectories = [
+  "apps/api/dist",
+  "apps/worker/dist",
+  "packages/database/dist",
+]

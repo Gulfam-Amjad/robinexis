@@ -1,0 +1,24 @@
+{
+  "name": "Blades price before personal details",
+  "type": "llm",
+  "chat_history": [
+    {
+      "message": "I'd like full-head highlights with anyone next Tuesday.",
+      "role": "user",
+      "time_in_call_secs": 1
+    }
+  ],
+  "success_condition": "Before asking for a name, mobile or email, the response says full-head highlights are FROM £135, explains the final price is confirmed at consultation, and asks whether the caller is happy to continue.",
+  "success_examples": [
+    {
+      "type": "success",
+      "response": "Full-head highlights are from £135, with the final price confirmed at consultation. Are you happy for me to check next Tuesday?"
+    }
+  ],
+  "failure_examples": [
+    {
+      "type": "failure",
+      "response": "Certainly. What's your full name and mobile?"
+    }
+  ]
+}

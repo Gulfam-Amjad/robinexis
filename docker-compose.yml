@@ -1,0 +1,31 @@
+# Local Postgres + Redis for the production platform. Do not use for real customer secrets.
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: robinexis
+      POSTGRES_PASSWORD: robinexis
+      POSTGRES_DB: robinexis
+    # 5432 is often taken by a native Postgres install on developer machines.
+    ports:
+      - "5433:5432"
+    volumes:
+      - robinexis_pgvector:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U robinexis"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  robinexis_pgvector:

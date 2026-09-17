@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jonny's Place — Demo</title>
+<style>
+  :root { --ink:#231f1c; --muted:#8a807a; --line:#ece5df; --accent:#a67c52; --bg:#f5f1ea; --blush:#efe4d6; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+         color:var(--ink); background:var(--bg); -webkit-font-smoothing:antialiased; }
+  .hero { background:linear-gradient(160deg,#ece0d1 0%,#f5f1ea 60%); padding:56px 24px 30px; text-align:center; }
+  .wrap { max-width:740px; margin:0 auto; padding:0 24px 150px; }
+  .hero .wrap { padding-bottom:0; }
+  .tag { font-size:12px; letter-spacing:.22em; text-transform:uppercase; color:var(--accent); font-weight:600; }
+  h1 { font-size:40px; margin:10px 0 6px; letter-spacing:-.015em; font-weight:600; }
+  .sub { font-style:italic; color:var(--muted); margin:0 0 6px; font-size:17px; }
+  .quote { color:var(--ink); font-size:15px; max-width:470px; margin:14px auto 0; line-height:1.5; opacity:.75; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:16px; padding:24px 26px; margin-top:16px;
+          box-shadow:0 1px 0 rgba(0,0,0,.02); }
+  h2 { font-size:13px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted);
+       margin:0 0 16px; font-weight:600; }
+  .pills { display:flex; flex-wrap:wrap; gap:9px; }
+  .pill { background:var(--blush); border:1px solid #e3d1bd; color:#7a5734; border-radius:999px;
+          padding:7px 15px; font-size:14.5px; }
+  .row { display:flex; justify-content:space-between; align-items:baseline;
+         padding:11px 0; border-bottom:1px solid #f4efea; font-size:16px; gap:16px; }
+  .row:last-child { border-bottom:0; }
+  .row span:first-child { color:var(--muted); }
+  .note { background:#f6eadd; border:1px solid #ead6bf; border-radius:16px;
+          padding:18px 22px; font-size:14.5px; line-height:1.6; color:#6b4a2f; margin-top:18px; }
+  .note b { color:#5a3c24; }
+  a { color:inherit; }
+  footer { text-align:center; color:var(--muted); font-size:13px; margin-top:28px; }
+</style>
+</head>
+<body>
+  <div class="hero">
+    <div class="wrap">
+      <div class="tag">Jonny's Place</div>
+      <h1>Hair &amp; Well-being</h1>
+      <p class="sub">An intimate space for hair and well-being</p>
+      <p class="quote">"Professional care from start to finish, crafted with love" — cuts, colour, grooming &amp; holistic treatments, a two-minute walk from Liverpool Street.</p>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="card">
+      <h2>Gents</h2>
+      <div class="row"><span>Gentlemen's Haircut, Wash &amp; Style · 30 min</span><span>from £47</span></div>
+      <div class="row"><span>New Intro Gents Haircut &amp; Style with Alina · 30 min</span><span>£40</span></div>
+      <div class="row"><span>Haircut &amp; Beard Combo · 45 min</span><span>£60</span></div>
+      <div class="row"><span>Gentleman's Colour · 30 min</span><span>£50</span></div>
+      <div class="row"><span>Face Shave with Foil · 30 min</span><span>£23</span></div>
+      <div class="row"><span>Beard Trim · 15 min</span><span>£23</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Ladies</h2>
+      <div class="row"><span>Long Hair Haircut &amp; Styling · 1 hr</span><span>from £87</span></div>
+      <div class="row"><span>Shoulder–Medium Haircut &amp; Styling · 1 hr</span><span>from £77</span></div>
+      <div class="row"><span>Short Crop Cut · 45 min</span><span>from £65</span></div>
+      <div class="row"><span>Short/Med Blow Dry or Hot-Tools · 45 min</span><span>from £42</span></div>
+      <div class="row"><span>Long Hair Blow Dry or Hot Tools · 45 min</span><span>from £47</span></div>
+      <div class="row"><span>Colour, roots or all over · 1 hr</span><span>from £80</span></div>
+      <div class="row"><span>Half Head Highlights · 2 hrs</span><span>from £165</span></div>
+      <div class="row"><span>Full Head Highlights / Balayage / Ombré · 2.5 hrs</span><span>from £205</span></div>
+      <div class="row"><span>Students &amp; NHS</span><span>15% off</span></div>
+    </div>
+
+    <div class="card">
+      <h2>The Team</h2>
+      <div class="row"><span>Jonny</span><span>Director</span></div>
+      <div class="row"><span>Alina</span><span>Stylist</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Find Us</h2>
+      <div class="row"><span>Address</span><span>5 Devonshire Square, London EC2M 4AE</span></div>
+      <div class="row"><span>Phone</span><span>+44 7841 590 695</span></div>
+      <div class="row"><span>Email</span><span>hello@jonnysplace.co.uk</span></div>
+      <div class="row"><span>Booking</span><span>Online via Booksy, or just ask</span></div>
+    </div>
+
+    <div class="note">
+      <b>Try the voice agent →</b> tap the widget in the corner and talk to it like a customer.
+      Ask what a cut costs, book a colour for Saturday morning, or see what happens when you call
+      after they've closed. It only knows what's published on this page — it won't invent prices or availability.
+    </div>
+
+    <footer>Voice agent demo built by Robinexis</footer>
+  </div>
+
+  <elevenlabs-convai agent-id="agent_9901kyj68e93etxs5pe4zp7mka3w"></elevenlabs-convai>
+  <script src="https://unpkg.com/@elevenlabs/convai-widget-embed" async type="text/javascript"></script>
+</body>
+</html>

@@ -1,0 +1,63 @@
+{
+  "name": "robinexis-aios",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "workspaces": [
+    "apps/api",
+    "apps/voice-runtime",
+    "apps/web",
+    "apps/worker",
+    "packages/api-contracts",
+    "packages/brain",
+    "packages/database",
+    "packages/evaluations",
+    "packages/integrations",
+    "packages/knowledge",
+    "packages/tool-contracts"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "test:web": "vitest run --config vitest.web.config.ts",
+    "test:e2e": "playwright test",
+    "typecheck": "tsc -p tsconfig.json && npm run typecheck -w @robinexis/web",
+    "build:web": "npm run check:csp-api-origin && npm run build -w @robinexis/web",
+    "build:api": "npm run build -w @robinexis/api",
+    "build:worker": "npm run build -w @robinexis/worker",
+    "build:migrate": "npm run build:migrate -w @robinexis/database",
+    "build:backend": "npm run build:api && npm run build:worker && npm run build:migrate",
+    "build": "npm run typecheck && npm run build:web && npm run build:backend",
+    "verify": "npm run build && npm test && npm run test:web",
+    "dev:web": "npm run dev -w @robinexis/web",
+    "dev:api": "npm run dev -w @robinexis/api",
+    "dev:worker": "npm run dev -w @robinexis/worker",
+    "dev:voice-runtime": "npm run dev -w @robinexis/voice-runtime",
+    "start:worker-runtime": "node scripts/start-worker-runtime.mjs",
+    "typecheck:voice-runtime": "npm run typecheck -w @robinexis/voice-runtime",
+    "test:voice-runtime": "npm test -w @robinexis/voice-runtime",
+    "db:migrate": "tsx packages/database/src/migrate.cli.ts",
+    "db:seed": "tsx packages/database/src/seed.ts",
+    "check:calcom": "tsx packages/integrations/src/verifyCalendar.ts",
+    "check:brain": "tsx packages/brain/src/verifyBrain.ts",
+    "measure:elevenlabs": "node scripts/measure-elevenlabs-capacity.mjs",
+    "check:voice-runtime": "node scripts/voice-runtime-readiness.mjs",
+    "check:secrets": "node scripts/scan-secrets.mjs",
+    "check:csp-api-origin": "node scripts/verify-csp-api-origin.mjs",
+    "test:csp-api-origin": "node --test scripts/verify-csp-api-origin.test.mjs",
+    "backup:postgres": "node scripts/backup-postgres.mjs"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@exodus/bytes": "^1.15.1",
+    "@playwright/test": "^1.62.1",
+    "jsdom": "^30.0.1",
+    "railway": "^3.11.0",
+    "tsup": "^8.5.0",
+    "tsx": "4.23.12",
+    "typescript": "5.9.3",
+    "vitest": "^3.2.4",
+    "ws": "^8.21.3"
+  }
+}

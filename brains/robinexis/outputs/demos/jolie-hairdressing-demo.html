@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jolie Hairdressing — Demo</title>
+<style>
+  :root { --ink:#2a2320; --muted:#9a8f86; --line:#efe9e3; --accent:#b08d57; --bg:#faf6f1; --blush:#f4ece2; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+         color:var(--ink); background:var(--bg); -webkit-font-smoothing:antialiased; }
+  .hero { background:linear-gradient(160deg,#efe1cf 0%,#faf6f1 64%); padding:56px 24px 30px; text-align:center; }
+  .wrap { max-width:740px; margin:0 auto; padding:0 24px 150px; }
+  .hero .wrap { padding-bottom:0; }
+  .tag { font-size:12px; letter-spacing:.24em; text-transform:uppercase; color:var(--accent); font-weight:700; }
+  h1 { font-size:42px; margin:10px 0 6px; letter-spacing:-.015em; font-weight:700; }
+  .sub { font-style:italic; color:var(--muted); margin:0 0 6px; font-size:17px; }
+  .quote { color:var(--ink); font-size:15px; max-width:480px; margin:14px auto 0; line-height:1.5; opacity:.78; }
+  .stars { color:var(--accent); font-size:14px; letter-spacing:.05em; margin-top:12px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:16px; padding:24px 26px; margin-top:16px;
+          box-shadow:0 1px 0 rgba(0,0,0,.02); }
+  h2 { font-size:13px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted);
+       margin:0 0 16px; font-weight:600; }
+  .grp { font-size:12px; letter-spacing:.1em; text-transform:uppercase; color:var(--accent);
+         font-weight:700; margin:20px 0 8px; }
+  .grp:first-of-type { margin-top:0; }
+  .row { display:flex; justify-content:space-between; align-items:baseline;
+         padding:9px 0; border-bottom:1px solid #f6f0e9; font-size:16px; gap:16px; }
+  .row:last-child { border-bottom:0; }
+  .row span:first-child { color:var(--ink); }
+  .row span:last-child { color:var(--accent); font-weight:600; white-space:nowrap; }
+  .info .row span:first-child { color:var(--muted); }
+  .info .row span:last-child { color:var(--ink); font-weight:400; }
+  .note { background:#f4ece2; border:1px solid #e6d8c4; border-radius:16px;
+          padding:18px 22px; font-size:14.5px; line-height:1.6; color:#7a6238; margin-top:18px; }
+  .note b { color:#5f4c28; }
+  a { color:inherit; }
+  footer { text-align:center; color:var(--muted); font-size:13px; margin-top:28px; }
+</style>
+</head>
+<body>
+  <div class="hero">
+    <div class="wrap">
+      <div class="tag">Jolie Hairdressing</div>
+      <h1>Jolie</h1>
+      <p class="sub">Transform your look at our salon</p>
+      <p class="quote">"Joanna &amp; Oliver are dedicated to you and your hair — together we make Jolie x" A warm, family-run salon in the heart of the City of London.</p>
+      <div class="stars">★★★★★ &nbsp;5.0 · 64 Google reviews</div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="card">
+      <h2>Menu / Price List</h2>
+
+      <div class="grp">Cutting &amp; Styling</div>
+      <div class="row"><span>Extra long hair cut &amp; finish</span><span>£70</span></div>
+      <div class="row"><span>Long hair cut &amp; finish</span><span>£65</span></div>
+      <div class="row"><span>Medium hair cut &amp; finish</span><span>£60</span></div>
+      <div class="row"><span>Wet cut</span><span>£45</span></div>
+      <div class="row"><span>Gentleman's cut &amp; finish</span><span>£35</span></div>
+      <div class="row"><span>Fringe trim</span><span>£10</span></div>
+
+      <div class="grp">Blow-dry &amp; Finishing</div>
+      <div class="row"><span>Extra long hair blow-dry</span><span>£55</span></div>
+      <div class="row"><span>Long hair blow-dry</span><span>£50</span></div>
+      <div class="row"><span>Medium hair blow-dry</span><span>£45</span></div>
+      <div class="row"><span>GHD curls (long)</span><span>£40</span></div>
+      <div class="row"><span>GHD curls (medium)</span><span>£35</span></div>
+
+      <div class="grp">Treatments</div>
+      <div class="row"><span>Scalp &amp; hair treatment (Moroccanoil)</span><span>£30</span></div>
+      <div class="row"><span>Moroccanoil mask &amp; massage</span><span>£15</span></div>
+
+      <div class="grp">Colour &amp; Technical</div>
+      <div class="row"><span>Keratin treatment</span><span>from £200</span></div>
+      <div class="row"><span>Body perm</span><span>from £150</span></div>
+      <div class="row"><span>Full head highlights</span><span>from £150</span></div>
+      <div class="row"><span>Half head highlights</span><span>from £100</span></div>
+      <div class="row"><span>T-section highlights</span><span>£85</span></div>
+      <div class="row"><span>Full head tint</span><span>£75</span></div>
+      <div class="row"><span>Root tint</span><span>£65</span></div>
+      <div class="row"><span>Gloss</span><span>£45</span></div>
+      <div class="row"><span>Gentleman's grey blending</span><span>£45</span></div>
+      <div class="row"><span>Hairline tint</span><span>£30</span></div>
+    </div>
+
+    <div class="card info">
+      <h2>Find Us</h2>
+      <div class="row"><span>Address</span><span>Dowgate Hill House, 14–16 Dowgate Hill, London EC4R 2SU</span></div>
+      <div class="row"><span>Phone</span><span>07399 396432</span></div>
+      <div class="row"><span>Instagram</span><span>@jolie_hair.salon</span></div>
+      <div class="row"><span>Booking</span><span>Online via the website — or just ask</span></div>
+      <div class="row"><span>Cancellations</span><span>Up to 24 hours before your appointment</span></div>
+    </div>
+
+    <div class="note">
+      <b>Try the voice agent →</b> tap the widget in the corner and talk to it like a client.
+      Ask the price of a full head of highlights, book a cut &amp; finish with Joanna for Saturday,
+      or see what happens when you call after the salon has closed. It only knows what's published
+      on this page — it won't invent prices or availability.
+    </div>
+
+    <footer>Voice agent demo built by Robinexis</footer>
+  </div>
+
+  <elevenlabs-convai agent-id="agent_7301kyj6nj73fbyv0qd6yfy6m2ea"></elevenlabs-convai>
+  <script src="https://unpkg.com/@elevenlabs/convai-widget-embed" async type="text/javascript"></script>
+</body>
+</html>

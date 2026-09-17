@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Barber East London — Demo</title>
+<style>
+  :root { --ink:#111; --muted:#6b6b6b; --line:#e6e6e6; --accent:#c9a227; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+         color:var(--ink); background:#fafafa; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:720px; margin:0 auto; padding:48px 24px 140px; }
+  .tag { font-size:12px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); }
+  h1 { font-size:34px; margin:10px 0 6px; letter-spacing:-.02em; }
+  .rating { color:var(--muted); font-size:15px; margin-bottom:28px; }
+  .rating b { color:var(--ink); }
+  .card { background:#fff; border:1px solid var(--line); border-radius:14px; padding:22px 24px; margin-bottom:16px; }
+  h2 { font-size:13px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted);
+       margin:0 0 14px; font-weight:600; }
+  .row { display:flex; justify-content:space-between; align-items:baseline;
+         padding:10px 0; border-bottom:1px solid #f2f2f2; font-size:16px; }
+  .row:last-child { border-bottom:0; }
+  .row .meta { color:var(--muted); font-size:14px; }
+  .price { font-weight:600; }
+  .closed { color:#b03030; }
+  .note { background:#fff8e1; border:1px solid #f0e0a8; border-radius:14px;
+          padding:16px 20px; font-size:14.5px; line-height:1.55; color:#5a4a12; }
+  a { color:inherit; }
+  footer { text-align:center; color:var(--muted); font-size:13px; margin-top:26px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="tag">Private Barber Studio</div>
+    <h1>Barber East London</h1>
+    <div class="rating">★ <b>5.0</b> · 34 reviews · 190+ reviews on Google (4.9 avg)</div>
+
+    <div class="card">
+      <h2>Services</h2>
+      <div class="row"><span>Haircut <span class="meta">~30 min</span></span><span class="price">£25</span></div>
+      <div class="row"><span>Haircut &amp; Beard <span class="meta">~45 min</span></span><span class="price">£30</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Opening Hours</h2>
+      <div class="row"><span>Monday – Friday</span><span>5:00 PM – 9:30 PM</span></div>
+      <div class="row"><span>Saturday</span><span class="closed">Closed</span></div>
+      <div class="row"><span>Sunday</span><span class="closed">Closed</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Find Us</h2>
+      <div class="row"><span>16 Pixley Street, London E14 7DF</span></div>
+      <div class="row"><span>Call for info</span><span>07490 454232</span></div>
+    </div>
+
+    <div class="note">
+      <b>Try the voice agent →</b> tap the widget in the corner and talk to it like you're a customer.
+      Ask the price of a beard trim, try to book a Saturday, or ask if you can just walk in.
+      It only knows what's published on this page — it won't invent anything.
+    </div>
+
+    <footer>Voice agent demo built by Robinexis</footer>
+  </div>
+
+  <elevenlabs-convai agent-id="agent_8901ky2h18eqf3tr6b1a3qy11q6m"></elevenlabs-convai>
+  <script src="https://unpkg.com/@elevenlabs/convai-widget-embed" async type="text/javascript"></script>
+</body>
+</html>

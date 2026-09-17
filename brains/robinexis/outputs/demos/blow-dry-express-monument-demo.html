@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blow Dry Express — Monument — Demo</title>
+<style>
+  :root { --ink:#1c1b22; --muted:#8b8794; --line:#eceaf1; --accent:#e5197f; --bg:#faf7fb; --blush:#fbe6f1; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+         color:var(--ink); background:var(--bg); -webkit-font-smoothing:antialiased; }
+  .hero { background:linear-gradient(160deg,#fbdcec 0%,#faf7fb 62%); padding:56px 24px 30px; text-align:center; }
+  .wrap { max-width:740px; margin:0 auto; padding:0 24px 150px; }
+  .hero .wrap { padding-bottom:0; }
+  .tag { font-size:12px; letter-spacing:.22em; text-transform:uppercase; color:var(--accent); font-weight:700; }
+  h1 { font-size:40px; margin:10px 0 6px; letter-spacing:-.015em; font-weight:700; }
+  .sub { font-style:italic; color:var(--muted); margin:0 0 6px; font-size:17px; }
+  .quote { color:var(--ink); font-size:15px; max-width:470px; margin:14px auto 0; line-height:1.5; opacity:.78; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:16px; padding:24px 26px; margin-top:16px;
+          box-shadow:0 1px 0 rgba(0,0,0,.02); }
+  h2 { font-size:13px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted);
+       margin:0 0 16px; font-weight:600; }
+  .pills { display:flex; flex-wrap:wrap; gap:9px; }
+  .pill { background:var(--blush); border:1px solid #f4cbe1; color:#b01467; border-radius:999px;
+          padding:7px 15px; font-size:14.5px; }
+  .row { display:flex; justify-content:space-between; align-items:baseline;
+         padding:11px 0; border-bottom:1px solid #f5f2f8; font-size:16px; gap:16px; }
+  .row:last-child { border-bottom:0; }
+  .row span:first-child { color:var(--muted); }
+  .menu { display:flex; flex-direction:column; }
+  .mrow { display:flex; justify-content:space-between; align-items:baseline; gap:16px;
+          padding:11px 0; border-bottom:1px solid #f5f2f8; font-size:16px; }
+  .mrow:last-child { border-bottom:0; }
+  .mname em { color:var(--muted); font-style:normal; font-size:13px; }
+  .mprice { color:var(--accent); font-weight:600; white-space:nowrap; }
+  .fineprint { color:var(--muted); font-size:13px; margin:14px 0 0; line-height:1.5; }
+  .hours { display:grid; grid-template-columns:1fr auto; gap:8px 16px; font-size:16px; }
+  .hours .d { color:var(--muted); }
+  .note { background:#fce9f3; border:1px solid #f4cbe1; border-radius:16px;
+          padding:18px 22px; font-size:14.5px; line-height:1.6; color:#8a2b62; margin-top:18px; }
+  .note b { color:#6f1f4d; }
+  a { color:inherit; }
+  footer { text-align:center; color:var(--muted); font-size:13px; margin-top:28px; }
+</style>
+</head>
+<body>
+  <div class="hero">
+    <div class="wrap">
+      <div class="tag">Blow Dry Express</div>
+      <h1>Monument</h1>
+      <p class="sub">Wash, style &amp; finish — in 30 minutes</p>
+      <p class="quote">"Feel the Magic." A blow dry bar built on speed, in the heart of the City — signature blow dries, updos, cuts &amp; smoothing.</p>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="card">
+      <h2>Services &amp; Prices</h2>
+      <div class="menu">
+        <div class="mrow"><span class="mname">Signature Blow Dry <em>· 30 min–1h 30</em></span><span class="mprice">from £32</span></div>
+        <div class="mrow"><span class="mname">UpDo <em>· 1 hour</em></span><span class="mprice">£86</span></div>
+        <div class="mrow"><span class="mname">Cut &amp; Blowdry <em>· 1 hour</em></span><span class="mprice">£86</span></div>
+        <div class="mrow"><span class="mname">Long / Thick / Curly Cut &amp; Blowdry <em>· 1h 30</em></span><span class="mprice">£126</span></div>
+        <div class="mrow"><span class="mname">Special Bridal Hairstyle <em>· 2 hours</em></span><span class="mprice">£170</span></div>
+        <div class="mrow"><span class="mname">Brazilian Blowout / Smoothing <em>· lasts 3–4 months</em></span><span class="mprice">from £305</span></div>
+      </div>
+      <p class="fineprint">Blow dry priced dynamically (long hair +£10, super-long +£10). Bridal: trial advised before booking.</p>
+    </div>
+
+    <div class="card">
+      <h2>Opening Hours</h2>
+      <div class="hours">
+        <span class="d">Every day</span><span>7am – 7pm</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Find Us</h2>
+      <div class="row"><span>Address</span><span>7 Botolph Alley, London, EC3R 8DR</span></div>
+      <div class="row"><span>Phone</span><span>020 7812 0747</span></div>
+      <div class="row"><span>Email</span><span>info@blowdryexpress.co.uk</span></div>
+      <div class="row"><span>Booking</span><span>Online via Fresha — or just ask</span></div>
+    </div>
+
+    <div class="note">
+      <b>Try the voice agent →</b> tap the widget in the corner and talk to it like a customer.
+      Ask how long a blow dry takes, book one in for tomorrow morning, or see what happens
+      when you call after they've closed. It only knows what's published on this page —
+      it won't invent prices or availability.
+    </div>
+
+    <footer>Voice agent demo built by Robinexis</footer>
+  </div>
+
+  <elevenlabs-convai agent-id="agent_8701kyj6ew2wevcspdtgbpg5wvxf"></elevenlabs-convai>
+  <script src="https://unpkg.com/@elevenlabs/convai-widget-embed" async type="text/javascript"></script>
+</body>
+</html>

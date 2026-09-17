@@ -1,0 +1,20 @@
+{
+  "name": "@robinexis/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsup",
+    "start": "node ../../scripts/start-worker-runtime.mjs",
+    "start:source": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@robinexis/database": "*",
+    "@robinexis/integrations": "*",
+    "dotenv": "^17.4.2"
+  }
+}
