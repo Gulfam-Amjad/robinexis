@@ -1726,24 +1726,29 @@ export class PostgresStore implements PlatformStore {
     );
   }
   async upsertProviderResource(resource: ProviderResource) {
-    const conflict = resource.providerResourceId
-      ? `ON CONFLICT (client_id,provider,provider_resource_id)
-           WHERE provider_resource_id IS NOT NULL
-         DO UPDATE SET lifecycle_status=EXCLUDED.lifecycle_status,
-           credential_ref=EXCLUDED.credential_ref,
-           encrypted_credential=EXCLUDED.encrypted_credential,metadata=EXCLUDED.metadata,
-           last_error=EXCLUDED.last_error,updated_at=EXCLUDED.updated_at`
-      : `ON CONFLICT (id) DO UPDATE SET provider_resource_id=EXCLUDED.provider_resource_id,
-           lifecycle_status=EXCLUDED.lifecycle_status,credential_ref=EXCLUDED.credential_ref,
-           encrypted_credential=EXCLUDED.encrypted_credential,metadata=EXCLUDED.metadata,
-           last_error=EXCLUDED.last_error,updated_at=EXCLUDED.updated_at
-         WHERE provider_resources.client_id=EXCLUDED.client_id`;
     await this.pool.query(
       `INSERT INTO provider_resources
        (id,client_id,provider,resource_type,provider_resource_id,lifecycle_status,credential_ref,
         encrypted_credential,metadata,last_error,created_at,updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-       ${conflict}`,
+       VALUES (
+         COALESCE((
+           SELECT id FROM provider_resources
+           WHERE client_id=$2 AND provider=$3 AND provider_resource_id=$5 AND $5 IS NOT NULL
+           LIMIT 1
+         ),$1),
+         $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12
+       )
+       ON CONFLICT (id) DO UPDATE SET
+         resource_type=EXCLUDED.resource_type,
+         provider_resource_id=EXCLUDED.provider_resource_id,
+         lifecycle_status=EXCLUDED.lifecycle_status,
+         credential_ref=EXCLUDED.credential_ref,
+         encrypted_credential=EXCLUDED.encrypted_credential,
+         metadata=EXCLUDED.metadata,
+         last_error=EXCLUDED.last_error,
+         updated_at=EXCLUDED.updated_at
+       WHERE provider_resources.client_id=EXCLUDED.client_id
+         AND provider_resources.provider=EXCLUDED.provider`,
       [resource.id,resource.clientId,resource.provider,resource.resourceType,resource.providerResourceId ?? null,
         resource.lifecycleStatus,resource.credentialRef ?? null,resource.encryptedCredential ?? null,
         resource.metadata,resource.lastError ?? null,resource.createdAt,resource.updatedAt],

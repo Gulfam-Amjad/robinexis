@@ -54,6 +54,20 @@ const elevenPhone = phoneItems
   .find((item) => item.phone_number === phoneNumber);
 if (!elevenPhone?.phone_number_id) throw new Error("staging_elevenlabs_phone_missing");
 
+const providerDeployments = await store.listProviderDeployments(clientId);
+const elevenDeployment = providerDeployments.find((item) => item.provider === "elevenlabs-convai");
+if (!elevenDeployment) throw new Error("staging_elevenlabs_deployment_missing");
+const expectedElevenVoiceUrl = String(elevenDeployment.config.twilioVoiceUrl ||
+  "https://api.elevenlabs.io/twilio/inbound_call");
+elevenDeployment.config = {
+  ...elevenDeployment.config,
+  phoneNumberId: elevenPhone.phone_number_id,
+  twilioPhoneNumberId: owned.sid,
+  twilioVoiceUrl: expectedElevenVoiceUrl,
+};
+elevenDeployment.updatedAt = new Date().toISOString();
+await store.upsertProviderDeployment(elevenDeployment);
+
 const promptId = `prompt_${clientId}_switch_canary`;
 await store.savePromptVersion({
   id: promptId,
@@ -160,21 +174,21 @@ if (phase === "switch") {
   if (operation.status !== "live") process.exitCode = 1;
 } else {
   const operation = (await store.listProviderSwitchOperations(clientId))
-    .find((item) => item.status === "succeeded");
+    .find((item) => ["succeeded", "failed", "rolled_back"].includes(item.status));
   if (!operation) throw new Error("successful_livekit_switch_missing");
   const rolledBack = await service.rollback(clientId, operation.id, "staging-canary");
   const routed = await routing.inspect(owned.sid);
   const restored = await store.getClient(clientId);
   const ok = rolledBack.status === "rolled_back" &&
     restored?.voicePipeline === "elevenlabs-convai" &&
-    routed.voiceUrl === owned.voiceUrl;
+    routed.voiceUrl === expectedElevenVoiceUrl;
   console.log(JSON.stringify({
     ok,
     phase,
     operationId: operation.id,
     status: rolledBack.status,
     provider: restored?.voicePipeline,
-    originalRouteRestored: routed.voiceUrl === owned.voiceUrl,
+    originalRouteRestored: routed.voiceUrl === expectedElevenVoiceUrl,
   }));
   if (!ok) process.exitCode = 1;
 }
