@@ -8,10 +8,19 @@ const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: process.env.DATABASE_SSL_REJECT_UNAUTHORIZED === "true" },
 });
-const [clientResult, subscriptions, connections, eventTypes, endpoints] = await Promise.all([
+const [
+  clientResult,
+  subscriptions,
+  connections,
+  eventTypes,
+  endpoints,
+  stripeSubscriptions,
+  latestCall,
+  latestUsage,
+] = await Promise.all([
   pool.query("SELECT config FROM clients WHERE id='client_blades_hair'"),
   pool.query(
-    "SELECT status,plan_tier,provider_subscription_id IS NOT NULL AS provider_subscription_present FROM subscriptions WHERE client_id='client_blades_hair' ORDER BY updated_at DESC",
+    "SELECT provider,status,plan_tier,provider_subscription_id IS NOT NULL AS provider_subscription_present,price_id IS NOT NULL AS price_present FROM subscriptions WHERE client_id='client_blades_hair' ORDER BY updated_at DESC",
   ),
   pool.query(
     "SELECT provider,status,calendar_id IS NOT NULL AS calendar_present FROM calendar_connections WHERE client_id='client_blades_hair' ORDER BY id",
@@ -21,6 +30,15 @@ const [clientResult, subscriptions, connections, eventTypes, endpoints] = await 
   ),
   pool.query(
     "SELECT provider,status,e164,provider_endpoint_id IS NOT NULL AS endpoint_present FROM phone_endpoints WHERE client_id='client_blades_hair' ORDER BY id",
+  ),
+  pool.query(
+    "SELECT client_id,status,plan_tier,price_id FROM subscriptions WHERE provider='stripe' AND status IN ('active','trialing','past_due') ORDER BY updated_at DESC",
+  ),
+  pool.query(
+    "SELECT updated_at,payload->>'direction' AS direction,payload->>'status' AS status FROM call_sessions WHERE client_id='client_blades_hair' ORDER BY updated_at DESC LIMIT 1",
+  ),
+  pool.query(
+    "SELECT created_at,usage_quantity,usage_unit FROM provider_usage_cost_events WHERE client_id='client_blades_hair' AND provider='elevenlabs-convai' ORDER BY created_at DESC LIMIT 1",
   ),
 ]);
 await pool.end();
@@ -44,4 +62,7 @@ console.log(JSON.stringify({
   calendarConnections: connections.rows,
   calendarEventTypes: eventTypes.rows,
   phoneEndpoints: endpoints.rows,
+  stripeSubscriptions: stripeSubscriptions.rows,
+  latestCall: latestCall.rows[0],
+  latestUsage: latestUsage.rows[0],
 }));

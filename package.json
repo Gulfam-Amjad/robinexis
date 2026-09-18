@@ -30,6 +30,7 @@
     "build:backend": "npm run build:api && npm run build:worker && npm run build:migrate",
     "build": "npm run typecheck && npm run build:web && npm run build:backend",
     "verify": "npm run test:web-production-env && npm run build && npm test && npm run test:web && npm run test:voice-runtime",
+    "handover:gate": "npm run check:secrets && npm run test:web-production-env && npm run test:csp-api-origin && npm run verify && npm run test:e2e && npm audit --omit=dev --audit-level=high",
     "dev:web": "npm run dev -w @robinexis/web",
     "dev:api": "npm run dev -w @robinexis/api",
     "dev:worker": "npm run dev -w @robinexis/worker",

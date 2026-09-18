@@ -4,18 +4,17 @@ This repository is handover-ready only when the automated gate below is green
 and the live-provider checklist is signed off separately. Automated tests do
 not prove credentials, provider dashboards, phone routing, or card settlement.
 
+Latest run: [[HANDOVER-EVIDENCE-2026-09-18]]. Its controlled Blades phone-call
+gate remains open; do not describe the release as fully handed over until that
+evidence note is changed from `blocked` to `ready`.
+
 ## Automated gate
 
 Run from a clean, committed revision on Node 24:
 
 ```sh
 npm ci
-npm run check:secrets
-npm run test:web-production-env
-npm run verify
-npm run test:voice-runtime
-npm run test:e2e
-npm audit --omit=dev --audit-level=high
+npm run handover:gate
 ```
 
 Production builds must set `VITE_API_BASE_URL`, `VITE_SUPABASE_URL`, and

@@ -2,6 +2,10 @@ import Stripe from "stripe";
 
 const secret = process.env.STRIPE_SECRET_KEY || "";
 if (!secret) throw new Error("STRIPE_SECRET_KEY is required");
+const live = secret.startsWith("sk_live_") || secret.startsWith("rk_live_") || secret.startsWith("rkcs_live_");
+if (live && process.env.ALLOW_STRIPE_LIVE_PORTAL !== "true") {
+  throw new Error("Refusing to mutate a live Stripe billing portal. Use a test-mode key, or set ALLOW_STRIPE_LIVE_PORTAL=true for a supervised live change.");
+}
 
 const stripe = new Stripe(secret);
 const active = await stripe.billingPortal.configurations.list({ active: true, limit: 1 });

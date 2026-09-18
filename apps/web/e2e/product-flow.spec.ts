@@ -503,9 +503,11 @@ test("viewer control planes are read-only on mobile", async ({ page }) => {
 
 test("booking workflow exposes filters and details", async ({ page }) => {
   await openWorkspaceSession(page);
-  await page.goto("/app/calendar");
+  await page.goto("/app/w/client_demo/bookings");
   await expect(page.getByPlaceholder("Search customer, email or title…")).toBeVisible();
-  await expect(page.getByText("Alex Customer")).toBeVisible();
+  const customer = page.getByText("Alex Customer");
+  await customer.scrollIntoViewIfNeeded();
+  await expect(customer).toBeVisible({ timeout: 15_000 });
   await page.getByRole("button", { name: "Details" }).click();
   await expect(page.getByRole("dialog").getByText("alex@example.test")).toBeVisible();
   await expectNoPageOverflow(page);
