@@ -14,7 +14,7 @@ status: blocked
 
 - Runtime revision: `6647d49e4c3f`.
 - Production API: healthy at `https://api.robinexis.com/health`.
-- Production web: Vercel deployment `dpl_6bAxMrx8rpQZ2j74Q8H5YxEWnCyU`, target `production`.
+- Production web: Vercel deployment `dpl_3twYm7nj5NkgBzumGGcvayTqkmxZ`, target `production`.
 - API and worker remain at one replica. `RATE_LIMIT_REDIS_REQUIRED=false`; Redis is required before scaling out.
 
 ## Passed gates
