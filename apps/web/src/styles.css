@@ -375,6 +375,77 @@ svg { flex: 0 0 auto; }
 .provider-mode-heading h2 { font-size: 18px; margin: 3px 0 0; }
 .provider-mode-card > p { color: var(--muted); font-size: 11px; line-height: 1.6; margin: 20px 0 12px; }
 .provider-mode-card ul { color: var(--muted); display: grid; font-size: 10px; gap: 8px; margin: 0; padding-left: 18px; }
+.comparison-shared-brief { margin-bottom: 18px; padding: 22px; }
+.comparison-shared-brief .section-heading { margin-bottom: 15px; }
+.comparison-brief-facts { border-top: 1px solid var(--line); display: grid; gap: 0; grid-template-columns: 1fr 2fr 1fr 1fr; }
+.comparison-brief-facts span { color: var(--muted); font-size: 10px; line-height: 1.45; padding: 14px 16px 0 0; }
+.comparison-brief-facts strong { color: var(--ink); display: block; font-size: 9px; letter-spacing: .06em; margin-bottom: 5px; text-transform: uppercase; }
+.comparison-summary-grid { display: grid; gap: 18px; grid-template-columns: 1fr 1fr; margin-bottom: 22px; }
+.comparison-summary-card { min-height: 210px; padding: 23px; }
+.comparison-summary-card.comparison-premium { background: linear-gradient(145deg, #fff, var(--cream)); }
+.comparison-summary-card.comparison-saver { background: linear-gradient(145deg, #f8fffb, var(--accent-soft)); border-color: #a8e6c9; }
+.comparison-summary-card > div { align-items: center; display: flex; gap: 12px; }
+.comparison-summary-card > div > span:first-child, .comparison-agent-label > svg { align-items: center; background: #fff; border: 1px solid var(--line); border-radius: 12px; display: flex; height: 42px; justify-content: center; padding: 10px; width: 42px; }
+.comparison-summary-card > div > div { flex: 1; }
+.comparison-summary-card small, .comparison-agent-label small { color: var(--faint); display: block; font-size: 9px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.comparison-summary-card h2 { font-size: 18px; margin: 3px 0 0; }
+.comparison-summary-card > p { color: var(--muted); font-size: 11px; line-height: 1.55; margin: 18px 0 12px; }
+.comparison-summary-card ul { color: var(--muted); display: grid; font-size: 10px; gap: 7px; margin: 0; padding-left: 18px; }
+.comparison-test-heading { align-items: center; display: flex; justify-content: space-between; margin: 24px 0 13px; }
+.comparison-test-heading > div { align-items: center; display: flex; gap: 10px; }
+.comparison-test-heading svg { color: #087245; }
+.comparison-test-heading strong, .comparison-test-heading small { display: block; }
+.comparison-test-heading strong { font-size: 14px; }
+.comparison-test-heading small { color: var(--faint); font-size: 10px; margin-top: 3px; }
+.comparison-agents-grid { align-items: start; display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.comparison-agent-panel { min-width: 0; padding: 13px; }
+.comparison-agent-label { align-items: center; display: flex; gap: 10px; padding: 5px 6px 13px; }
+.comparison-agent-label > span { display: grid; gap: 3px; }
+.comparison-agent-label strong { font-size: 13px; }
+.comparison-agent-panel .receptionist-experience { display: grid; grid-template-columns: 1fr; max-width: none; padding: 0; }
+.comparison-agent-panel .receptionist-stage { border-radius: 22px; min-height: 560px; }
+.comparison-agent-panel .receptionist-side { grid-template-rows: auto; }
+.comparison-agent-panel .receptionist-prompts { display: none; }
+.comparison-agent-panel .receptionist-transcript { min-height: 330px; }
+.comparison-call { display: grid; gap: 20px; }
+.comparison-call > audio { display: none; }
+.comparison-call-stage {
+  background: linear-gradient(145deg, rgba(255,255,255,.045), transparent 42%), #171717;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 22px;
+  box-shadow: 0 30px 75px rgba(0,0,0,.16);
+  color: #fff;
+  min-height: 560px;
+  overflow: hidden;
+  padding: 28px;
+  position: relative;
+}
+.comparison-call-stage::before { background: rgba(9,254,148,.13); border-radius: 50%; content: ""; height: 300px; position: absolute; right: -150px; top: 80px; width: 300px; }
+.comparison-call-brand { align-items: center; display: flex; position: relative; z-index: 1; }
+.comparison-call-brand > span { align-items: center; background: var(--accent); border-radius: 11px 11px 11px 4px; color: var(--on-accent); display: flex; height: 40px; justify-content: center; margin-right: 11px; width: 40px; }
+.comparison-call-brand > span svg { height: 19px; width: 19px; }
+.comparison-call-brand > div { flex: 1; }
+.comparison-call-brand strong, .comparison-call-brand small { display: block; }
+.comparison-call-brand strong { font-family: var(--font-display); font-size: 16px; font-weight: 500; }
+.comparison-call-brand small { color: #a3a3a3; font-size: 9px; margin-top: 3px; }
+.comparison-voice-orb { align-items: center; background: radial-gradient(circle at 32% 25%, #b5ffdc, #09fe94 53%, #00c974); border-radius: 50%; box-shadow: 0 25px 55px rgba(9,254,148,.24); color: #0d1f16; display: flex; height: 116px; justify-content: center; margin: 73px auto 45px; position: relative; transition: transform .2s; width: 116px; }
+.comparison-voice-orb::before, .comparison-voice-orb::after { border: 1px solid rgba(9,254,148,.28); border-radius: 50%; content: ""; inset: -27px; position: absolute; }
+.comparison-voice-orb::after { inset: -44px; }
+.comparison-voice-orb.voice-orb-speaking, .comparison-voice-orb.voice-orb-listening { animation: voice-pulse 1.65s ease-out infinite; }
+.comparison-voice-orb svg { height: 31px; width: 31px; }
+.comparison-call-stage .voice-status { margin-bottom: 29px; position: relative; z-index: 1; }
+.comparison-call-stage .voice-controls { position: relative; z-index: 1; }
+.comparison-call-stage .receptionist-trust { left: 28px; right: 28px; }
+.comparison-transcript { display: flex; flex-direction: column; min-height: 330px; overflow: hidden; padding: 22px; }
+.comparison-transcript .transcript-feed { min-height: 245px; }
+.comparison-readiness { background: var(--amber-soft); border: 1px solid #efd791; border-radius: 12px; margin-top: 13px; padding: 13px; }
+.comparison-readiness strong { font-size: 10px; }
+.comparison-readiness p { color: #6f4a00; font-size: 9px; line-height: 1.55; margin: 5px 0 0; overflow-wrap: anywhere; }
+.comparison-test-script { margin-top: 18px; padding: 22px; }
+.comparison-test-script > div { display: grid; gap: 9px; grid-template-columns: repeat(4, 1fr); }
+.comparison-test-script > div span { align-items: center; background: #fafafa; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); display: flex; font-size: 10px; gap: 9px; line-height: 1.4; padding: 11px; }
+.comparison-test-script b { align-items: center; background: var(--accent); border-radius: 50%; color: var(--on-accent); display: flex; flex: 0 0 auto; font-size: 9px; height: 22px; justify-content: center; width: 22px; }
+.comparison-test-script > p { color: var(--faint); font-size: 9px; line-height: 1.5; margin: 13px 0 0; }
 .routing-customer-list { display: grid; }
 .routing-customer-row { align-items: center; border-bottom: 1px solid var(--line); display: grid; gap: 16px; grid-template-columns: minmax(220px, 1.35fr) minmax(170px, 1fr) minmax(120px, .7fr) minmax(130px, .7fr) minmax(170px, auto); padding: 17px 0; }
 .routing-customer-row:last-child { border-bottom: 0; padding-bottom: 0; }
@@ -812,7 +883,9 @@ fieldset:disabled input, fieldset:disabled textarea, fieldset:disabled select { 
   .team-access-form .button { width: 100%; }
   .routing-entry-card { align-items: flex-start; flex-direction: column; }
   .routing-entry-card .button { width: 100%; }
-  .provider-comparison-grid, .provider-choice-grid, .benchmark-grid { grid-template-columns: 1fr; }
+  .provider-comparison-grid, .provider-choice-grid, .benchmark-grid, .comparison-summary-grid, .comparison-agents-grid { grid-template-columns: 1fr; }
+  .comparison-brief-facts { grid-template-columns: 1fr 1fr; }
+  .comparison-test-script > div { grid-template-columns: 1fr 1fr; }
   .routing-summary-strip { grid-template-columns: 1fr 1fr; }
   .routing-summary-strip > div:nth-child(2) { border-right: 0; }
   .routing-summary-strip > div:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
@@ -896,6 +969,10 @@ fieldset:disabled input, fieldset:disabled textarea, fieldset:disabled select { 
   .filter-bar select { width: 100%; }
   .period-select { width: 100%; }
   .page-actions > label { width: 100%; }
+  .comparison-brief-facts, .comparison-test-script > div { grid-template-columns: 1fr; }
+  .comparison-test-heading { align-items: flex-start; flex-direction: column; gap: 10px; }
+  .comparison-call-stage { min-height: 540px; padding: 20px; }
+  .comparison-call-stage .receptionist-trust { left: 20px; right: 20px; }
   .chart-wrap { height: 260px; margin-left: -12px; }
   .calendar-summary { grid-template-columns: 1fr; }
   .agenda-day { grid-template-columns: 45px 1fr; }

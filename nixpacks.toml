@@ -5,7 +5,7 @@ NIXPACKS_NODE_VERSION = "24"
 NPM_CONFIG_CACHE = "/tmp/npm-cache"
 
 [phases.install]
-cmds = ["npm install --include=dev --no-audit --no-fund"]
+cmds = ["npm ci --include=dev --no-audit --no-fund"]
 
 # Nixpacks recopies the git tree after build, which drops dist/. Start
 # rebuilds if needed; keep the compiled trees in the build cache too.

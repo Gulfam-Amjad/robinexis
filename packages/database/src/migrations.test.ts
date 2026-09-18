@@ -142,4 +142,22 @@ describe("database migrations", () => {
     expect(sql).not.toMatch(/ALTER TABLE credit_ledger/i);
     expect(sql).toMatch(/REVOKE ALL ON public\.provider_deployments FROM anon, authenticated/i);
   });
+
+  it("isolates messaging entitlements and overage records from voice credits", () => {
+    const sql = readFileSync(
+      path.join(dir, "026_messaging_and_overage_contracts.sql"),
+      "utf8",
+    );
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS tenant_feature_entitlements/i);
+    expect(sql).toMatch(/whatsapp_enabled BOOLEAN NOT NULL DEFAULT false/i);
+    expect(sql).toMatch(/auto_minute_blocks_enabled BOOLEAN NOT NULL DEFAULT false/i);
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS message_usage_periods/i);
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS message_sessions/i);
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS message_events/i);
+    expect(sql).toMatch(/UNIQUE \(provider, provider_message_id\)/i);
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS scheduled_followups/i);
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS overage_purchase_records/i);
+    expect(sql).toMatch(/channel IN \('email', 'sms', 'whatsapp'\)/i);
+    expect(sql).not.toMatch(/ALTER TABLE credit_ledger/i);
+  });
 });

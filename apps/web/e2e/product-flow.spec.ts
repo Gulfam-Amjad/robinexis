@@ -124,6 +124,12 @@ async function openWorkspaceSession(
     if (path === `/api/v1/clients/${client.id}/notifications/status`) return route.fulfill({ json: { pending: 0, failed: 0 } });
     if (path === `/api/v1/clients/${client.id}/twilio-connection`) return route.fulfill({ json: { mode: "robinexis_account", status: "active", selectedPhoneNumber: "+441130000000", canReconnect: true } });
     if (path === `/api/v1/clients/${client.id}/calendar-connection`) return route.fulfill({ json: { mode: "managed", status: "active", destinationCalendarId: "calendar_1", availableCalendars: [], canReconnect: true } });
+    if (path === `/api/v1/admin/clients/${client.id}/feature-entitlements`) return route.fulfill({ json: { whatsappEnabled: false, autoMinuteBlocksEnabled: false } });
+    if (path === `/api/v1/admin/clients/${client.id}/managed-whatsapp-status`) return route.fulfill({ json: {
+      sender: { status: "not_configured" },
+      templates: { status: "not_configured" },
+      runtime: { status: "disabled" },
+    } });
     if (path === "/api/v1/audit" || path === "/api/v1/admin/audit") return route.fulfill({ json: { items: [] } });
     if (path === "/api/v1/memberships") return route.fulfill({ json: { items: role === "salon" ? [{ id: "member_1", clientId: client.id, email: "owner@demo-salon.test", role: "owner", createdAt: "2026-09-01T00:00:00.000Z" }] : [] } });
     if (path === "/api/v1/usage") return route.fulfill({ json: { clientId: client.id, month: "2026-08", inboundMinutes: 10, outboundMinutes: 2 } });

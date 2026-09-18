@@ -22,6 +22,13 @@ const catalog = [
   { tier: "starter", name: "Starter", amount: 9900, minutes: 300, features: ["inbound", "booking", "transfer"] },
   { tier: "pro", name: "Pro", amount: 24900, minutes: 1500, features: ["inbound", "booking", "transfer", "knowledge"] },
 ];
+const overage = {
+  key: "minute_block_100",
+  name: "Voice minutes — 100 minute block",
+  currency: "usd",
+  amount: 1500,
+  minutes: 100,
+};
 
 async function findOrCreatePrice(spec) {
   const products = await stripe.products.list({ limit: 100, active: true });
@@ -56,8 +63,39 @@ async function findOrCreatePrice(spec) {
   return { productId: product.id, priceId: price.id, ...spec };
 }
 
+// One-off price billed on its own invoice when a tenant crosses its minute
+// allowance. Never recurring: the subscription cycle must stay untouched.
+async function findOrCreateOveragePrice(spec) {
+  const products = await stripe.products.list({ limit: 100, active: true });
+  let product = products.data.find((item) => item.metadata?.robinexis_overage === spec.key);
+  if (!product) {
+    product = await stripe.products.create({
+      name: spec.name,
+      description: `Robinexis automatic ${spec.minutes}-minute voice overage block`,
+      metadata: { robinexis_overage: spec.key },
+    });
+  }
+
+  const prices = await stripe.prices.list({ product: product.id, active: true, limit: 100 });
+  let price = prices.data.find((item) =>
+    item.currency === spec.currency
+    && item.unit_amount === spec.amount
+    && !item.recurring,
+  );
+  if (!price) {
+    price = await stripe.prices.create({
+      product: product.id,
+      currency: spec.currency,
+      unit_amount: spec.amount,
+      metadata: { robinexis_overage: spec.key, minutes: String(spec.minutes) },
+    });
+  }
+  return { productId: product.id, priceId: price.id };
+}
+
 const created = [];
 for (const spec of catalog) created.push(await findOrCreatePrice(spec));
+const overagePrice = await findOrCreateOveragePrice(overage);
 
 const priceIds = Object.fromEntries(created.map((item) => [item.tier, item.priceId]));
 const features = Object.fromEntries(created.map((item) => [item.priceId, {
@@ -112,6 +150,14 @@ console.log(JSON.stringify({
   livemode: false,
   priceIds,
   features,
+  overage: {
+    envVar: "STRIPE_OVERAGE_PRICE_ID",
+    priceId: overagePrice.priceId,
+    productId: overagePrice.productId,
+    currency: overage.currency,
+    amount: overage.amount,
+    minutes: overage.minutes,
+  },
   webhook: webhook
     ? {
         id: webhook.id,

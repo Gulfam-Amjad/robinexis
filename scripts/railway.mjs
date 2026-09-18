@@ -106,9 +106,7 @@ function ensureInstall() {
     console.error("railway.mjs: package-lock.json not found at", root);
     process.exit(1);
   }
-  // Do not use `npm ci` on Railway: it deletes node_modules including the
-  // mounted node_modules/.cache directory (EBUSY / exit 240).
-  run(["install", "--include=dev", "--no-audit", "--no-fund"]);
+  run(["ci", "--include=dev", "--no-audit", "--no-fund"]);
 }
 
 const service = builds[argvTask] ? argvTask : inferService();

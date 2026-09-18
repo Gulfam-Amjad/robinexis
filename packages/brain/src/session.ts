@@ -25,6 +25,11 @@ export interface BrainStreamCallbacks {
 
 const MAX_TOOL_ITERATIONS = 8;
 
+export interface BrainSessionOptions {
+  initialMessages?: LlmMessage[];
+  maxToolIterations?: number;
+}
+
 export class BrainSession {
   private messages: LlmMessage[] = [];
   private currentAbort: AbortController | null = null;
@@ -37,9 +42,19 @@ export class BrainSession {
     private call: CallSession,
     greeting?: string,
     frozenSystemPrompt?: string,
+    options: BrainSessionOptions = {},
   ) {
-    const g = greeting ?? greetingFor(client);
-    this.messages.push({ role: "assistant", content: g });
+    const restored = options.initialMessages?.slice(-20) ?? [];
+    if (restored.length) {
+      this.messages.push(...restored);
+    } else {
+      const g = greeting ?? greetingFor(client);
+      this.messages.push({ role: "assistant", content: g });
+    }
+    this.maxToolIterations = Math.max(
+      1,
+      Math.min(options.maxToolIterations ?? MAX_TOOL_ITERATIONS, MAX_TOOL_ITERATIONS),
+    );
     this.systemPrompt =
       frozenSystemPrompt ??
       compilePrompt({
@@ -49,12 +64,18 @@ export class BrainSession {
       });
   }
 
+  private readonly maxToolIterations: number;
+
   abortTurn() {
     this.currentAbort?.abort();
   }
 
   getCall() {
     return this.call;
+  }
+
+  getMessages() {
+    return structuredClone(this.messages);
   }
 
   async handleUserTurn(
@@ -77,7 +98,7 @@ export class BrainSession {
       input_schema: t.input_schema as Record<string, unknown>,
     }));
 
-    for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
+    for (let i = 0; i < this.maxToolIterations; i++) {
       if (controller.signal.aborted) return { type: "aborted" };
       let turn: LlmTurn;
       try {

@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createHash, createHmac } from "node:crypto";
-import { BLADES_HAIR_ID, MemoryStore, seedStore } from "@robinexis/database";
+import {
+  BLADES_HAIR_ID,
+  MemoryStore,
+  seedStore,
+  type NotificationDelivery,
+} from "@robinexis/database";
 import { FakeCalendar } from "@robinexis/integrations";
 import {
   runVoiceTool,
@@ -14,7 +19,40 @@ const oldRuntimeSecret = process.env.VOICE_RUNTIME_INTERNAL_SECRET;
 afterEach(() => {
   if (oldRuntimeSecret === undefined) delete process.env.VOICE_RUNTIME_INTERNAL_SECRET;
   else process.env.VOICE_RUNTIME_INTERNAL_SECRET = oldRuntimeSecret;
+  delete process.env.WHATSAPP_ENABLED;
+  delete process.env.WHATSAPP_BOOKING_CONFIRMATION_CONTENT_SID;
+  delete process.env.WHATSAPP_MANAGED_SENDERS_JSON;
 });
+
+const NOW = "2026-09-17T12:00:00.000Z";
+
+async function enableWhatsApp(store: MemoryStore) {
+  process.env.WHATSAPP_ENABLED = "true";
+  process.env.WHATSAPP_BOOKING_CONFIRMATION_CONTENT_SID = "HXbooking";
+  process.env.WHATSAPP_MANAGED_SENDERS_JSON = JSON.stringify({
+    "whatsapp:+14155238886": BLADES_HAIR_ID,
+  });
+  const client = await store.getClient(BLADES_HAIR_ID);
+  await store.upsertClient({ ...client!, phoneAcquisitionMode: "robinexis_account" });
+  await store.upsertTenantFeatureEntitlements({
+    clientId: BLADES_HAIR_ID,
+    whatsappEnabled: true,
+    autoMinuteBlocksEnabled: false,
+    createdAt: NOW,
+    updatedAt: NOW,
+  });
+  await store.upsertProviderResource({
+    id: "resource_blades_wa",
+    clientId: BLADES_HAIR_ID,
+    provider: "twilio",
+    resourceType: "whatsapp_sender",
+    providerResourceId: "+14155238886",
+    lifecycleStatus: "active",
+    metadata: { address: "whatsapp:+14155238886" },
+    createdAt: NOW,
+    updatedAt: NOW,
+  });
+}
 
 describe("ElevenLabs voice tool routes", () => {
   it("requires a non-empty shared secret", () => {
@@ -314,5 +352,63 @@ describe("ElevenLabs voice tool routes", () => {
       status: 503,
       body: { ok: false, error: "booking_temporarily_unavailable" },
     });
+  });
+
+  it("keeps a successful booking when WhatsApp confirmation enqueue fails", async () => {
+    class FailWhatsAppStore extends MemoryStore {
+      override async enqueueNotification(delivery: NotificationDelivery) {
+        if (delivery.idempotencyKey.startsWith("whatsapp:booking:")) {
+          throw new Error("notification_outbox_unavailable");
+        }
+        return super.enqueueNotification(delivery);
+      }
+    }
+    const store = new FailWhatsAppStore();
+    await seedStore(store);
+    await enableWhatsApp(store);
+    const calendar = new FakeCalendar(["2026-09-02T10:00:00.000Z"]);
+    const result = await runVoiceTool(
+      store,
+      "create-booking",
+      {
+        eventTypeSlug: "30min",
+        start: "2026-09-02T10:00:00.000Z",
+        attendeeName: "Gultham",
+        attendeePhone: "07446 860 675",
+        callerConfirmed: true,
+        conversationId: "conv_wa_fail",
+        idempotencyKey: "conv_wa_fail:booking",
+      },
+      { store, calendar },
+    );
+    expect(result.status).toBe(200);
+    expect(result.body.bookingUid).toBe("bk_1");
+    expect(calendar.bookings.size).toBe(1);
+    expect(await store.listNotifications(BLADES_HAIR_ID)).toEqual([]);
+  });
+
+  it("does not enqueue a second WhatsApp confirmation for a duplicate booking", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    await enableWhatsApp(store);
+    const calendar = new FakeCalendar(["2026-09-02T10:00:00.000Z"]);
+    const input = {
+      eventTypeSlug: "30min",
+      start: "2026-09-02T10:00:00.000Z",
+      attendeeName: "Gultham",
+      attendeePhone: "07446 860 675",
+      callerConfirmed: true,
+      conversationId: "conv_wa_dup",
+      idempotencyKey: "conv_wa_dup:booking",
+    };
+    const first = await runVoiceTool(store, "create-booking", input, { store, calendar });
+    const second = await runVoiceTool(store, "create-booking", input, { store, calendar });
+    expect(first.body.bookingUid).toBe("bk_1");
+    expect(second.body.bookingUid).toBe("bk_1");
+    expect(calendar.bookings.size).toBe(1);
+    const confirmations = (await store.listNotifications(BLADES_HAIR_ID))
+      .filter((item) => item.idempotencyKey === "whatsapp:booking:bk_1");
+    expect(confirmations).toHaveLength(1);
+    expect(confirmations[0]?.payload?.contentSid).toBe("HXbooking");
   });
 });

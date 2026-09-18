@@ -1,6 +1,6 @@
 # Robinexis SaaS readiness
 
-Updated: 2026-09-15
+Updated: 2026-09-18
 
 ## Shipped in the launch candidate
 
@@ -25,6 +25,11 @@ Updated: 2026-09-15
 - Automatic provisioning foundation: resumable onboarding jobs, reviewed website extraction, hybrid Twilio,
   connected/managed Cal.com, isolated ElevenLabs builds, readiness-only synthetic booking checks, owner-only
   two-phase activation, provider compensation, durable lifecycle mail, and client/operator control planes.
+- Handover hardening: hosted environments cannot auto-seed demo tenants, API replicas do not own production
+  migrations, production web builds fail closed on auth/API/Supabase configuration, browser voice CSP and
+  microphone policy are explicit, and Sentry SDKs are wired without default PII.
+- Outbound jobs use an explicit, feature-gated Twilio dispatcher with suppression, calling-window, idempotent
+  claim, retry, and readiness checks instead of silently failing through the retired gateway path.
 
 ## Safety state
 
@@ -32,6 +37,7 @@ Updated: 2026-09-15
 - `SAAS_PROVISIONING_ENABLED=false` remains unchanged in API and worker.
 - No live Stripe charge was created. Checkout verification used Stripe's `4242` test card in an isolated sandbox.
 - Production was not promoted automatically; this candidate remains on `feat/multi-tenant-saas-conversion`.
+- See `CLIENT-HANDOVER.md` for the automated gate and the separate live-provider sign-off.
 
 ## Release-gated limitations
 

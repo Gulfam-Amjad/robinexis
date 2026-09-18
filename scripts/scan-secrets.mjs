@@ -3,6 +3,12 @@ import { readFileSync } from "node:fs";
 
 const patterns = [
   { name: "Firecrawl API key", regex: /\bfc-[A-Za-z0-9_-]{24,}\b/g },
+  { name: "Stripe secret key", regex: /\bsk_(?:live|test)_[A-Za-z0-9]{20,}\b/g },
+  { name: "GitHub token", regex: /\b(?:ghp|gho|ghu|ghs|github_pat)_[A-Za-z0-9_]{20,}\b/g },
+  { name: "Groq API key", regex: /\bgsk_[A-Za-z0-9]{20,}\b/g },
+  { name: "Resend API key", regex: /\bre_[A-Za-z0-9_]{20,}\b/g },
+  { name: "AWS access key", regex: /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g },
+  { name: "Private key", regex: /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/g },
 ];
 
 const files = execFileSync(

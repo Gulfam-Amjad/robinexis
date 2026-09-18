@@ -26,6 +26,43 @@ export type OnboardingStatus =
   | "active"
   | "failed";
 export type PhoneAcquisitionMode = "robinexis_account" | "customer_oauth";
+export type NotificationChannel = "email" | "sms" | "whatsapp";
+
+export interface UpgradeFeatureFlags {
+  whatsappEnabled: boolean;
+  autoMinuteBlocksEnabled: boolean;
+}
+
+export const DEFAULT_UPGRADE_FEATURE_FLAGS: Readonly<UpgradeFeatureFlags> = Object.freeze({
+  whatsappEnabled: false,
+  autoMinuteBlocksEnabled: false,
+});
+
+export interface AdminFeatureEntitlements extends UpgradeFeatureFlags {
+  clientId: string;
+  updatedAt?: string;
+}
+
+export interface ManagedWhatsAppStatus {
+  clientId: string;
+  sender: {
+    status: "active" | "pending" | "failed" | "not_configured";
+    configured: boolean;
+    updatedAt?: string;
+  };
+  templates: {
+    status: "configured" | "partial" | "not_configured";
+    bookingConfirmationConfigured: boolean;
+    bookingReminderConfigured: boolean;
+    cancellationFollowupConfigured: boolean;
+    outsideWindowConfigured: boolean;
+  };
+  runtime: {
+    status: "active" | "disabled";
+    globallyEnabled: boolean;
+    tenantEnabled: boolean;
+  };
+}
 
 export const ACTIVE_VOICE_PROVIDERS = ["elevenlabs-convai", "livekit-cascade"] as const;
 export type ActiveVoiceProvider = (typeof ACTIVE_VOICE_PROVIDERS)[number];
@@ -311,6 +348,7 @@ export interface Client extends ClientSummary {
   onboardingEta?: string;
   phoneAcquisitionMode?: PhoneAcquisitionMode;
   requestedPhoneNumber?: string;
+  featureFlags?: UpgradeFeatureFlags;
 }
 
 export interface ProvisioningStatus {
@@ -590,6 +628,34 @@ export interface Usage {
   periodAllocatedMinutes?: number;
   periodUsedMinutes?: number;
   periodRemainingMinutes?: number;
+  messaging?: {
+    whatsapp: {
+      includedMessages: number;
+      usedMessages: number;
+      remainingMessages: number;
+      periodStart: string;
+      periodEnd: string;
+      limitReached: boolean;
+    };
+  };
+  overage?: {
+    autoPurchaseEnabled: boolean;
+    blockMinutes: number;
+    blockPriceMinor: number;
+    currency: string;
+    purchases: OveragePurchaseReceipt[];
+  };
+}
+
+export interface OveragePurchaseReceipt {
+  id: string;
+  boundaryMinutes: number;
+  grantedMinutes: number;
+  amountMinor: number;
+  currency: string;
+  status: "pending" | "processing" | "succeeded" | "failed" | "refunded";
+  purchasedAt: string;
+  completedAt?: string;
 }
 
 export interface TimeseriesPoint {

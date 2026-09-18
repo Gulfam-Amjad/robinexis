@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { TOOL_DEFINITIONS } from "@robinexis/tool-contracts";
-import { signPostCall } from "./apiClient.js";
+import { RuntimeApiClient, signPostCall } from "./apiClient.js";
 import { loadVoiceRuntimeEnv } from "./env.js";
 import { parseJobMetadata, stableCallId } from "./metadata.js";
 import { normalizedUsage } from "./telemetry.js";
@@ -60,6 +60,30 @@ describe("voice runtime safety contracts", () => {
     const body = JSON.stringify({ callId: "call_123" });
     const expected = createHmac("sha256", "secret").update(`123.${body}`).digest("hex");
     expect(signPostCall(body, "secret", 123)).toBe(expected);
+  });
+
+  it("authenticates runtime config and signs post-call delivery", async () => {
+    const fetchImpl = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ tenantId: "tenant-a" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const client = new RuntimeApiClient(
+      "https://api.example/",
+      "internal-secret",
+      "signing-secret",
+      fetchImpl,
+    );
+    await client.getPublishedConfig("tenant/a", "deployment-1");
+    expect(fetchImpl.mock.calls[0][0]).toContain("tenant%2Fa?deploymentId=deployment-1");
+    expect(fetchImpl.mock.calls[0][1]?.headers).toEqual({
+      "x-voice-runtime-secret": "internal-secret",
+    });
+    const payload = { tenantId: "tenant-a", callId: "call-1" } as never;
+    await client.sendPostCall(payload);
+    const request = fetchImpl.mock.calls[1][1]!;
+    const headers = request.headers as Record<string, string>;
+    expect(headers["x-voice-runtime-signature"]).toMatch(/^[a-f0-9]{64}$/);
+    expect(headers["x-voice-runtime-timestamp"]).toMatch(/^\d+$/);
+    expect(request.body).toBe(JSON.stringify(payload));
   });
 
   it("bridges every provider-neutral tool without caller-selected tenant fields", async () => {

@@ -126,11 +126,11 @@ export function createToolExecutor(opts: {
     client: Parameters<ToolExecutor>[0]["client"],
   ): Promise<unknown> {
     const cal = opts.calendar;
-    const live = opts.resolveCalendarTenant
-      ? await opts.resolveCalendarTenant(client)
+    const resolveLive = () => opts.resolveCalendarTenant
+      ? opts.resolveCalendarTenant(client)
       : opts.calendar
-        ? tenantFromClient(client, resolveSecret)
-        : (await resolveCalcomTenantConnection(opts.store, client)).tenant;
+        ? Promise.resolve(tenantFromClient(client, resolveSecret))
+        : resolveCalcomTenantConnection(opts.store, client).then((resolved) => resolved.tenant);
 
     switch (name) {
       case "get_business_info": {
@@ -176,6 +176,7 @@ export function createToolExecutor(opts: {
       }
       case "check_availability": {
         if (cal) return cal.check(String(input.eventTypeSlug));
+        const live = await resolveLive();
         if (!live.apiKey || !live.username) throw new Error("calendar_not_configured");
         return calcom.checkAvailability(live, {
           eventTypeSlug: String(input.eventTypeSlug),
@@ -185,6 +186,7 @@ export function createToolExecutor(opts: {
         });
       }
       case "create_booking": {
+        const live = await resolveLive();
         if (input.callerConfirmed !== true) throw new Error("caller_confirmation_required");
         const phone = normalizeSpokenPhone(String(input.attendeePhone || call.contactPhone || ""));
         let attendeeEmail = String(input.attendeeEmail || "").trim();
@@ -223,6 +225,7 @@ export function createToolExecutor(opts: {
         return result;
       }
       case "reschedule_booking": {
+        const live = await resolveLive();
         if (input.callerConfirmed !== true) throw new Error("caller_confirmation_required");
         if (client.calendar.schedule?.rescheduleAllowed === false) throw new Error("rescheduling_not_allowed");
         if (!cal && (!live.apiKey || !live.username)) throw new Error("calendar_not_configured");
@@ -230,6 +233,7 @@ export function createToolExecutor(opts: {
         return calcom.rescheduleBooking(live, { bookingUid: String(input.bookingUid), start: String(input.newStart) });
       }
       case "cancel_booking": {
+        const live = await resolveLive();
         if (input.callerConfirmed !== true) throw new Error("caller_confirmation_required");
         if (client.calendar.schedule?.cancellationAllowed === false) throw new Error("cancellation_not_allowed");
         if (!cal && (!live.apiKey || !live.username)) throw new Error("calendar_not_configured");
@@ -270,6 +274,7 @@ export function createToolExecutor(opts: {
         return { savedLocally: true, externalSaved: true, providerId: result.providerId };
       }
       case "append_calendar_note": {
+        const live = await resolveLive();
         const uid = String(input.bookingUid);
         const note = String(input.calendarSummary);
         if (client.calendarNoteMode !== "verbatim" && input.includeFullTranscript) {

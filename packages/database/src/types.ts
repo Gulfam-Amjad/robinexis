@@ -638,15 +638,17 @@ export interface OnboardingOutboxEvent {
 }
 
 export type NotificationDeliveryStatus = "pending" | "leased" | "delivered" | "dead_letter";
+export type NotificationChannel = "email" | "sms" | "whatsapp";
 
 export interface NotificationDelivery {
   id: string;
   clientId: string;
   operationId: string;
   idempotencyKey: string;
-  channel: "email";
+  channel: NotificationChannel;
   recipient: string;
   template: string;
+  payload?: Record<string, unknown>;
   status: NotificationDeliveryStatus;
   providerId?: string;
   attemptCount: number;
@@ -667,6 +669,101 @@ export interface NotificationHealth {
   deadLetter: number;
   oldestPendingAt?: string;
   providerFailures24h: number;
+}
+
+export interface TenantFeatureEntitlements {
+  clientId: string;
+  whatsappEnabled: boolean;
+  autoMinuteBlocksEnabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type MessageChannel = Exclude<NotificationChannel, "email">;
+
+export interface MessageUsagePeriod {
+  id: string;
+  clientId: string;
+  channel: MessageChannel;
+  periodStart: string;
+  periodEnd: string;
+  includedMessages: number;
+  usedMessages: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MessageSession {
+  id: string;
+  clientId: string;
+  channel: MessageChannel;
+  contactAddress: string;
+  senderAddress: string;
+  status: "active" | "closed" | "opted_out";
+  serviceWindowExpiresAt?: string;
+  state: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MessageEvent {
+  id: string;
+  clientId: string;
+  sessionId: string;
+  channel: MessageChannel;
+  direction: "inbound" | "outbound";
+  provider: string;
+  providerMessageId?: string;
+  idempotencyKey: string;
+  status: "received" | "processing" | "processed" | "queued" | "sent" | "delivered" | "failed" | "suppressed";
+  body?: string;
+  billableUnits: number;
+  metadata: Record<string, unknown>;
+  processingAttemptCount?: number;
+  processingLeaseOwner?: string;
+  processingLeaseExpiresAt?: string;
+  processingError?: string;
+  processedAt?: string;
+  occurredAt: string;
+  createdAt: string;
+}
+
+export interface ScheduledFollowup {
+  id: string;
+  clientId: string;
+  sessionId?: string;
+  channel: MessageChannel;
+  recipient: string;
+  template: string;
+  idempotencyKey: string;
+  payload: Record<string, unknown>;
+  status: "pending" | "leased" | "completed" | "cancelled" | "dead_letter";
+  scheduledAt: string;
+  attemptCount: number;
+  maxAttempts: number;
+  leaseOwner?: string;
+  leaseExpiresAt?: string;
+  lastError?: string;
+  completedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OveragePurchaseRecord {
+  id: string;
+  clientId: string;
+  idempotencyKey: string;
+  boundaryMinutes: number;
+  grantedMinutes: number;
+  amountMinor: number;
+  currency: string;
+  status: "pending" | "processing" | "succeeded" | "failed" | "refunded";
+  stripePaymentId?: string;
+  creditLedgerEntryId?: string;
+  failureCode?: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
 }
 
 export interface WebsiteSource {

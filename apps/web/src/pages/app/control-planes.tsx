@@ -68,14 +68,26 @@ function SetupControl({ clientId }: { clientId: string }) {
   if (setup.isLoading || runs.isLoading) return <LoadingState label="Checking setup readiness…" />;
   if (setup.error || runs.error) return <ErrorState error={setup.error || runs.error} onRetry={() => { setup.refetch(); runs.refetch(); }} />;
   const client = setup.data!.client;
-  const readyConnections = integrations.data?.filter((item) => item.connected).length || 0;
+  const integrationById = new Map((integrations.data || []).map((item) => [item.id, item]));
+  const requiredConnectionIds = client.voicePipeline === "livekit-cascade"
+    ? ["twilio", "livekit", "calcom"]
+    : ["twilio", "elevenlabs", "calcom"];
+  const readyConnections = requiredConnectionIds.filter((id) => integrationById.get(id)?.connected).length;
+  const phoneAndCalendarReady = readyConnections === requiredConnectionIds.length;
+  const businessReady = Boolean(
+    client.published &&
+    client.promptVersionId &&
+    client.businessName?.trim() &&
+    client.services?.length &&
+    client.hours?.trim(),
+  );
   const status = client.onboardingStatus || "details_required";
   return <>
     <PageHeader eyebrow="Go-live checklist" title="Four steps to a receptionist you can trust" description="Review your business, connect the customer-facing tools, make a test call, then approve the exact version that goes live." actions={<Button variant="secondary" onClick={() => { setup.refetch(); runs.refetch(); integrations.refetch(); }}><RefreshCw size={15} /> Refresh status</Button>} />
     <div className="metrics-grid metrics-compact">
       <MetricCard label="Setup status" value={status.replaceAll("_", " ")} detail={client.onboardingEta ? `Target ${formatDate(client.onboardingEta)}` : "Latest saved state"} icon={Clock3} tone="peach" />
       <MetricCard label="Readiness" value={readiness ? readiness.passed ? "Passed" : "Needs attention" : "Waiting"} detail={readiness?.generatedAt ? formatDate(readiness.generatedAt) : "No test completed yet"} icon={ShieldCheck} tone={readiness?.passed ? "sage" : "cream"} />
-      <MetricCard label="Connections" value={`${readyConnections}/${integrations.data?.length || 0}`} detail={integrations.error ? "Status unavailable" : "Phone, calendar and voice"} icon={Activity} />
+      <MetricCard label="Connections" value={`${readyConnections}/${requiredConnectionIds.length}`} detail={integrations.error ? "Status unavailable" : "Live phone, calendar and voice checks"} icon={Activity} />
       <MetricCard label="Updates" value={notifications.data?.failed ? "Needs attention" : notifications.data?.pending ? "Sending" : "Delivered"} detail={notifications.data?.lastDeliveryAt ? formatDate(notifications.data.lastDeliveryAt) : "Lifecycle notification status"} icon={Activity} tone={notifications.data?.failed ? "peach" : "sage"} />
       <MetricCard label={`${usage.data?.plan || "Plan"} allowance`} value={`${usage.data?.remainingMinutes ?? 0} min`} detail={`${usage.data?.usedMinutes ?? 0} used this period`} icon={Clock3} tone={(usage.data?.remainingMinutes ?? 0) > 0 ? "sage" : "peach"} />
     </div>
@@ -84,9 +96,9 @@ function SetupControl({ clientId }: { clientId: string }) {
       <div className="team-list">
         {[
           { label: "1. Plan active", done: ["active", "trialing"].includes(client.serviceStatus), detail: "Stripe subscription and minute allowance" },
-          { label: "2. Business reviewed", done: ["ready_to_provision", "provisioning", "testing", "awaiting_approval", "active"].includes(status), detail: "Website facts, services and call behaviour" },
-          { label: "3. Phone and calendar connected", done: Boolean(client.requestedPhoneNumber) && readyConnections > 0, detail: "Customer-owned Twilio plus tenant-scoped Cal.com" },
-          { label: "4. Tested and activated", done: status === "active", detail: "Readiness booking, cancellation and owner approval" },
+          { label: "2. Business reviewed", done: businessReady, detail: "Published prompt, hours, services and call behaviour" },
+          { label: "3. Phone and calendar connected", done: phoneAndCalendarReady, detail: "Live Twilio, voice-provider and Cal.com checks" },
+          { label: "4. Tested and activated", done: status === "active" && Boolean(readiness?.passed), detail: "Readiness booking, cancellation and owner approval" },
         ].map((stage) => <div className="team-row" key={stage.label}>
           {stage.done ? <CheckCircle2 /> : <Clock3 />}
           <div><strong>{stage.label}</strong><small>{stage.detail}</small></div>

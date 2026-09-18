@@ -35,14 +35,18 @@ export function ReceptionistCall({
   config = BLADES_RECEPTIONIST_DEMO,
   compact = false,
   showShare = false,
+  disabled = false,
+  onActiveChange,
 }: {
   config?: ReceptionistDemoConfig;
   compact?: boolean;
   showShare?: boolean;
+  disabled?: boolean;
+  onActiveChange?: (active: boolean) => void;
 }) {
   return (
     <ConversationProvider agentId={config.agentId}>
-      <ReceptionistCallExperience config={config} compact={compact} showShare={showShare} />
+      <ReceptionistCallExperience config={config} compact={compact} showShare={showShare} disabled={disabled} onActiveChange={onActiveChange} />
     </ConversationProvider>
   );
 }
@@ -51,10 +55,14 @@ function ReceptionistCallExperience({
   config,
   compact,
   showShare,
+  disabled,
+  onActiveChange,
 }: {
   config: ReceptionistDemoConfig;
   compact: boolean;
   showShare: boolean;
+  disabled: boolean;
+  onActiveChange?: (active: boolean) => void;
 }) {
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [phase, setPhase] = useState<LocalCallPhase>("idle");
@@ -69,6 +77,7 @@ function ReceptionistCallExperience({
 
   const conversation = useConversation({
     onConnect: () => {
+      onActiveChange?.(true);
       hadConnected.current = true;
       connectedAt.current = Date.now();
       setElapsed(0);
@@ -76,9 +85,11 @@ function ReceptionistCallExperience({
       setLocalError("");
     },
     onDisconnect: () => {
+      onActiveChange?.(false);
       if (hadConnected.current) setPhase("ended");
     },
     onError: (message) => {
+      onActiveChange?.(false);
       setLocalError(message || "The voice connection could not be started.");
       setPhase("idle");
     },
@@ -147,6 +158,8 @@ function ReceptionistCallExperience({
   }, [connected]);
 
   const startCall = useCallback(async () => {
+    if (disabled) return;
+    onActiveChange?.(true);
     setLocalError("");
     setTranscript([]);
     setElapsed(0);
@@ -173,13 +186,20 @@ function ReceptionistCallExperience({
             : "We couldn't access your microphone.",
       );
       setPhase("idle");
+      onActiveChange?.(false);
     }
-  }, [config.agentId, conversation]);
+  }, [config.agentId, conversation, disabled, onActiveChange]);
 
   const endCall = useCallback(() => {
     conversation.endSession();
     setPhase("ended");
-  }, [conversation]);
+    onActiveChange?.(false);
+  }, [conversation, onActiveChange]);
+
+  useEffect(() => () => {
+    conversationRef.current.endSession();
+    onActiveChange?.(false);
+  }, [onActiveChange]);
 
   const copyText = useCallback(async (text: string, label: string) => {
     await navigator.clipboard.writeText(text);
@@ -251,9 +271,9 @@ function ReceptionistCallExperience({
 
         <div className="voice-controls">
           {!connected && conversation.status !== "connecting" ? (
-            <Button className="voice-start" onClick={startCall}>
+            <Button className="voice-start" disabled={disabled} onClick={startCall}>
               {uiStatus === "ended" || uiStatus === "error" ? <RotateCcw /> : <Phone />}
-              {uiStatus === "ended" || uiStatus === "error" ? "Start another call" : `Talk to ${config.agentName}`}
+              {disabled ? "End the Cost Saver call first" : uiStatus === "ended" || uiStatus === "error" ? "Start another call" : `Talk to ${config.agentName}`}
             </Button>
           ) : (
             <>

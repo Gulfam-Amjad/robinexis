@@ -1,5 +1,6 @@
 import type {
   AdminControlPlane,
+  AdminFeatureEntitlements,
   AdminSummary,
   AnalyticsSummary,
   ApiErrorBody,
@@ -13,6 +14,7 @@ import type {
   Job,
   KnowledgeDocument,
   ListResponse,
+  ManagedWhatsAppStatus,
   OnboardingWizardData,
   OnboardingWizardResponse,
   OnboardingWizardState,
@@ -107,6 +109,7 @@ export const api = {
       monthlyPricePence: number | null;
       trialDays: number;
       includedMinutes: number;
+      includedMessages: number;
       calendarLimit: number | null;
       locationLimit: number | null;
       phoneProvisioning: { customerOwned: boolean; managed: boolean };
@@ -138,6 +141,32 @@ export const api = {
   clients: async () => list(await request<ClientSummary[] | ListResponse<ClientSummary>>("/api/v1/clients")),
   adminSummary: () => request<AdminSummary>("/api/v1/admin/summary"),
   adminControlPlane: () => request<AdminControlPlane>("/api/v1/admin/control-plane"),
+  featureEntitlements: (clientId: string) =>
+    request<AdminFeatureEntitlements>(
+      `/api/v1/admin/clients/${encodeURIComponent(clientId)}/feature-entitlements`,
+    ),
+  updateFeatureEntitlements: (
+    clientId: string,
+    input: Partial<Pick<AdminFeatureEntitlements, "whatsappEnabled" | "autoMinuteBlocksEnabled">> & {
+      confirmation?: "ENABLE_AUTO_MINUTE_BLOCKS";
+    },
+  ) =>
+    request<AdminFeatureEntitlements>(
+      `/api/v1/admin/clients/${encodeURIComponent(clientId)}/feature-entitlements`,
+      { method: "PATCH", body: JSON.stringify(input) },
+    ),
+  managedWhatsAppStatus: (clientId: string) =>
+    request<ManagedWhatsAppStatus>(
+      `/api/v1/admin/clients/${encodeURIComponent(clientId)}/managed-whatsapp-status`,
+    ),
+  configureManagedWhatsApp: (clientId: string, sender: string) =>
+    request<ManagedWhatsAppStatus>(
+      `/api/v1/admin/clients/${encodeURIComponent(clientId)}/managed-whatsapp-status`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ sender, confirmation: "ENABLE_MANAGED_WHATSAPP" }),
+      },
+    ),
   prepareProviderDeployment: (
     clientId: string,
     provider: "elevenlabs-convai" | "livekit-cascade",
@@ -182,6 +211,21 @@ export const api = {
     ),
   providerUsage: (range: { from?: string; to?: string } = {}) =>
     request<ProviderUsagePortfolio>(`/api/v1/admin/provider-usage${query(range)}`),
+  providerComparisonReadiness: () =>
+    request<{
+      clientId: string;
+      businessName?: string;
+      premium: { ready: boolean; reason?: string };
+      costSaver: { ready: boolean; reason?: string; missing: string[] };
+    }>("/api/v1/admin/provider-comparison/readiness"),
+  createProviderComparisonSession: () =>
+    request<{
+      url: string;
+      token: string;
+      roomName: string;
+      expiresInSeconds: number;
+      clientId: string;
+    }>("/api/v1/admin/provider-comparison/session", { method: "POST" }),
   refreshElevenLabsAccount: () =>
     request<ProviderUsagePortfolio["accountSnapshots"][number]>(
       "/api/v1/admin/provider-usage/elevenlabs/refresh",
@@ -509,4 +553,11 @@ export function initials(value: string) {
     .map((part) => part[0])
     .join("")
     .toUpperCase();
+}
+
+export function formatMinorCurrency(amountMinor: number, currency: string) {
+  return new Intl.NumberFormat("en-GB", {
+    style: "currency",
+    currency,
+  }).format(amountMinor / 100);
 }

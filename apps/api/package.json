@@ -20,7 +20,9 @@
     "@robinexis/integrations": "*",
     "@robinexis/knowledge": "*",
     "@robinexis/tool-contracts": "*",
+    "@sentry/node": "^10.75.0",
     "dotenv": "^17.4.2",
-    "jose": "^6.0.12"
+    "jose": "^6.0.12",
+    "livekit-server-sdk": "^2.19.0"
   }
 }

@@ -350,6 +350,31 @@ export class ElevenLabsManagementClient {
     }
   }
 
+  async getAgent(agentId: string): Promise<Record<string, unknown>> {
+    if (!agentId.trim()) throw new ElevenLabsValidationError("An ElevenLabs agent ID is required");
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const response = await this.fetchImpl(
+        `${this.baseUrl}/v1/convai/agents/${encodeURIComponent(agentId)}`,
+        {
+          method: "GET",
+          headers: { "xi-api-key": this.options.apiKey },
+          signal: controller.signal,
+        },
+      );
+      const body = await parseResponseBody(response);
+      if (!response.ok) throw new ElevenLabsHttpError(response.status, body);
+      return body as Record<string, unknown>;
+    } catch (error) {
+      if (error instanceof ElevenLabsHttpError) throw error;
+      if (controller.signal.aborted || isAbortError(error)) throw new ElevenLabsTimeoutError(this.timeoutMs);
+      throw new ElevenLabsNetworkError(error);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   createAgent(
     config: ElevenLabsAgentConfig,
     operationKey: string,

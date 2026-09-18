@@ -30,6 +30,17 @@ export {
   reconcileStripe,
 } from "./stripe.js";
 export {
+  MINUTE_BLOCK_AMOUNT_MINOR,
+  MINUTE_BLOCK_CURRENCY,
+  MINUTE_BLOCK_MINUTES,
+  resolveMinuteAccess,
+} from "./minuteAccess.js";
+export type {
+  MinuteAccessMode,
+  MinuteAccessOptions,
+  MinuteAccessResult,
+} from "./minuteAccess.js";
+export {
   cheapVoiceDefaultEnabled,
   defaultVoicePipeline,
   featureOperationallyAvailable,
@@ -94,7 +105,30 @@ export {
   toDialableE164,
 } from "./phone.js";
 export { sendNotification } from "./notifications.js";
-export { enqueueLifecycleEmail, processNotificationDeliveries } from "./notificationQueue.js";
+export {
+  enqueueLifecycleEmail,
+  enqueueWhatsAppNotification,
+  processNotificationDeliveries,
+} from "./notificationQueue.js";
+export {
+  applyManagedWhatsAppStatus,
+  enqueueWhatsAppBookingConfirmation,
+  enqueueWhatsAppBookingReminder,
+  enqueueWhatsAppCancellationFollowup,
+  ingestManagedWhatsApp,
+  normalizeWhatsAppAddress,
+  resolveManagedWhatsAppTenant,
+  resolveUniqueManagedWhatsAppSender,
+  validateManagedWhatsAppWebhook,
+  type WhatsAppInboundProcessor,
+} from "./whatsapp.js";
+export { hasRemainingMessageAllowance, messageAllowancePeriod } from "./messageAllowance.js";
+export {
+  processInboundWhatsAppMessages,
+  processScheduledWhatsAppFollowups,
+  type MessagingBrainDependencies,
+  type MessagingBrainResult,
+} from "./messagingBrain.js";
 export { applyOutboundStatus } from "./outboundStatus.js";
 export { finishCall } from "./finishCall.js";
 export {

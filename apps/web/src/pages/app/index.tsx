@@ -69,7 +69,7 @@ import type {
   PublicCalendarConnection,
   TimeseriesPoint,
 } from "@robinexis/api-contracts";
-import { api, formatDate } from "../../lib/api";
+import { api, formatDate, formatMinorCurrency } from "../../lib/api";
 import { usePermissions } from "../../lib/permissions";
 import { workspacePath } from "../../lib/navigation";
 import { workspaceReceptionistDemo } from "../../lib/receptionistDemo";
@@ -163,7 +163,9 @@ function OverviewContent({ clientId }: { clientId: string }) {
   const answerRate = summary?.totalCalls
     ? Math.round(((summary.answeredCalls || 0) / summary.totalCalls) * 100)
     : 0;
-  const essentialConnections = ["elevenlabs", "calcom", "twilio"];
+  const essentialConnections = client.data?.voicePipeline === "livekit-cascade"
+    ? ["livekit", "calcom", "twilio"]
+    : ["elevenlabs", "calcom", "twilio"];
   const readyConnections = essentialConnections.filter((id) => integration(id)?.connected).length;
   const today = new Date().toISOString().slice(0, 10);
   const todayBookings = (bookings.data || []).filter((booking) => booking.start.slice(0, 10) === today);
@@ -1084,7 +1086,7 @@ function CampaignsContent({ clientId }: { clientId: string }) {
 }
 
 function JobTable({ jobs, onAction }: { jobs: Job[]; onAction: (id: string, type: "approve" | "cancel") => void }) {
-  return <div className="table-scroll"><table className="mobile-card-table"><caption className="sr-only">Outbound call jobs</caption><thead><tr><th scope="col">Contact</th><th scope="col">Campaign</th><th scope="col">Scheduled</th><th scope="col">Status</th><th scope="col">Attempts</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead><tbody>{jobs.map((job) => <tr key={job.id}><td data-label="Contact"><strong>{job.contactName || job.contactPhone}</strong><small className="block">{job.contactName ? job.contactPhone : job.purpose}</small></td><td data-label="Campaign" className="capitalize">{job.campaign.replaceAll("-", " ")}</td><td data-label="Scheduled">{formatDate(job.scheduledAt)}</td><td data-label="Status"><Badge tone={statusTone(job.status)}>{job.status}</Badge></td><td data-label="Attempts">{job.attemptCount}/{job.maxAttempts}</td><td data-label="Actions"><div className="row-actions">{job.status === "pending" && <Button size="sm" onClick={() => onAction(job.id, "approve")}>Approve</Button>}{!["completed", "cancelled", "failed"].includes(job.status) && <button aria-label={`Cancel job for ${job.contactName || job.contactPhone}`} className="icon-button danger-icon" onClick={() => onAction(job.id, "cancel")}><XCircle size={17} /></button>}</div></td></tr>)}</tbody></table></div>;
+  return <div className="table-scroll"><table className="mobile-card-table"><caption className="sr-only">Outbound call jobs</caption><thead><tr><th scope="col">Contact</th><th scope="col">Campaign</th><th scope="col">Scheduled</th><th scope="col">Status</th><th scope="col">Attempts</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead><tbody>{jobs.map((job) => <tr key={job.id}><td data-label="Contact"><strong>{job.contactName || job.contactPhone}</strong><small className="block">{job.contactName ? job.contactPhone : job.purpose}</small></td><td data-label="Campaign" className="capitalize">{job.campaign.replaceAll("-", " ")}</td><td data-label="Scheduled">{formatDate(job.scheduledAt)}</td><td data-label="Status"><Badge tone={statusTone(job.status)}>{job.status}</Badge>{job.lastError && <small className="block">{job.lastError.replaceAll("_", " ")}</small>}</td><td data-label="Attempts">{job.attemptCount}/{job.maxAttempts}</td><td data-label="Actions"><div className="row-actions">{job.status === "pending" && <Button size="sm" onClick={() => onAction(job.id, "approve")}>Approve</Button>}{!["completed", "cancelled", "failed", "suppressed"].includes(job.status) && <button aria-label={`Cancel job for ${job.contactName || job.contactPhone}`} className="icon-button danger-icon" onClick={() => onAction(job.id, "cancel")}><XCircle size={17} /></button>}</div></td></tr>)}</tbody></table></div>;
 }
 
 const documentSchema = z.object({ title: z.string().min(2, "Add a title"), source: z.string().optional(), content: z.string().optional() });
@@ -1492,6 +1494,41 @@ function UsageContent({ clientId }: { clientId: string }) {
           <div className="usage-unmetered"><ShieldCheck /><div><strong>Usage is still measured</strong><p>The API has not supplied a plan limit, so Robinexis won’t display a made-up allowance.</p></div></div>
         )}
       </Card>
+      {usage.data?.messaging?.whatsapp && (
+        <Card className="panel">
+          <SectionHeading
+            title="WhatsApp allowance"
+            description={`${usage.data.messaging.whatsapp.usedMessages} of ${usage.data.messaging.whatsapp.includedMessages} messages used this billing period`}
+          />
+          <dl className="detail-list">
+            <div><dt>Included</dt><dd>{usage.data.messaging.whatsapp.includedMessages}</dd></div>
+            <div><dt>Used</dt><dd>{usage.data.messaging.whatsapp.usedMessages}</dd></div>
+            <div><dt>Remaining</dt><dd>{usage.data.messaging.whatsapp.remainingMessages}</dd></div>
+            <div><dt>Limit status</dt><dd><Badge tone={usage.data.messaging.whatsapp.limitReached ? "danger" : "success"}>{usage.data.messaging.whatsapp.limitReached ? "Limit reached" : "Within allowance"}</Badge></dd></div>
+          </dl>
+          <p className="inline-notice">The message allowance is a Robinexis plan limit. It does not guarantee or cover WhatsApp provider charges.</p>
+        </Card>
+      )}
+      {usage.data?.overage && (
+        <Card className="panel">
+          <SectionHeading
+            title="Additional voice-minute blocks"
+            description={`${usage.data.overage.blockMinutes} minutes per block at ${formatMinorCurrency(usage.data.overage.blockPriceMinor, usage.data.overage.currency)}`}
+          />
+          <p className="muted">Automatic block purchase is {usage.data.overage.autoPurchaseEnabled ? "enabled" : "off"} for this workspace.</p>
+          {usage.data.overage.purchases.length ? (
+            <div className="team-list">
+              {usage.data.overage.purchases.map((purchase) => (
+                <div className="team-row" key={purchase.id}>
+                  <CircleDollarSign />
+                  <div><strong>{purchase.grantedMinutes} voice minutes</strong><small>{formatMinorCurrency(purchase.amountMinor, purchase.currency)} · {formatDate(purchase.purchasedAt)}</small></div>
+                  <Badge tone={statusTone(purchase.status)}>{purchase.status}</Badge>
+                </div>
+              ))}
+            </div>
+          ) : <p className="muted">No additional minute blocks were purchased in this billing period.</p>}
+        </Card>
+      )}
       {plan && <Card className="panel"><SectionHeading title={`${plan.name} plan limits`} description="Commercial limits for this workspace, separate from Robinexis provider accounts." /><dl className="detail-list"><div><dt>Included voice minutes</dt><dd>{plan.includedMinutes}</dd></div><div><dt>Locations</dt><dd>{plan.locationLimit ?? "Custom"}</dd></div><div><dt>Calendars</dt><dd>{plan.calendarLimit ?? "Custom"}</dd></div><div><dt>Billing period</dt><dd>{usage.data?.billingPeriodStart && usage.data?.billingPeriodEnd ? `${formatDate(usage.data.billingPeriodStart, { dateStyle: "medium" })} – ${formatDate(usage.data.billingPeriodEnd, { dateStyle: "medium" })}` : "Not reported"}</dd></div></dl></Card>}
     </>
   );
@@ -1525,6 +1562,7 @@ function BillingContent({ clientId }: { clientId: string }) {
         <Card className="panel usage-card"><SectionHeading title="Monthly usage" description={`Billing period ${usage.data?.month || "current month"}`} /><div className="usage-count"><strong>{meteredUsed}</strong><span>{allowance ? `of ${allowance} minutes` : "minutes recorded"}</span></div>{usagePercent !== undefined && <div className="progress"><i style={{ width: `${usagePercent}%` }} /></div>}<p><ShieldCheck /> {`${usage.data?.inboundMinutes || 0} inbound · ${usage.data?.outboundMinutes || 0} outbound minutes`}</p></Card>
       </div>
       <Card className="panel"><SectionHeading title="Billing details" description="Every plan begins with a three-day trial backed by a payment card secured by Stripe." /><div className="deferred-row"><CircleDollarSign /><div><strong>Stripe manages payment details</strong><p>Checkout receives only tenant billing metadata; voice, calendar and salon credentials stay in Robinexis.</p></div><a className="button button-secondary button-md" href="mailto:hello@robinexis.com">Contact billing</a></div></Card>
+      {usage.data?.overage && <Card className="panel"><SectionHeading title="Automatic minute blocks" description={`Each additional ${usage.data.overage.blockMinutes}-minute block costs ${formatMinorCurrency(usage.data.overage.blockPriceMinor, usage.data.overage.currency)}.`} /><p className="muted">{usage.data.overage.autoPurchaseEnabled ? "Enabled by a Robinexis operator with explicit auto-charge confirmation." : "Off. Calls stop when the available voice-minute balance is exhausted."}</p><LinkButton to="/usage" variant="secondary">View block receipts</LinkButton></Card>}
     </>
   );
 }

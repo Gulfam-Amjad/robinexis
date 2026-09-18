@@ -21,6 +21,7 @@ export interface PlanDefinition {
   calendarLimit: number | null;
   locationLimit: number | null;
   includedMinutes: number;
+  includedMessages: number;
   phoneProvisioning: {
     customerOwned: boolean;
     managed: boolean;
@@ -35,12 +36,30 @@ const DEFAULT_INCLUDED_MINUTES: Record<PlanTier, number> = {
   enterprise: 5_000,
 };
 
-function configuredMinutes(tier: PlanTier): number {
-  const key = `PLAN_${tier.toUpperCase()}_INCLUDED_MINUTES`;
+const DEFAULT_INCLUDED_MESSAGES: Record<PlanTier, number> = {
+  starter: 0,
+  pro: 3_000,
+  enterprise: 0,
+};
+
+function configuredAllowance(
+  tier: PlanTier,
+  name: "MINUTES" | "MESSAGES",
+  defaults: Record<PlanTier, number>,
+): number {
+  const key = `PLAN_${tier.toUpperCase()}_INCLUDED_${name}`;
   const configured = Number(process.env[key]);
   return Number.isFinite(configured) && configured >= 0
     ? Math.floor(configured)
-    : DEFAULT_INCLUDED_MINUTES[tier];
+    : defaults[tier];
+}
+
+function configuredMinutes(tier: PlanTier): number {
+  return configuredAllowance(tier, "MINUTES", DEFAULT_INCLUDED_MINUTES);
+}
+
+function configuredMessages(tier: PlanTier): number {
+  return configuredAllowance(tier, "MESSAGES", DEFAULT_INCLUDED_MESSAGES);
 }
 
 function configuredPhoneSpendCap(tier: PlanTier): number {
@@ -70,6 +89,7 @@ export function planCatalog(): Record<PlanTier, PlanDefinition> {
       calendarLimit: 1,
       locationLimit: 1,
       includedMinutes: configuredMinutes("starter"),
+      includedMessages: configuredMessages("starter"),
       phoneProvisioning: {
         customerOwned: true,
         managed: false,
@@ -85,6 +105,7 @@ export function planCatalog(): Record<PlanTier, PlanDefinition> {
       calendarLimit: 5,
       locationLimit: 1,
       includedMinutes: configuredMinutes("pro"),
+      includedMessages: configuredMessages("pro"),
       phoneProvisioning: {
         customerOwned: true,
         managed: false,
@@ -100,6 +121,7 @@ export function planCatalog(): Record<PlanTier, PlanDefinition> {
       calendarLimit: null,
       locationLimit: null,
       includedMinutes: configuredMinutes("enterprise"),
+      includedMessages: configuredMessages("enterprise"),
       phoneProvisioning: {
         customerOwned: true,
         managed: false,

@@ -8,7 +8,10 @@ import {
 } from "@robinexis/database";
 import {
   createToolExecutor,
+  enqueueWhatsAppBookingConfirmation,
+  enqueueWhatsAppCancellationFollowup,
   normalizeSpokenPhone,
+  resolveMinuteAccess,
 } from "@robinexis/integrations";
 import type { ToolName } from "@robinexis/tool-contracts";
 
@@ -109,21 +112,11 @@ export async function runVoiceTool(
       body: { ok: false, error: "service_unavailable", reason: access.reason },
     };
   }
-  const subscription = await store.getCurrentSubscription(client.id);
-  if (
-    subscription?.status === "trialing" &&
-    subscription.trialEndsAt &&
-    Date.parse(subscription.trialEndsAt) <= Date.now()
-  ) {
+  const minuteAccess = await resolveMinuteAccess(store, client, { mode: "access" });
+  if (!minuteAccess.allowed) {
     return {
       status: 403,
-      body: { ok: false, error: "service_unavailable", reason: "trial_expired" },
-    };
-  }
-  if (subscription?.provider === "stripe" && await store.getCreditBalance(client.id) <= 0) {
-    return {
-      status: 403,
-      body: { ok: false, error: "service_unavailable", reason: "minute_allowance_exhausted" },
+      body: { ok: false, error: "service_unavailable", reason: minuteAccess.reason },
     };
   }
   if (!client.enabledFeatures.includes("booking")) {
@@ -248,6 +241,17 @@ export async function runVoiceTool(
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });
+  try {
+    await enqueueWhatsAppBookingConfirmation({
+      store,
+      clientId: client.id,
+      attendeePhone,
+      bookingUid: booking.uid,
+      startsAt: new Date(start).toISOString(),
+    });
+  } catch {
+    // Booking is already durable. A WhatsApp outbox failure must not change the response.
+  }
   return {
     status: 200,
     body: { ok: true, bookingUid: booking.uid, bookingStatus: booking.status || "accepted" },
@@ -274,6 +278,13 @@ export async function runVoiceContractTool(
   if (!access.inbound) {
     return { status: 403, body: { ok: false, error: "service_unavailable", reason: access.reason } };
   }
+  const minuteAccess = await resolveMinuteAccess(store, client, { mode: "access" });
+  if (!minuteAccess.allowed) {
+    return {
+      status: 403,
+      body: { ok: false, error: "service_unavailable", reason: minuteAccess.reason },
+    };
+  }
   const conversationId = String(input.conversationId || "").trim();
   if (!conversationId) return { status: 400, body: { ok: false, error: "missing_conversation_id" } };
 
@@ -285,6 +296,28 @@ export async function runVoiceContractTool(
     call,
     client,
   });
+  if (result.ok && tool === "cancel_booking") {
+    const bookingUid = String(input.bookingUid || "");
+    const booking = (await store.listBookingRecords(client.id))
+      .find((item) => item.providerBookingId === bookingUid);
+    if (booking) {
+      booking.status = "cancelled";
+      booking.updatedAt = new Date().toISOString();
+      await store.saveBookingRecord(booking);
+      if (booking.attendeePhone) {
+        try {
+          await enqueueWhatsAppCancellationFollowup({
+            store,
+            clientId: client.id,
+            attendeePhone: booking.attendeePhone,
+            bookingUid,
+          });
+        } catch {
+          // The provider cancellation succeeded; messaging must not change the tool result.
+        }
+      }
+    }
+  }
   return result.ok
     ? { status: 200, body: { ok: true, ...result.data as object } }
     : { status: 503, body: { ok: false, error: result.error || "voice_tool_failed" } };

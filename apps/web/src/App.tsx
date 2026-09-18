@@ -57,6 +57,7 @@ const AdminCustomersPage = lazy(() => adminCustomerPages().then((m) => ({ defaul
 const AdminCustomerDetailPage = lazy(() => adminCustomerPages().then((m) => ({ default: m.AdminCustomerDetailPage })));
 const AdminUsageCostPage = lazy(() => adminUsagePages().then((m) => ({ default: m.AdminUsageCostPage })));
 const AdminVoiceRoutingPage = lazy(() => import("./pages/admin/voice-routing"));
+const AdminProviderComparisonPage = lazy(() => import("./pages/admin/provider-comparison"));
 const AdminControlPlanePage = lazy(() => controlPlanePages().then((m) => ({ default: m.AdminControlPlanePage })));
 const SetupConsolePage = lazy(() => appPages().then((m) => ({ default: m.SetupConsolePage })));
 
@@ -215,6 +216,7 @@ export default function App() {
                 <Route path="customers/:id" element={<AdminCustomerDetailPage />} />
                 <Route path="voice-routing" element={<AdminVoiceRoutingPage />} />
                 <Route path="usage-cost" element={<AdminUsageCostPage />} />
+                <Route path="provider-comparison" element={<AdminProviderComparisonPage />} />
                 <Route path="control-plane" element={<AdminControlPlanePage />} />
                 <Route path="setup/:id" element={<SetupConsolePage />} />
                 <Route path="clients/new" element={<OnboardingPage />} />

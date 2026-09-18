@@ -22,6 +22,9 @@ import type {
   KnowledgeSearchOptions,
   KnowledgeSearchResult,
   Location,
+  MessageEvent,
+  MessageSession,
+  MessageUsagePeriod,
   OperatorAuditRecord,
   OnboardingGap,
   OnboardingJob,
@@ -29,6 +32,7 @@ import type {
   OnboardingWizardState,
   NotificationDelivery,
   NotificationHealth,
+  OveragePurchaseRecord,
   OutboundJob,
   Page,
   PhoneEndpoint,
@@ -47,6 +51,8 @@ import type {
   StripeEvent,
   Subscription,
   Suppression,
+  ScheduledFollowup,
+  TenantFeatureEntitlements,
   TenantRequest,
   ToolActionRow,
   TwilioConnection,
@@ -160,8 +166,45 @@ export interface PlatformStore {
   completeNotification(clientId: string, id: string, workerId: string, providerId: string, deliveredAt: string): Promise<boolean>;
   retryNotification(clientId: string, id: string, workerId: string, error: string, nextAttemptAt: string): Promise<boolean>;
   deadLetterNotification(clientId: string, id: string, workerId: string, error: string, failedAt: string): Promise<boolean>;
+  getNotification(clientId: string, id: string): Promise<NotificationDelivery | undefined>;
   listNotifications(clientId: string, limit?: number): Promise<NotificationDelivery[]>;
   notificationHealth(nowIso: string): Promise<NotificationHealth>;
+  getTenantFeatureEntitlements(clientId: string): Promise<TenantFeatureEntitlements | undefined>;
+  upsertTenantFeatureEntitlements(entitlements: TenantFeatureEntitlements): Promise<void>;
+  getMessageUsagePeriod(clientId: string, channel: MessageUsagePeriod["channel"], periodStart: string): Promise<MessageUsagePeriod | undefined>;
+  upsertMessageUsagePeriod(period: MessageUsagePeriod): Promise<void>;
+  consumeMessageAllowance(clientId: string, channel: MessageUsagePeriod["channel"], periodStart: string, units: number, nowIso: string): Promise<MessageUsagePeriod | undefined>;
+  saveMessageSession(session: MessageSession): Promise<void>;
+  getOrCreateMessageSession(session: MessageSession): Promise<MessageSession>;
+  getMessageSession(clientId: string, id: string): Promise<MessageSession | undefined>;
+  findMessageSession(clientId: string, channel: MessageSession["channel"], contactAddress: string, senderAddress: string): Promise<MessageSession | undefined>;
+  appendMessageEvent(event: MessageEvent): Promise<boolean>;
+  claimInboundMessageEvents(workerId: string, nowIso: string, leaseSeconds: number, limit: number): Promise<MessageEvent[]>;
+  completeInboundMessageEvent(clientId: string, id: string, workerId: string, processedAt: string): Promise<boolean>;
+  retryInboundMessageEvent(clientId: string, id: string, workerId: string, error: string, retryAt: string, maxAttempts: number): Promise<boolean>;
+  reserveMessageEventAllowance(
+    event: MessageEvent,
+    period: MessageUsagePeriod,
+    persistSuppressedOnExhaustion?: boolean,
+  ): Promise<"reserved" | "duplicate" | "exhausted">;
+  updateMessageEventProviderStatus(
+    clientId: string,
+    idempotencyKey: string,
+    providerMessageId: string,
+    status: MessageEvent["status"],
+    metadata: Record<string, unknown>,
+    occurredAt: string,
+  ): Promise<boolean>;
+  findMessageEventByProviderId(clientId: string, provider: string, providerMessageId: string): Promise<MessageEvent | undefined>;
+  listMessageEvents(clientId: string, sessionId: string): Promise<MessageEvent[]>;
+  enqueueScheduledFollowup(followup: ScheduledFollowup): Promise<boolean>;
+  claimScheduledFollowups(workerId: string, nowIso: string, leaseSeconds: number, limit: number): Promise<ScheduledFollowup[]>;
+  saveScheduledFollowup(followup: ScheduledFollowup, leaseOwner?: string): Promise<boolean>;
+  listScheduledFollowups(clientId: string): Promise<ScheduledFollowup[]>;
+  claimOveragePurchase(purchase: OveragePurchaseRecord): Promise<boolean>;
+  saveOveragePurchase(purchase: OveragePurchaseRecord): Promise<void>;
+  getOveragePurchaseByIdempotency(clientId: string, idempotencyKey: string): Promise<OveragePurchaseRecord | undefined>;
+  listOveragePurchases(clientId: string): Promise<OveragePurchaseRecord[]>;
   saveWebsiteSource(source: WebsiteSource): Promise<void>;
   getWebsiteSource(clientId: string, id: string): Promise<WebsiteSource | undefined>;
   listWebsiteSources(clientId: string): Promise<WebsiteSource[]>;
@@ -272,6 +315,12 @@ export class MemoryStore implements PlatformStore {
   onboardingJobs = new Map<string, OnboardingJob>();
   onboardingOutbox = new Map<string, OnboardingOutboxEvent>();
   notifications = new Map<string, NotificationDelivery>();
+  tenantFeatureEntitlements = new Map<string, TenantFeatureEntitlements>();
+  messageUsagePeriods = new Map<string, MessageUsagePeriod>();
+  messageSessions = new Map<string, MessageSession>();
+  messageEvents = new Map<string, MessageEvent>();
+  scheduledFollowups = new Map<string, ScheduledFollowup>();
+  overagePurchases = new Map<string, OveragePurchaseRecord>();
   websiteSources = new Map<string, WebsiteSource>();
   websiteExtractionRuns = new Map<string, WebsiteExtractionRun>();
   extractedFacts = new Map<string, ExtractedFact>();
@@ -931,6 +980,10 @@ export class MemoryStore implements PlatformStore {
     delete item.leaseExpiresAt;
     return true;
   }
+  async getNotification(clientId: string, id: string) {
+    const delivery = this.notifications.get(`${clientId}:${id}`);
+    return delivery ? structuredClone(delivery) : undefined;
+  }
   async listNotifications(clientId: string, limit = 100) {
     return [...this.notifications.values()].filter((item) => item.clientId === clientId)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit)
@@ -947,6 +1000,266 @@ export class MemoryStore implements PlatformStore {
       oldestPendingAt: pending.sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0]?.createdAt,
       providerFailures24h: all.filter((item) => item.lastError && item.updatedAt >= yesterday).length,
     };
+  }
+  async getTenantFeatureEntitlements(clientId: string) {
+    const value = this.tenantFeatureEntitlements.get(clientId);
+    return value ? structuredClone(value) : undefined;
+  }
+  async upsertTenantFeatureEntitlements(entitlements: TenantFeatureEntitlements) {
+    this.tenantFeatureEntitlements.set(entitlements.clientId, structuredClone(entitlements));
+  }
+  async getMessageUsagePeriod(
+    clientId: string,
+    channel: MessageUsagePeriod["channel"],
+    periodStart: string,
+  ) {
+    const period = this.messageUsagePeriods.get(`${clientId}:${channel}:${periodStart}`);
+    return period ? structuredClone(period) : undefined;
+  }
+  async upsertMessageUsagePeriod(period: MessageUsagePeriod) {
+    this.messageUsagePeriods.set(
+      `${period.clientId}:${period.channel}:${period.periodStart}`,
+      structuredClone(period),
+    );
+  }
+  async consumeMessageAllowance(
+    clientId: string,
+    channel: MessageUsagePeriod["channel"],
+    periodStart: string,
+    units: number,
+    nowIso: string,
+  ) {
+    if (!Number.isInteger(units) || units <= 0) throw new Error("message_units_must_be_positive_integer");
+    const key = `${clientId}:${channel}:${periodStart}`;
+    const period = this.messageUsagePeriods.get(key);
+    if (!period || period.usedMessages + units > period.includedMessages) return undefined;
+    period.usedMessages += units;
+    period.updatedAt = nowIso;
+    return structuredClone(period);
+  }
+  async saveMessageSession(session: MessageSession) {
+    const existing = this.messageSessions.get(`${session.clientId}:${session.id}`);
+    if (existing && existing.clientId !== session.clientId) throw new Error("message_session_tenant_conflict");
+    this.messageSessions.set(`${session.clientId}:${session.id}`, structuredClone(session));
+  }
+  async getOrCreateMessageSession(session: MessageSession) {
+    const existing = [...this.messageSessions.values()].find((item) =>
+      item.clientId === session.clientId &&
+      item.channel === session.channel &&
+      item.contactAddress === session.contactAddress &&
+      item.senderAddress === session.senderAddress);
+    if (existing) return structuredClone(existing);
+    this.messageSessions.set(`${session.clientId}:${session.id}`, structuredClone(session));
+    return structuredClone(session);
+  }
+  async getMessageSession(clientId: string, id: string) {
+    const session = this.messageSessions.get(`${clientId}:${id}`);
+    return session ? structuredClone(session) : undefined;
+  }
+  async findMessageSession(
+    clientId: string,
+    channel: MessageSession["channel"],
+    contactAddress: string,
+    senderAddress: string,
+  ) {
+    const session = [...this.messageSessions.values()].find((item) =>
+      item.clientId === clientId && item.channel === channel &&
+      item.contactAddress === contactAddress && item.senderAddress === senderAddress);
+    return session ? structuredClone(session) : undefined;
+  }
+  async appendMessageEvent(event: MessageEvent) {
+    const duplicate = [...this.messageEvents.values()].some((item) =>
+      (item.clientId === event.clientId && item.idempotencyKey === event.idempotencyKey) ||
+      Boolean(event.providerMessageId && item.provider === event.provider &&
+        item.providerMessageId === event.providerMessageId));
+    if (duplicate) return false;
+    if (!this.messageSessions.has(`${event.clientId}:${event.sessionId}`)) {
+      throw new Error("message_session_not_found");
+    }
+    this.messageEvents.set(`${event.clientId}:${event.id}`, structuredClone(event));
+    return true;
+  }
+  async claimInboundMessageEvents(workerId: string, nowIso: string, leaseSeconds: number, limit: number) {
+    const leaseExpiresAt = new Date(Date.parse(nowIso) + Math.max(1, leaseSeconds) * 1000).toISOString();
+    const events = [...this.messageEvents.values()]
+      .filter((event) => event.direction === "inbound" && event.channel === "whatsapp")
+      .filter((event) => event.status === "received" ||
+        (event.status === "processing" &&
+          Boolean(event.processingLeaseExpiresAt && event.processingLeaseExpiresAt <= nowIso)))
+      .sort((a, b) => a.occurredAt.localeCompare(b.occurredAt))
+      .slice(0, Math.max(0, limit));
+    for (const event of events) {
+      event.status = "processing";
+      event.processingLeaseOwner = workerId;
+      event.processingLeaseExpiresAt = leaseExpiresAt;
+      event.processingAttemptCount = (event.processingAttemptCount ?? 0) + 1;
+      event.processingError = undefined;
+    }
+    return events.map((event) => structuredClone(event));
+  }
+  async completeInboundMessageEvent(clientId: string, id: string, workerId: string, processedAt: string) {
+    const event = this.messageEvents.get(`${clientId}:${id}`);
+    if (!event || event.status !== "processing" || event.processingLeaseOwner !== workerId) return false;
+    event.status = "processed";
+    event.processedAt = processedAt;
+    event.processingLeaseOwner = undefined;
+    event.processingLeaseExpiresAt = undefined;
+    event.processingError = undefined;
+    return true;
+  }
+  async retryInboundMessageEvent(
+    clientId: string,
+    id: string,
+    workerId: string,
+    error: string,
+    retryAt: string,
+    maxAttempts: number,
+  ) {
+    const event = this.messageEvents.get(`${clientId}:${id}`);
+    if (!event || event.status !== "processing" || event.processingLeaseOwner !== workerId) return false;
+    const exhausted = (event.processingAttemptCount ?? 0) >= maxAttempts;
+    event.status = exhausted ? "failed" : "processing";
+    event.processingError = error;
+    event.processingLeaseOwner = exhausted ? undefined : workerId;
+    event.processingLeaseExpiresAt = exhausted ? undefined : retryAt;
+    return !exhausted;
+  }
+  async reserveMessageEventAllowance(
+    event: MessageEvent,
+    period: MessageUsagePeriod,
+    persistSuppressedOnExhaustion = false,
+  ) {
+    const duplicate = [...this.messageEvents.values()].some((item) =>
+      (item.clientId === event.clientId && item.idempotencyKey === event.idempotencyKey) ||
+      Boolean(event.providerMessageId && item.provider === event.provider &&
+        item.providerMessageId === event.providerMessageId));
+    if (duplicate) return "duplicate" as const;
+    const periodKey = `${period.clientId}:${period.channel}:${period.periodStart}`;
+    const current = this.messageUsagePeriods.get(periodKey);
+    if (!current) this.messageUsagePeriods.set(periodKey, structuredClone(period));
+    const allowance = this.messageUsagePeriods.get(periodKey)!;
+    if (allowance.usedMessages + event.billableUnits > allowance.includedMessages) {
+      if (persistSuppressedOnExhaustion) {
+        if (!this.messageSessions.has(`${event.clientId}:${event.sessionId}`)) {
+          throw new Error("message_session_not_found");
+        }
+        this.messageEvents.set(`${event.clientId}:${event.id}`, structuredClone({
+          ...event,
+          status: "suppressed",
+          billableUnits: 0,
+          metadata: {
+            ...event.metadata,
+            reason: "whatsapp_message_allowance_exhausted",
+            rejected: true,
+          },
+        }));
+      }
+      return "exhausted" as const;
+    }
+    if (!this.messageSessions.has(`${event.clientId}:${event.sessionId}`)) {
+      throw new Error("message_session_not_found");
+    }
+    allowance.usedMessages += event.billableUnits;
+    allowance.updatedAt = event.occurredAt;
+    this.messageEvents.set(`${event.clientId}:${event.id}`, structuredClone(event));
+    return "reserved" as const;
+  }
+  async updateMessageEventProviderStatus(
+    clientId: string,
+    idempotencyKey: string,
+    providerMessageId: string,
+    status: MessageEvent["status"],
+    metadata: Record<string, unknown>,
+    occurredAt: string,
+  ) {
+    const event = [...this.messageEvents.values()].find((item) =>
+      item.clientId === clientId && item.idempotencyKey === idempotencyKey);
+    if (!event) return false;
+    const providerConflict = [...this.messageEvents.values()].some((item) =>
+      item !== event && item.provider === event.provider && item.providerMessageId === providerMessageId);
+    if (providerConflict) return false;
+    event.providerMessageId = providerMessageId;
+    if (event.status !== "delivered" && (event.status !== "failed" || status === "delivered")) {
+      event.status = status;
+    }
+    event.metadata = { ...event.metadata, ...metadata };
+    event.occurredAt = occurredAt;
+    return true;
+  }
+  async findMessageEventByProviderId(clientId: string, provider: string, providerMessageId: string) {
+    const event = [...this.messageEvents.values()].find((item) =>
+      item.clientId === clientId && item.provider === provider &&
+      item.providerMessageId === providerMessageId);
+    return event ? structuredClone(event) : undefined;
+  }
+  async listMessageEvents(clientId: string, sessionId: string) {
+    return [...this.messageEvents.values()]
+      .filter((event) => event.clientId === clientId && event.sessionId === sessionId)
+      .sort((a, b) => a.occurredAt.localeCompare(b.occurredAt))
+      .map((event) => structuredClone(event));
+  }
+  async enqueueScheduledFollowup(followup: ScheduledFollowup) {
+    if ([...this.scheduledFollowups.values()].some((item) =>
+      item.clientId === followup.clientId && item.idempotencyKey === followup.idempotencyKey)) return false;
+    if (followup.sessionId && !this.messageSessions.has(`${followup.clientId}:${followup.sessionId}`)) {
+      throw new Error("message_session_not_found");
+    }
+    this.scheduledFollowups.set(`${followup.clientId}:${followup.id}`, structuredClone(followup));
+    return true;
+  }
+  async claimScheduledFollowups(workerId: string, nowIso: string, leaseSeconds: number, limit: number) {
+    const leaseExpiresAt = new Date(Date.parse(nowIso) + Math.max(1, leaseSeconds) * 1000).toISOString();
+    const items = [...this.scheduledFollowups.values()]
+      .filter((item) => item.attemptCount < item.maxAttempts && item.scheduledAt <= nowIso)
+      .filter((item) => item.status === "pending" ||
+        (item.status === "leased" && Boolean(item.leaseExpiresAt && item.leaseExpiresAt <= nowIso)))
+      .sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt))
+      .slice(0, Math.max(0, limit));
+    for (const item of items) {
+      Object.assign(item, {
+        status: "leased", leaseOwner: workerId, leaseExpiresAt,
+        attemptCount: item.attemptCount + 1, updatedAt: nowIso,
+      });
+    }
+    return items.map((item) => structuredClone(item));
+  }
+  async saveScheduledFollowup(followup: ScheduledFollowup, leaseOwner?: string) {
+    const key = `${followup.clientId}:${followup.id}`;
+    const existing = this.scheduledFollowups.get(key);
+    if (!existing || (leaseOwner && existing.leaseOwner !== leaseOwner)) return false;
+    this.scheduledFollowups.set(key, structuredClone(followup));
+    return true;
+  }
+  async listScheduledFollowups(clientId: string) {
+    return [...this.scheduledFollowups.values()]
+      .filter((item) => item.clientId === clientId)
+      .sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt))
+      .map((item) => structuredClone(item));
+  }
+  async claimOveragePurchase(purchase: OveragePurchaseRecord) {
+    const duplicate = [...this.overagePurchases.values()].some((item) =>
+      item.clientId === purchase.clientId &&
+      (item.idempotencyKey === purchase.idempotencyKey ||
+        item.boundaryMinutes === purchase.boundaryMinutes));
+    if (duplicate) return false;
+    this.overagePurchases.set(`${purchase.clientId}:${purchase.id}`, structuredClone(purchase));
+    return true;
+  }
+  async saveOveragePurchase(purchase: OveragePurchaseRecord) {
+    const key = `${purchase.clientId}:${purchase.id}`;
+    if (!this.overagePurchases.has(key)) throw new Error("overage_purchase_not_found");
+    this.overagePurchases.set(key, structuredClone(purchase));
+  }
+  async getOveragePurchaseByIdempotency(clientId: string, idempotencyKey: string) {
+    const purchase = [...this.overagePurchases.values()].find((item) =>
+      item.clientId === clientId && item.idempotencyKey === idempotencyKey);
+    return purchase ? structuredClone(purchase) : undefined;
+  }
+  async listOveragePurchases(clientId: string) {
+    return [...this.overagePurchases.values()]
+      .filter((item) => item.clientId === clientId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .map((item) => structuredClone(item));
   }
   async saveWebsiteSource(source: WebsiteSource) {
     this.websiteSources.set(`${source.clientId}:${source.id}`, structuredClone(source));

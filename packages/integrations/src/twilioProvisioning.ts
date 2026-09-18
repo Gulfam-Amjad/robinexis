@@ -12,6 +12,8 @@ export const PROTECTED_TWILIO_RESOURCE_IDS = new Set([
 export interface TwilioNumber {
   phoneNumber: string;
   sid?: string;
+  voiceUrl?: string;
+  statusCallback?: string;
 }
 
 export interface TwilioManagedSubaccount {
@@ -322,7 +324,12 @@ export async function findOwnedTwilioNumber(
     : managementClient();
   const numbers = await client.incomingPhoneNumbers.list({ phoneNumber: e164, limit: 1 });
   const number = numbers[0];
-  return number ? { phoneNumber: number.phoneNumber, sid: number.sid } : undefined;
+  return number ? {
+    phoneNumber: number.phoneNumber,
+    sid: number.sid,
+    voiceUrl: number.voiceUrl || undefined,
+    statusCallback: number.statusCallback || undefined,
+  } : undefined;
 }
 
 export async function listOwnedTwilioNumbers(

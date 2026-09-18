@@ -6,7 +6,11 @@ import type {
   CallSession,
   CreditLedgerEntry,
   Location,
+  MessageEvent,
+  MessageSession,
+  MessageUsagePeriod,
   OnboardingJob,
+  OveragePurchaseRecord,
   ProviderAccountSnapshot,
   ProviderAlertRule,
   ProviderDeployment,
@@ -14,6 +18,7 @@ import type {
   ProviderSwitchOperation,
   ProviderUsageCostEvent,
   ProvisioningRun,
+  ScheduledFollowup,
   StripeEvent,
   UserProfile,
 } from "./types.js";
@@ -195,6 +200,60 @@ describe("MemoryStore SaaS foundation", () => {
     };
     await store.upsertProviderAlertRule(rule);
     expect(await store.listProviderAlertRules("client-a")).toEqual([rule]);
+  });
+
+  it("isolates message allowance, provider deduplication, and overage claims", async () => {
+    const store = new MemoryStore();
+    const period: MessageUsagePeriod = {
+      id: "messages-1", clientId: "client-a", channel: "whatsapp",
+      periodStart: now, periodEnd: "2026-10-04T09:00:00.000Z",
+      includedMessages: 2, usedMessages: 0, createdAt: now, updatedAt: now,
+    };
+    await store.upsertMessageUsagePeriod(period);
+    expect((await store.consumeMessageAllowance(
+      "client-a", "whatsapp", now, 2, now,
+    ))?.usedMessages).toBe(2);
+    expect(await store.consumeMessageAllowance("client-a", "whatsapp", now, 1, now))
+      .toBeUndefined();
+    expect(await store.getCreditBalance("client-a")).toBe(0);
+
+    const session: MessageSession = {
+      id: "session-1", clientId: "client-a", channel: "whatsapp",
+      contactAddress: "whatsapp:+15550000001", senderAddress: "whatsapp:+15550000002",
+      status: "active", state: {}, createdAt: now, updatedAt: now,
+    };
+    await store.saveMessageSession(session);
+    const event: MessageEvent = {
+      id: "message-1", clientId: "client-a", sessionId: session.id,
+      channel: "whatsapp", direction: "inbound", provider: "twilio",
+      providerMessageId: "SM123", idempotencyKey: "twilio:SM123", status: "received",
+      billableUnits: 1, metadata: {}, occurredAt: now, createdAt: now,
+    };
+    expect(await store.appendMessageEvent(event)).toBe(true);
+    expect(await store.appendMessageEvent({ ...event, id: "message-2" })).toBe(false);
+    expect(await store.findMessageEventByProviderId("client-b", "twilio", "SM123"))
+      .toBeUndefined();
+    expect(await store.listMessageEvents("client-b", session.id)).toEqual([]);
+
+    const followup: ScheduledFollowup = {
+      id: "followup-1", clientId: "client-a", sessionId: session.id,
+      channel: "whatsapp", recipient: session.contactAddress, template: "booking_reminder",
+      idempotencyKey: "booking:1:reminder", payload: {}, status: "pending",
+      scheduledAt: now, attemptCount: 0, maxAttempts: 2, createdAt: now, updatedAt: now,
+    };
+    expect(await store.enqueueScheduledFollowup(followup)).toBe(true);
+    expect(await store.enqueueScheduledFollowup({ ...followup, id: "followup-2" })).toBe(false);
+    expect((await store.claimScheduledFollowups("worker-a", now, 60, 1))[0])
+      .toMatchObject({ id: followup.id, status: "leased", attemptCount: 1 });
+
+    const purchase: OveragePurchaseRecord = {
+      id: "overage-1", clientId: "client-a", idempotencyKey: "period:boundary:100",
+      boundaryMinutes: 100, grantedMinutes: 100, amountMinor: 1500, currency: "USD",
+      status: "pending", createdAt: now, updatedAt: now,
+    };
+    expect(await store.claimOveragePurchase(purchase)).toBe(true);
+    expect(await store.claimOveragePurchase({ ...purchase, id: "overage-2" })).toBe(false);
+    expect(await store.listCreditLedger("client-a")).toEqual([]);
   });
 
   it("reclaims only stale provisioning runs and guards writes by claim token", async () => {
