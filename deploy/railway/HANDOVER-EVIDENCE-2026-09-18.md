@@ -14,7 +14,8 @@ status: blocked
 
 - Runtime revision: `6647d49e4c3f`.
 - Production API: healthy at `https://api.robinexis.com/health`.
-- Production web: Vercel deployment `dpl_3twYm7nj5NkgBzumGGcvayTqkmxZ`, target `production`.
+- Production web: Vercel deployment `dpl_3zraunrWkdLHf45wQ1UFTgbwyB1L`, target `production`
+  (CSP fix for the Cost Saver browser call).
 - API and worker remain at one replica. `RATE_LIMIT_REDIS_REQUIRED=false`; Redis is required before scaling out.
 
 ## Passed gates
@@ -35,6 +36,12 @@ status: blocked
 - The production comparison page is enabled. Its Cost Saver browser canary created a session,
   connected the agent, received 11 audio frames, and wrote four component cost events without changing
   phone routing.
+- Cost Saver calls initially failed in the browser with `Client initiated disconnect`: the web CSP
+  allowed ElevenLabs but not LiveKit, so the signal socket was blocked. `connect-src` now allows
+  `https://*.livekit.cloud` and `wss://*.livekit.cloud`. Verified on `https://app.robinexis.com`: a
+  WebSocket to `robin-rq64w99n.livekit.cloud` raises no policy violation, while a control host still
+  reports a `connect-src` violation. `npm run check:live-csp` guards the deployed header and
+  `npm run check:csp-api-origin` guards `vercel.json` at build time.
 - Blades remains mapped to agent `agent_6101m1c3n4wnfsgskgzr13w2gt9s` and number `+447446868067`.
   Its internal Starter trial is `trialing`, onboarding is `active`, and live Cal.com availability is green.
 
@@ -53,6 +60,10 @@ status: blocked
 > Twilio has only the protected Blades number plus a malformed legacy verified caller ID. The self-call
 > returned busy and Twilio rejected the legacy caller ID. A manual inbound call must produce exactly one
 > Blades call record and one ElevenLabs usage event before status can change to `ready`.
+
+> [!note] Signed-in Cost Saver click-through
+> The CSP block is fixed and proven from the production origin, but the final signed-in conversation on
+> `/admin/provider-comparison` needs an operator session with microphone permission.
 
 > [!warning] Owner operations
 > Rotate the staging Stripe test secret shared in chat. Provision Redis before adding replicas. Enable
