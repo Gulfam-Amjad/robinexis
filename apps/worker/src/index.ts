@@ -28,6 +28,7 @@ import { reconcileBillingAccess } from "./billingAccess.js";
 import { processOutboundJobs } from "./outboundJobs.js";
 import { captureWorkerError, initializeWorkerTelemetry } from "./telemetry.js";
 
+// This service also supervises the isolated LiveKit voice runtime process.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 loadEnv({ path: path.resolve(__dirname, "../../../.env") });
 loadDatabaseEnv();

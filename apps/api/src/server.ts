@@ -22,6 +22,7 @@ import {
   validateTwilioWebhook,
 } from "@robinexis/integrations";
 import { TOOL_NAMES, type ToolName } from "@robinexis/tool-contracts";
+// Shared booking safeguards are part of the deployed voice-tool boundary.
 import { applyCors, authenticateRequest, describeAuthMode } from "./auth.js";
 import { ingestElevenLabsWebhook } from "./elevenLabsWebhook.js";
 import {
