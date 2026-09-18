@@ -107,6 +107,19 @@ export function receptionistStatusCopy(status: ReceptionistStatus, agentName: st
   return { label: fill(copy.label), detail: fill(copy.detail) };
 }
 
+// livekit-client reports a blocked or dropped signal socket by cancelling the
+// pending connect, so the raw message is never useful to an operator.
+export function costSaverStartError(cause: unknown): string {
+  if (cause instanceof DOMException && cause.name === "NotAllowedError") {
+    return "Microphone access was blocked. Allow it in your browser settings, then try again.";
+  }
+  const message = cause instanceof Error ? cause.message : "";
+  if (/client initiated disconnect|could not establish|signal connection|websocket/i.test(message)) {
+    return "We couldn't reach the Cost Saver voice runtime from this browser. Check the network, then try again.";
+  }
+  return message || "The Cost Saver call could not be started.";
+}
+
 export function formatCallDuration(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = Math.max(0, totalSeconds % 60);

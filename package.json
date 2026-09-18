@@ -30,7 +30,7 @@
     "build:backend": "npm run build:api && npm run build:worker && npm run build:migrate",
     "build": "npm run typecheck && npm run build:web && npm run build:backend",
     "verify": "npm run test:web-production-env && npm run build && npm test && npm run test:web && npm run test:voice-runtime",
-    "handover:gate": "npm run check:secrets && npm run test:web-production-env && npm run test:csp-api-origin && npm run verify && npm run test:e2e && npm audit --omit=dev --audit-level=high",
+    "handover:gate": "npm run check:secrets && npm run test:web-production-env && npm run test:csp-api-origin && npm run verify && npm run test:e2e && npm run check:live-csp && npm audit --omit=dev --audit-level=high",
     "dev:web": "npm run dev -w @robinexis/web",
     "dev:api": "npm run dev -w @robinexis/api",
     "dev:worker": "npm run dev -w @robinexis/worker",
@@ -49,6 +49,7 @@
     "test:web-production-env": "node --test scripts/verify-web-production-env.test.mjs",
     "check:csp-api-origin": "node scripts/verify-csp-api-origin.mjs",
     "test:csp-api-origin": "node --test scripts/verify-csp-api-origin.test.mjs",
+    "check:live-csp": "node scripts/verify-live-csp.mjs",
     "backup:postgres": "node scripts/backup-postgres.mjs"
   },
   "devDependencies": {

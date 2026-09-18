@@ -21,6 +21,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 import {
+  costSaverStartError,
   deriveReceptionistStatus,
   formatCallDuration,
   receptionistStatusCopy,
@@ -60,6 +61,8 @@ export function CostSaverCall({
   const connectedAt = useRef(0);
   const audioRef = useRef<HTMLAudioElement>(null);
   const transcriptEnd = useRef<HTMLDivElement>(null);
+  const activeChangeRef = useRef(onActiveChange);
+  activeChangeRef.current = onActiveChange;
 
   const stop = useCallback(async (ended = true) => {
     const room = roomRef.current;
@@ -73,8 +76,8 @@ export function CostSaverCall({
     setMuted(false);
     setAgentSpeaking(false);
     if (ended) setPhase("ended");
-    onActiveChange?.(false);
-  }, [onActiveChange]);
+    activeChangeRef.current?.(false);
+  }, []);
 
   useEffect(() => () => {
     const room = roomRef.current;
@@ -83,8 +86,8 @@ export function CostSaverCall({
       room.disconnect();
       room.removeAllListeners();
     }
-    onActiveChange?.(false);
-  }, [onActiveChange]);
+    activeChangeRef.current?.(false);
+  }, []);
 
   useEffect(() => {
     if (!connected) return;
@@ -123,7 +126,7 @@ export function CostSaverCall({
     setTranscript([]);
     setElapsed(0);
     setPhase("permission");
-    onActiveChange?.(true);
+    activeChangeRef.current?.(true);
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
         throw new Error("This browser does not support microphone conversations.");
@@ -145,7 +148,7 @@ export function CostSaverCall({
         setConnected(false);
         setAgentSpeaking(false);
         setPhase("ended");
-        onActiveChange?.(false);
+        activeChangeRef.current?.(false);
       });
       await room.connect(session.url, session.token, { autoSubscribe: true });
       await room.localParticipant.setMicrophoneEnabled(true, {
@@ -159,13 +162,10 @@ export function CostSaverCall({
       setPhase("idle");
     } catch (cause) {
       await stop(false);
-      const denied = cause instanceof DOMException && cause.name === "NotAllowedError";
-      setError(denied
-        ? "Microphone access was blocked. Allow it in your browser settings, then try again."
-        : cause instanceof Error ? cause.message : "The Cost Saver call could not be started.");
+      setError(costSaverStartError(cause));
       setPhase("idle");
     }
-  }, [available, disabled, onActiveChange, receiveTranscript, stop]);
+  }, [available, disabled, receiveTranscript, stop]);
 
   const toggleMute = useCallback(async () => {
     const room = roomRef.current;
