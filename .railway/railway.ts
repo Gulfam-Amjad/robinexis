@@ -183,7 +183,7 @@ export default defineRailway(() => {
       GEMINI_LLM_MODEL: "gemini-2.5-flash",
       ELEVENLABS_API_KEY: preserve(),
       ELEVENLABS_VOICE_ID: preserve(),
-      ELEVENLABS_TTS_MODEL: "eleven_flash_v2_5",
+      ELEVENLABS_TTS_MODEL: "eleven_flash_v2",
       VOICE_RUNTIME_ENABLED: "false",
     },
   });

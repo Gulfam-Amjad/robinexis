@@ -104,7 +104,6 @@ export async function createEventType(
       lengthInMinutes: input.durationMinutes,
       length: input.durationMinutes,
       hidden: true,
-      locations: [{ type: "phone" }],
       beforeEventBuffer: input.bufferBeforeMinutes || 0,
       afterEventBuffer: input.bufferAfterMinutes || 0,
       minimumBookingNotice: input.minimumNoticeMinutes || 0,

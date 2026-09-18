@@ -72,7 +72,7 @@ export interface ElevenLabsAgentConfig {
   };
 }
 
-export const COST_SAVING_TTS_MODEL = "eleven_flash_v2_5";
+export const COST_SAVING_TTS_MODEL = "eleven_flash_v2";
 
 export function elevenLabsTtsModel(costOptimized: boolean): string | undefined {
   if (!costOptimized) return undefined;
@@ -398,8 +398,14 @@ export class ElevenLabsManagementClient {
     );
   }
 
-  createTool(config: Record<string, unknown>, operationKey: string): Promise<CreatedTool> {
-    return this.request("/v1/convai/tools", "POST", config, operationKey);
+  async createTool(config: Record<string, unknown>, operationKey: string): Promise<CreatedTool> {
+    const created = await this.request<CreatedTool & { id?: string }>(
+      "/v1/convai/tools",
+      "POST",
+      { tool_config: config },
+      operationKey,
+    );
+    return { tool_id: created.tool_id || created.id || "" };
   }
 
   updateAgent(
