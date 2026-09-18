@@ -36,6 +36,7 @@ import {
   publicDemoCallView,
   validateTwilioWebhook,
 } from "@robinexis/integrations";
+import { TOOL_DEFINITIONS } from "@robinexis/tool-contracts";
 import { describe, expect, it } from "vitest";
 
 function emptyCall(clientId: string, promptVersionId: string): CallSession {
@@ -45,6 +46,7 @@ function emptyCall(clientId: string, promptVersionId: string): CallSession {
     clientId,
     direction: "inbound",
     objective: "Book or help the caller",
+    contactPhone: "+447700900123",
     promptVersionId,
     transcript: [],
     collected: {},
@@ -70,6 +72,26 @@ describe("prompt compiler", () => {
     const outbound = compilePrompt({ client, direction: "outbound", objective: "appointment-reminder" });
     expect(outbound).toMatch(/OUTBOUND/);
     expect(outbound).toMatch(/voicemail/);
+  });
+
+  it("compacts voice instructions without dropping safety boundaries", async () => {
+    const { client } = await seedStore(new MemoryStore());
+    const full = compilePrompt({ client, direction: "inbound", objective: "receptionist" });
+    const compact = compilePrompt({
+      client,
+      direction: "inbound",
+      objective: "receptionist",
+      compactVoice: true,
+    });
+    expect(compact.length).toBeLessThan(full.length);
+    expect(compact).toMatch(/customer-facing words/i);
+    expect(compact).toMatch(/never output analysis/i);
+    expect(compact).toMatch(/check_availability before offering/i);
+    expect(compact).not.toMatch(/Return approved client facts only/);
+
+    const booking = TOOL_DEFINITIONS.find((tool) => tool.name === "create_booking")!;
+    expect(booking.input_schema.required).toContain("attendeePhone");
+    expect(booking.description).toMatch(/Never combine uncertain phone fragments/);
   });
 });
 
@@ -138,6 +160,7 @@ describe("text brain + fake calendar", () => {
         start: "2026-09-01T10:00:00.000Z",
         attendeeName: "Alex",
         attendeeEmail: "alex@example.com",
+        attendeePhone: "+447700900123",
         idempotencyKey: "k1",
         callerConfirmed: false,
       },
@@ -145,6 +168,24 @@ describe("text brain + fake calendar", () => {
       client,
     });
     expect(denied.ok).toBe(false);
+
+    const invalidPhone = await exec({
+      name: "create_booking",
+      input: {
+        eventTypeSlug: "haircut-style",
+        start: "2026-09-01T10:00:00.000Z",
+        attendeeName: "Michael",
+        attendeePhone: "+44 34435609",
+        idempotencyKey: "invalid-phone",
+        callerConfirmed: true,
+      },
+      call: emptyCall(client.id, prompt.id),
+      client,
+    });
+    expect(invalidPhone).toMatchObject({
+      ok: false,
+      error: "attendee_phone_invalid_ask_for_complete_number_from_beginning",
+    });
 
     const call = emptyCall(client.id, prompt.id);
     const first = await exec({
@@ -154,6 +195,7 @@ describe("text brain + fake calendar", () => {
         start: "2026-09-01T10:00:00.000Z",
         attendeeName: "Alex",
         attendeeEmail: "alex@example.com",
+        attendeePhone: "+447700900123",
         idempotencyKey: "book-1",
         callerConfirmed: true,
       },
@@ -167,6 +209,7 @@ describe("text brain + fake calendar", () => {
         start: "2026-09-01T10:00:00.000Z",
         attendeeName: "Alex",
         attendeeEmail: "alex@example.com",
+        attendeePhone: "+447700900123",
         idempotencyKey: "book-1",
         callerConfirmed: true,
       },
@@ -231,6 +274,7 @@ describe("text brain + fake calendar", () => {
         start: "2026-09-01T10:00:00.000Z",
         attendeeName: "Sam",
         attendeeEmail: "sam@example.com",
+        attendeePhone: "+447700900123",
         callerConfirmed: true,
         idempotencyKey: "b2",
       },
@@ -290,6 +334,7 @@ describe("text brain + fake calendar", () => {
         start: "2026-09-01T10:00:00.000Z",
         attendeeName: "Jo",
         attendeeEmail: "jo@example.com",
+        attendeePhone: "+447700900123",
         callerConfirmed: true,
         idempotencyKey: "n1",
       },

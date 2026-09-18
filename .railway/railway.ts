@@ -180,7 +180,7 @@ export default defineRailway(() => {
       GROQ_API_KEY: preserve(),
       GROQ_LLM_MODEL: "openai/gpt-oss-120b",
       GOOGLE_API_KEY: preserve(),
-      GEMINI_LLM_MODEL: "gemini-2.5-flash",
+      GEMINI_LLM_MODEL: "gemini-3.6-flash",
       ELEVENLABS_API_KEY: preserve(),
       ELEVENLABS_VOICE_ID: preserve(),
       ELEVENLABS_TTS_MODEL: "eleven_flash_v2",

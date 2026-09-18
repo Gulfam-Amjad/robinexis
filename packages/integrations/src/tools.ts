@@ -2,7 +2,11 @@ import type { ToolExecutor } from "@robinexis/brain";
 import type { PlatformStore } from "@robinexis/database";
 import { newId } from "@robinexis/database";
 import { requiredFieldsFor, type CallOutcome, type ToolName } from "@robinexis/tool-contracts";
-import { guestEmailFromPhone, normalizeSpokenPhone } from "./phone.js";
+import {
+  guestEmailFromPhone,
+  isPlausibleCustomerPhone,
+  normalizeSpokenPhone,
+} from "./phone.js";
 import * as calcom from "./calcom.js";
 import { resolveCalcomTenantConnection } from "./calcomAuth.js";
 import { appendVerifiedCalendarNote } from "./calendarNotes.js";
@@ -188,7 +192,11 @@ export function createToolExecutor(opts: {
       case "create_booking": {
         const live = await resolveLive();
         if (input.callerConfirmed !== true) throw new Error("caller_confirmation_required");
-        const phone = normalizeSpokenPhone(String(input.attendeePhone || call.contactPhone || ""));
+        const rawPhone = String(input.attendeePhone || call.contactPhone || "");
+        if (!isPlausibleCustomerPhone(rawPhone)) {
+          throw new Error("attendee_phone_invalid_ask_for_complete_number_from_beginning");
+        }
+        const phone = normalizeSpokenPhone(rawPhone);
         let attendeeEmail = String(input.attendeeEmail || "").trim();
         if (!attendeeEmail) {
           if (!opts.calendar && live.apiKey) {

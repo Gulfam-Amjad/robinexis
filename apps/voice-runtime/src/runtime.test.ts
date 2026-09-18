@@ -1,11 +1,11 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import { TOOL_DEFINITIONS } from "@robinexis/tool-contracts";
 import { RuntimeApiClient, signPostCall } from "./apiClient.js";
+import { classifySessionError } from "./agent.js";
 import { loadVoiceRuntimeEnv } from "./env.js";
 import { parseJobMetadata, stableCallId } from "./metadata.js";
 import { normalizedUsage } from "./telemetry.js";
-import { createToolBridge } from "./toolBridge.js";
+import { createToolBridge, VOICE_TOOL_NAMES } from "./toolBridge.js";
 
 const completeEnv = {
   VOICE_RUNTIME_ENABLED: "true",
@@ -32,6 +32,10 @@ describe("voice runtime safety contracts", () => {
       llmProvider: "groq",
       groqModel: "openai/gpt-oss-120b",
       elevenLabsTtsModel: "eleven_flash_v2_5",
+      endpointingMinDelayMs: 450,
+      endpointingMaxDelayMs: 2_200,
+      interruptionMinDurationMs: 650,
+      interruptionMinWords: 2,
     });
     expect(() => loadVoiceRuntimeEnv({ ...completeEnv, VOICE_LLM_PROVIDER: "invalid" }))
       .toThrow("invalid_voice_llm_provider");
@@ -86,7 +90,7 @@ describe("voice runtime safety contracts", () => {
     expect(request.body).toBe(JSON.stringify(payload));
   });
 
-  it("bridges every provider-neutral tool without caller-selected tenant fields", async () => {
+  it("bridges only voice tools without caller-selected tenant fields", async () => {
     const requests: Array<[RequestInfo | URL, RequestInit | undefined]> = [];
     const fetchImpl: typeof fetch = async (input, init) => {
       requests.push([input, init]);
@@ -101,13 +105,36 @@ describe("voice runtime safety contracts", () => {
       history,
       fetchImpl,
     });
-    expect(tools.map((tool) => tool.name)).toEqual(TOOL_DEFINITIONS.map((tool) => tool.name));
+    expect(tools.map((tool) => tool.name)).toEqual(VOICE_TOOL_NAMES);
     await (tools[0] as any).execute({ clientId: "bad", tenantId: "bad", topic: "hours" }, {});
     const request = requests[0][1]!;
     expect(request.headers).toMatchObject({ "x-voice-tool-secret": "tenant-bound-secret" });
     expect(request.headers).toMatchObject({ "x-voice-tool-tenant": "tenant-a" });
     expect(JSON.parse(String(request.body))).toEqual({ topic: "hours", conversationId: "call_stable" });
     expect(history[0].result).toEqual({ ok: true });
+  });
+
+  it("returns structured tool rejections to the model and classifies rate limits", async () => {
+    const history: Array<any> = [];
+    const tools = createToolBridge({
+      apiBaseUrl: "https://api.example",
+      tenantId: "tenant-a",
+      toolSecret: "secret",
+      callId: "call-1",
+      history,
+      fetchImpl: async () => new Response(JSON.stringify({
+        ok: false,
+        error: "attendee_phone_invalid_ask_for_complete_number_from_beginning",
+      }), { status: 400 }),
+    });
+    const booking = tools.find((tool) => tool.name === "create_booking")!;
+    await expect((booking as any).execute({ attendeePhone: "short" }, {})).resolves.toEqual({
+      ok: false,
+      error: "attendee_phone_invalid_ask_for_complete_number_from_beginning",
+    });
+    expect(history[0].result).toMatchObject({ ok: false });
+    expect(classifySessionError(new Error("429 tokens per minute"))).toBe("rate_limit");
+    expect(classifySessionError(new Error("LLM completion failed"))).toBe("llm");
   });
 
   it("normalizes LiveKit and model usage into provider-neutral units", () => {

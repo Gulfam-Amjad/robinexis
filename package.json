@@ -38,6 +38,7 @@
     "start:worker-runtime": "node scripts/start-worker-runtime.mjs",
     "typecheck:voice-runtime": "npm run typecheck -w @robinexis/voice-runtime",
     "test:voice-runtime": "npm test -w @robinexis/voice-runtime",
+    "evaluate:cost-saver": "tsx scripts/evaluate-cost-saver-models.ts",
     "db:migrate": "tsx packages/database/src/migrate.cli.ts",
     "db:seed": "tsx packages/database/src/seed.ts",
     "check:calcom": "tsx packages/integrations/src/verifyCalendar.ts",

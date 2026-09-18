@@ -27,6 +27,7 @@ export default defineAgent({
     const startedAt = new Date();
     const toolHistory: PostCallPayload["toolHistory"] = [];
     const latency: PostCallPayload["latency"] = {};
+    let recoverySpoken = false;
 
     const session = new voice.AgentSession({
       stt: new deepgram.STT({
@@ -55,10 +56,44 @@ export default defineAgent({
         language: "en",
         enableLogging: false,
       }),
-      maxToolSteps: 5,
+      maxToolSteps: 4,
+      turnHandling: {
+        endpointing: {
+          mode: "dynamic",
+          minDelay: env.endpointingMinDelayMs,
+          maxDelay: env.endpointingMaxDelayMs,
+        },
+        interruption: {
+          enabled: true,
+          mode: "adaptive",
+          minDuration: env.interruptionMinDurationMs,
+          minWords: env.interruptionMinWords,
+          resumeFalseInterruption: true,
+        },
+        preemptiveGeneration: {
+          enabled: true,
+          preemptiveTts: false,
+          maxRetries: 1,
+        },
+      },
     });
     session.on(AgentSessionEventTypes.MetricsCollected, (event) => {
       collectLatency(latency, event.metrics);
+      runtimeLog("voice_runtime_metric", {
+        metricType: event.metrics.type,
+        llmTtftMs: latency.llmTtftMs,
+        sttMs: latency.sttMs,
+        ttsTtfbMs: latency.ttsTtfbMs,
+        endToEndMs: latency.endToEndMs,
+      });
+    });
+    session.on(AgentSessionEventTypes.Error, (event) => {
+      const errorType = classifySessionError(event.error);
+      runtimeLog("voice_runtime_provider_error", { errorType });
+      if (!recoverySpoken && (errorType === "rate_limit" || errorType === "llm")) {
+        recoverySpoken = true;
+        session.say("Sorry, I had trouble checking that. Please say that once more.");
+      }
     });
 
     ctx.addShutdownCallback(async () => {
@@ -98,6 +133,7 @@ export default defineAgent({
           client: config.client,
           direction: metadata.direction,
           objective: metadata.objective,
+          compactVoice: true,
         }),
         tools: createToolBridge({
           apiBaseUrl: env.apiBaseUrl,
@@ -112,6 +148,17 @@ export default defineAgent({
     runtimeLog("voice_runtime_session_started", { callId, tenantId: metadata.tenantId });
   },
 });
+
+export function classifySessionError(error: unknown): "rate_limit" | "llm" | "stt" | "tts" | "provider" {
+  const value = error && typeof error === "object"
+    ? `${String((error as { name?: unknown }).name || "")} ${String((error as { message?: unknown }).message || "")}`
+    : String(error || "");
+  if (/429|rate.limit|tokens per minute/i.test(value)) return "rate_limit";
+  if (/llm|completion|model/i.test(value)) return "llm";
+  if (/speech.to.text|transcri|stt/i.test(value)) return "stt";
+  if (/text.to.speech|tts/i.test(value)) return "tts";
+  return "provider";
+}
 
 function transcriptFromSession(session: voice.AgentSession): TranscriptItem[] {
   return session.history.items.flatMap((item) => {

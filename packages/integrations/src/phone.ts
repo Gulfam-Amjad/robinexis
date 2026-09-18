@@ -78,3 +78,15 @@ export function isDialableE164(value: string | undefined): boolean {
   return Boolean(toDialableE164(value));
 }
 
+/**
+ * Booking contacts need a complete number, not merely the permissive E.164
+ * minimum. Apply known national lengths where the country code is explicit.
+ */
+export function isPlausibleCustomerPhone(value: string | undefined): boolean {
+  const normalized = toDialableE164(value);
+  if (!normalized) return false;
+  if (normalized.startsWith("+44")) return /^\+44\d{10}$/.test(normalized);
+  if (normalized.startsWith("+92")) return /^\+92\d{10}$/.test(normalized);
+  return isValidE164(normalized);
+}
+

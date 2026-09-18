@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { guestEmailFromPhone, normalizeSpokenPhone, toDialableE164 } from "./phone.js";
+import {
+  guestEmailFromPhone,
+  isPlausibleCustomerPhone,
+  normalizeSpokenPhone,
+  toDialableE164,
+} from "./phone.js";
 
 describe("normalizeSpokenPhone", () => {
   it("maps UK and Pakistan national numbers", () => {
@@ -19,6 +24,15 @@ describe("toDialableE164", () => {
   it("rejects Twilio placeholders", () => {
     expect(toDialableE164("+15555550100")).toBeUndefined();
     expect(toDialableE164("+442079296680")).toBe("+442079296680");
+  });
+});
+
+describe("isPlausibleCustomerPhone", () => {
+  it("requires complete UK and Pakistan numbers", () => {
+    expect(isPlausibleCustomerPhone("+44 34435609")).toBe(false);
+    expect(isPlausibleCustomerPhone("443443532")).toBe(false);
+    expect(isPlausibleCustomerPhone("07443 443532")).toBe(true);
+    expect(isPlausibleCustomerPhone("0342 4432411")).toBe(true);
   });
 });
 

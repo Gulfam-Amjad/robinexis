@@ -79,7 +79,7 @@ export const TOOL_DEFINITIONS = [
   {
     name: "create_booking",
     description:
-      "Create a confirmed appointment. Call only after the caller explicitly confirmed service, time, name, and mobile. attendeeEmail is optional — omit it if they did not give one. Always pass attendeePhone and an idempotencyKey.",
+      "Create a confirmed appointment. Call only after the caller explicitly confirmed service, time, name, and a complete mobile. Never combine uncertain phone fragments or invent digits. attendeeEmail is optional. Announce success only when this tool returns a booking UID.",
     input_schema: {
       type: "object",
       properties: {
@@ -97,6 +97,7 @@ export const TOOL_DEFINITIONS = [
         "eventTypeSlug",
         "start",
         "attendeeName",
+        "attendeePhone",
         "idempotencyKey",
         "callerConfirmed",
       ],

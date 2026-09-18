@@ -42,12 +42,14 @@ export function CostSaverCall({
   available,
   unavailableReason,
   disabled = false,
+  requestStart,
   onActiveChange,
 }: {
   config: ReceptionistDemoConfig;
   available: boolean;
   unavailableReason?: string;
   disabled?: boolean;
+  requestStart?: () => boolean;
   onActiveChange?: (active: boolean) => void;
 }) {
   const [phase, setPhase] = useState<LocalCallPhase>("idle");
@@ -62,13 +64,26 @@ export function CostSaverCall({
   const audioRef = useRef<HTMLAudioElement>(null);
   const transcriptEnd = useRef<HTMLDivElement>(null);
   const activeChangeRef = useRef(onActiveChange);
+  const requestStartRef = useRef(requestStart);
+  const startAttempt = useRef(0);
   activeChangeRef.current = onActiveChange;
+  requestStartRef.current = requestStart;
 
   const stop = useCallback(async (ended = true) => {
+    startAttempt.current += 1;
     const room = roomRef.current;
     roomRef.current = undefined;
     if (room) {
       await room.localParticipant.setMicrophoneEnabled(false).catch(() => undefined);
+      if (audioRef.current) {
+        room.remoteParticipants.forEach((participant) => {
+          participant.trackPublications.forEach((publication) => {
+            publication.track?.detach(audioRef.current!);
+          });
+        });
+        audioRef.current.pause();
+        audioRef.current.srcObject = null;
+      }
       room.disconnect();
       room.removeAllListeners();
     }
@@ -80,6 +95,7 @@ export function CostSaverCall({
   }, []);
 
   useEffect(() => () => {
+    startAttempt.current += 1;
     const room = roomRef.current;
     roomRef.current = undefined;
     if (room) {
@@ -88,6 +104,12 @@ export function CostSaverCall({
     }
     activeChangeRef.current?.(false);
   }, []);
+
+  useEffect(() => {
+    if (disabled && (roomRef.current || phase === "permission" || phase === "starting")) {
+      void stop();
+    }
+  }, [disabled, phase, stop]);
 
   useEffect(() => {
     if (!connected) return;
@@ -122,6 +144,11 @@ export function CostSaverCall({
 
   const start = useCallback(async () => {
     if (!available || disabled) return;
+    if (requestStartRef.current && !requestStartRef.current()) {
+      setError("End the Premium call before starting Cost Saver.");
+      return;
+    }
+    const attempt = ++startAttempt.current;
     setError("");
     setTranscript([]);
     setElapsed(0);
@@ -133,8 +160,10 @@ export function CostSaverCall({
       }
       const permission = await navigator.mediaDevices.getUserMedia({ audio: true });
       permission.getTracks().forEach((track) => track.stop());
+      if (attempt !== startAttempt.current) return;
       setPhase("starting");
       const session = await api.createProviderComparisonSession();
+      if (attempt !== startAttempt.current) return;
       const room = new Room({ adaptiveStream: true, dynacast: true });
       roomRef.current = room;
       room.on(RoomEvent.TrackSubscribed, (track: RemoteTrack) => {
@@ -151,6 +180,10 @@ export function CostSaverCall({
         activeChangeRef.current?.(false);
       });
       await room.connect(session.url, session.token, { autoSubscribe: true });
+      if (attempt !== startAttempt.current) {
+        room.disconnect();
+        return;
+      }
       await room.localParticipant.setMicrophoneEnabled(true, {
         echoCancellation: true,
         noiseSuppression: true,
@@ -161,6 +194,7 @@ export function CostSaverCall({
       setMuted(false);
       setPhase("idle");
     } catch (cause) {
+      if (attempt !== startAttempt.current) return;
       await stop(false);
       setError(costSaverStartError(cause));
       setPhase("idle");

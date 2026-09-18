@@ -11,6 +11,10 @@ export interface VoiceRuntimeEnv {
   elevenLabsApiKey: string;
   elevenLabsVoiceId: string;
   elevenLabsTtsModel: string;
+  endpointingMinDelayMs: number;
+  endpointingMaxDelayMs: number;
+  interruptionMinDurationMs: number;
+  interruptionMinWords: number;
   apiBaseUrl: string;
   internalSecret: string;
   signingSecret: string;
@@ -63,7 +67,22 @@ export function loadVoiceRuntimeEnv(env: NodeJS.ProcessEnv = process.env): Voice
     groqApiKey: env.GROQ_API_KEY?.trim() || undefined,
     googleApiKey: env.GOOGLE_API_KEY?.trim() || undefined,
     groqModel: env.GROQ_LLM_MODEL?.trim() || "openai/gpt-oss-120b",
-    geminiModel: env.GEMINI_LLM_MODEL?.trim() || "gemini-2.5-flash",
+    geminiModel: env.GEMINI_LLM_MODEL?.trim() || "gemini-3.6-flash",
     elevenLabsTtsModel: env.ELEVENLABS_TTS_MODEL?.trim() || "eleven_flash_v2_5",
+    endpointingMinDelayMs: boundedInteger(env.VOICE_ENDPOINTING_MIN_DELAY_MS, 450, 200, 2_000),
+    endpointingMaxDelayMs: boundedInteger(env.VOICE_ENDPOINTING_MAX_DELAY_MS, 2_200, 800, 6_000),
+    interruptionMinDurationMs: boundedInteger(env.VOICE_INTERRUPTION_MIN_DURATION_MS, 650, 200, 3_000),
+    interruptionMinWords: boundedInteger(env.VOICE_INTERRUPTION_MIN_WORDS, 2, 0, 10),
   };
+}
+
+function boundedInteger(
+  raw: string | undefined,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(minimum, Math.min(maximum, Math.round(parsed)));
 }

@@ -101,6 +101,7 @@ export {
 export {
   guestEmailFromPhone,
   isDialableE164,
+  isPlausibleCustomerPhone,
   normalizeSpokenPhone,
   toDialableE164,
 } from "./phone.js";

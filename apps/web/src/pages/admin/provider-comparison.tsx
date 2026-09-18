@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { CheckCircle2, Gauge, Scale, Sparkles } from "lucide-react";
 import { CostSaverCall } from "../../components/CostSaverCall";
@@ -12,13 +12,14 @@ import {
   SectionHeading,
 } from "../../components/ui";
 import { api } from "../../lib/api";
+import { ExclusiveVoiceSession, type VoiceProvider } from "../../lib/exclusiveVoiceSession";
 import { workspaceReceptionistDemo } from "../../lib/receptionistDemo";
 
 const BLADES_HAIR_ID = "client_blades_hair";
-type ActiveProvider = "premium" | "cost-saver" | null;
 
 export default function AdminProviderComparisonPage() {
-  const [activeProvider, setActiveProvider] = useState<ActiveProvider>(null);
+  const [activeProvider, setActiveProvider] = useState<VoiceProvider | null>(null);
+  const voiceSession = useRef(new ExclusiveVoiceSession());
   const client = useQuery({
     queryKey: ["client", BLADES_HAIR_ID],
     queryFn: () => api.client(BLADES_HAIR_ID),
@@ -29,12 +30,24 @@ export default function AdminProviderComparisonPage() {
     queryFn: api.providerComparisonReadiness,
     retry: false,
   });
+  const acquire = useCallback((provider: VoiceProvider) => {
+    const acquired = voiceSession.current.acquire(provider);
+    if (acquired) setActiveProvider(provider);
+    return acquired;
+  }, []);
+  const release = useCallback((provider: VoiceProvider) => {
+    if (voiceSession.current.release(provider)) setActiveProvider(null);
+  }, []);
   const premiumActive = useCallback((active: boolean) => {
-    setActiveProvider((current) => active ? "premium" : current === "premium" ? null : current);
-  }, []);
+    if (active) acquire("premium");
+    else release("premium");
+  }, [acquire, release]);
   const costSaverActive = useCallback((active: boolean) => {
-    setActiveProvider((current) => active ? "cost-saver" : current === "cost-saver" ? null : current);
-  }, []);
+    if (active) acquire("cost-saver");
+    else release("cost-saver");
+  }, [acquire, release]);
+  const requestPremium = useCallback(() => acquire("premium"), [acquire]);
+  const requestCostSaver = useCallback(() => acquire("cost-saver"), [acquire]);
 
   if (client.isLoading || readiness.isLoading) {
     return <LoadingState label="Loading the Blades provider comparison…" />;
@@ -102,6 +115,7 @@ export default function AdminProviderComparisonPage() {
           config={demo}
           compact
           disabled={activeProvider === "cost-saver"}
+          requestStart={requestPremium}
           onActiveChange={premiumActive}
         />
       </Card>
@@ -112,6 +126,7 @@ export default function AdminProviderComparisonPage() {
           available={costSaverReady}
           unavailableReason={unavailableReason}
           disabled={activeProvider === "premium"}
+          requestStart={requestCostSaver}
           onActiveChange={costSaverActive}
         />
         {!costSaverReady && readiness.data?.costSaver.missing.length ? (
