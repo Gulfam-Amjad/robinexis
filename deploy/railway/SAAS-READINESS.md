@@ -41,6 +41,8 @@ Updated: 2026-09-18
   accepted and cancelled successfully.
 - The cheap LiveKit runtime is registered in production. The isolated staging room/audio canary,
   quality gate, ElevenLabs → LiveKit switch, post-call usage persistence, and rollback all passed.
+- Production browser comparison readiness is green. A Cost Saver session connected, returned audio,
+  and persisted LiveKit, Deepgram, Groq, and ElevenLabs component usage without changing phone routing.
 - `SAAS_PROVISIONING_ENABLED=false` remains unchanged in API and worker.
 - No live Stripe charge was created. Checkout verification used Stripe's `4242` test card in an isolated sandbox.
 - Stripe staging checkout, portal, signed webhook, replay idempotency, subscription, and one allowance

@@ -32,6 +32,9 @@ status: blocked
 - ElevenLabs synthetic simulation returned tool calls and availability.
 - LiveKit registered a worker, returned audio in a real room, persisted post-call/cost events, switched
   the isolated phone route, and restored the original ElevenLabs route.
+- The production comparison page is enabled. Its Cost Saver browser canary created a session,
+  connected the agent, received 11 audio frames, and wrote four component cost events without changing
+  phone routing.
 - Blades remains mapped to agent `agent_6101m1c3n4wnfsgskgzr13w2gt9s` and number `+447446868067`.
   Its internal Starter trial is `trialing`, onboarding is `active`, and live Cal.com availability is green.
 
