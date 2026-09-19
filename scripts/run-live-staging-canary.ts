@@ -19,7 +19,7 @@ const required = (name: string) => {
 };
 
 const clientId = "client_staging_launch_canary";
-const operationKey = "live-integrations-launch-v1";
+const operationKey = `${clientId}:v1`;
 const phoneNumber = required("STAGING_CANARY_PHONE_NUMBER");
 if (phoneNumber === "+447446868067") throw new Error("protected_number_forbidden");
 const pool = createPool(required("DATABASE_URL"));

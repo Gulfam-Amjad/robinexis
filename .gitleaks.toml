@@ -1,0 +1,22 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Provider resource IDs in generated deployment exports; values are references, not credentials"
+paths = [
+  '''^brains/robinexis/outputs/demos/agents-project/(agent_configs|tool_configs)/.*\.json$''',
+  '''^brains/robinexis/outputs/production/smith-england-salon/(README\.md|agents-project/(agent_configs|tool_configs)/.*\.json)$''',
+]
+
+[[allowlists]]
+description = "Documented deployment IDs and environment-variable examples"
+paths = [
+  '''^deploy/railway/HANDOVER-EVIDENCE-[0-9-]+\.md$''',
+  '''^os/references/stripe-cli\.md$''',
+]
+
+[[allowlists]]
+description = "Public RFC 6455 test vector"
+paths = [
+  '''^superpowers/tests/brainstorm-server/ws-protocol\.test\.js$''',
+]

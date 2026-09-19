@@ -20,7 +20,7 @@ jobs:
           docker run --rm
           -v "$PWD:/repo"
           ghcr.io/gitleaks/gitleaks:v8.24.3
-          dir /repo --redact --verbose --exit-code 1
+          dir /repo --config /repo/.gitleaks.toml --redact --verbose --exit-code 1
 
   verify:
     runs-on: ubuntu-latest
@@ -73,7 +73,13 @@ jobs:
       - run: npm run db:migrate
       - run: npm test
       - run: npm run test:voice-runtime
-      - run: npm audit --omit=dev --audit-level=high
+      - name: Audit production dependencies
+        run: |
+          for attempt in 1 2 3; do
+            npm audit --omit=dev --audit-level=high && exit 0
+            test "$attempt" = "3" || sleep 10
+          done
+          exit 1
       - run: npm run test:web
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
