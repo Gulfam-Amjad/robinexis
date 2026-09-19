@@ -27,7 +27,8 @@ status: blocked
 - Automated checks passed: 326 backend tests, 50 web tests, 10 voice-runtime tests, root/web typechecks,
   and the rolling nine-stage Groq conversation evaluation. The evaluation passed unfinished speech,
   retained day/service/time/name, incomplete and corrected phone, confirmation, booking intent, and
-  close at 1.756 seconds with 1,979 input and 519 output tokens.
+  close at 1.887 seconds with 2,033 input and 589 output tokens. Groq scored 9/9 and remained
+  selected over Gemini, which scored 8/9 at 8.220 seconds.
 - Staging uses agent name `robinexis-alternate-runtime-staging`, preventing production workers from
   claiming staging jobs in the shared LiveKit project. The final spoken canary heard the complete
   interrupted request, stopped with a measured 330 ms audio gap, used one concise question, offered
