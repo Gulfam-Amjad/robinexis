@@ -265,6 +265,37 @@ describe("product route tenant authorization", () => {
       referenceId: "call_period",
       createdAt: now.toISOString(),
     });
+    await store.upsertMessageUsagePeriod({
+      id: "message_usage_period",
+      clientId: BLADES_HAIR_ID,
+      channel: "whatsapp",
+      periodStart: start,
+      periodEnd: end,
+      includedMessages: 3_000,
+      usedMessages: 125,
+      createdAt: start,
+      updatedAt: now.toISOString(),
+    });
+    await store.upsertTenantFeatureEntitlements({
+      clientId: BLADES_HAIR_ID,
+      whatsappEnabled: true,
+      autoMinuteBlocksEnabled: true,
+      createdAt: start,
+      updatedAt: now.toISOString(),
+    });
+    await store.claimOveragePurchase({
+      id: "overage_receipt",
+      clientId: BLADES_HAIR_ID,
+      idempotencyKey: "minute-overage:test",
+      boundaryMinutes: 300,
+      grantedMinutes: 100,
+      amountMinor: 1_500,
+      currency: "USD",
+      status: "succeeded",
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+      completedAt: now.toISOString(),
+    });
 
     const response = await request(store, salonActor, `/api/v1/usage?clientId=${BLADES_HAIR_ID}`);
     expect(response).toMatchObject({
@@ -275,10 +306,180 @@ describe("product route tenant authorization", () => {
         billingPeriodEnd: end,
         periodAllocatedMinutes: 300,
         periodUsedMinutes: 24,
+        messaging: {
+          whatsapp: {
+            includedMessages: 3_000,
+            usedMessages: 125,
+            remainingMessages: 2_875,
+            limitReached: false,
+          },
+        },
+        overage: {
+          autoPurchaseEnabled: true,
+          blockMinutes: 100,
+          purchases: [{ id: "overage_receipt", status: "succeeded" }],
+        },
       },
     });
     expect(response.body).not.toHaveProperty("accountSnapshots");
     expect(response.body).not.toHaveProperty("providerCost");
+  });
+
+  it("keeps feature controls operator-only and requires auto-charge confirmation", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+
+    const forbidden = await request(
+      store,
+      salonActor,
+      `/api/v1/admin/clients/${BLADES_HAIR_ID}/feature-entitlements`,
+    );
+    expect(forbidden).toMatchObject({ status: 403, body: { error: "platform_admin_required" } });
+
+    const defaults = await request(
+      store,
+      operatorActor,
+      `/api/v1/admin/clients/${BLADES_HAIR_ID}/feature-entitlements`,
+    );
+    expect(defaults).toMatchObject({
+      status: 200,
+      body: {
+        clientId: BLADES_HAIR_ID,
+        whatsappEnabled: false,
+        autoMinuteBlocksEnabled: false,
+      },
+    });
+
+    const unconfirmed = await request(
+      store,
+      operatorActor,
+      `/api/v1/admin/clients/${BLADES_HAIR_ID}/feature-entitlements`,
+      "PATCH",
+      { autoMinuteBlocksEnabled: true },
+    );
+    expect(unconfirmed).toMatchObject({
+      status: 409,
+      body: { error: "auto_minute_blocks_confirmation_required" },
+    });
+
+    const updated = await request(
+      store,
+      operatorActor,
+      `/api/v1/admin/clients/${BLADES_HAIR_ID}/feature-entitlements`,
+      "PATCH",
+      {
+        whatsappEnabled: true,
+        autoMinuteBlocksEnabled: true,
+        confirmation: "ENABLE_AUTO_MINUTE_BLOCKS",
+      },
+    );
+    expect(updated).toMatchObject({
+      status: 200,
+      body: { whatsappEnabled: true, autoMinuteBlocksEnabled: true },
+    });
+  });
+
+  it("returns sanitized managed WhatsApp readiness without sender secrets", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    const now = new Date().toISOString();
+    await store.upsertProviderResource({
+      id: "managed_whatsapp_sender",
+      clientId: BLADES_HAIR_ID,
+      provider: "twilio",
+      resourceType: "whatsapp_sender",
+      providerResourceId: "whatsapp:+14155238886",
+      lifecycleStatus: "active",
+      credentialRef: "secret://twilio/token",
+      encryptedCredential: "encrypted-token",
+      metadata: { address: "whatsapp:+14155238886", authToken: "private-token" },
+      createdAt: now,
+      updatedAt: now,
+    });
+    const previousEnabled = process.env.WHATSAPP_ENABLED;
+    process.env.WHATSAPP_ENABLED = "true";
+    try {
+      const response = await request(
+        store,
+        operatorActor,
+        `/api/v1/admin/clients/${BLADES_HAIR_ID}/managed-whatsapp-status`,
+      );
+      expect(response).toMatchObject({
+        status: 200,
+        body: { sender: { status: "active", configured: true } },
+      });
+      expect(JSON.stringify(response.body)).not.toMatch(
+        /14155238886|private-token|encrypted-token|credentialRef|providerResourceId/,
+      );
+      const forbidden = await request(
+        store,
+        salonActor,
+        `/api/v1/admin/clients/${BLADES_HAIR_ID}/managed-whatsapp-status`,
+      );
+      expect(forbidden.status).toBe(403);
+    } finally {
+      if (previousEnabled === undefined) delete process.env.WHATSAPP_ENABLED;
+      else process.env.WHATSAPP_ENABLED = previousEnabled;
+    }
+  });
+
+  it("configures one approved managed WhatsApp sender for an active Pro tenant", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    const now = new Date().toISOString();
+    await store.upsertSubscription({
+      id: "subscription_whatsapp_pro",
+      clientId: BLADES_HAIR_ID,
+      provider: "internal",
+      planTier: "pro",
+      status: "active",
+      currentPeriodStart: "2026-09-01T00:00:00.000Z",
+      currentPeriodEnd: "2026-10-01T00:00:00.000Z",
+      cancelAtPeriodEnd: false,
+      metadata: {},
+      createdAt: now,
+      updatedAt: now,
+    });
+    const unconfirmed = await request(
+      store,
+      operatorActor,
+      `/api/v1/admin/clients/${BLADES_HAIR_ID}/managed-whatsapp-status`,
+      "PUT",
+      { sender: "+14155238886" },
+    );
+    expect(unconfirmed).toMatchObject({
+      status: 409,
+      body: { error: "managed_whatsapp_confirmation_required" },
+    });
+    const configured = await request(
+      store,
+      operatorActor,
+      `/api/v1/admin/clients/${BLADES_HAIR_ID}/managed-whatsapp-status`,
+      "PUT",
+      { sender: "+14155238886", confirmation: "ENABLE_MANAGED_WHATSAPP" },
+    );
+    expect(configured).toMatchObject({
+      status: 200,
+      body: {
+        sender: { status: "active", configured: true },
+        runtime: { tenantEnabled: true },
+      },
+    });
+    expect(JSON.stringify(configured.body)).not.toContain("14155238886");
+    expect(await store.getTenantFeatureEntitlements(BLADES_HAIR_ID))
+      .toMatchObject({ whatsappEnabled: true });
+    expect(await store.getClient(BLADES_HAIR_ID))
+      .toMatchObject({ phoneAcquisitionMode: "robinexis_account" });
+    expect(await store.listProviderResources(BLADES_HAIR_ID)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          provider: "twilio",
+          resourceType: "whatsapp_sender",
+          lifecycleStatus: "active",
+          metadata: { address: "whatsapp:+14155238886" },
+        }),
+      ]),
+    );
   });
 
   it("returns not found instead of exposing another tenant or its calls", async () => {

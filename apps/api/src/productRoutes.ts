@@ -44,12 +44,20 @@ import {
   listOwnedTwilioNumbers,
   listCalcomDestinationCalendars,
   isPlanTier,
+  MINUTE_BLOCK_AMOUNT_MINOR,
+  MINUTE_BLOCK_CURRENCY,
+  MINUTE_BLOCK_MINUTES,
+  normalizeWhatsAppAddress,
   planCatalog,
   planDefinition,
   provisionManagedTwilioNumber,
   publicClientView,
   replayStripeEvent,
   enqueueLifecycleEmail,
+  enqueueWhatsAppCancellationFollowup,
+  configureManagedWhatsAppSender,
+  managedWhatsAppReadiness,
+  whatsappAllowanceSnapshot,
   twilioOAuthAuthorizeUrl,
   verifyTwilioOAuthState,
   calcomConnectionModes,
@@ -76,6 +84,7 @@ import {
 } from "./auth.js";
 import { ensureSelfServeWorkspace, writableClientId } from "./billingService.js";
 import { provisionClientAgent, repairCalendarEventTypes } from "./provisioningService.js";
+import { handleProviderComparisonRoute } from "./providerComparisonRoutes.js";
 import { handleProviderSwitchRoute } from "./providerSwitchRoutes.js";
 import { handleProviderUsageRoute } from "./providerUsageRoutes.js";
 
@@ -565,11 +574,138 @@ export function calendarDetail(calendar: Record<string, unknown>): string {
   return error.slice(0, 160);
 }
 
-export function integrationList(client: ClientConfig, calendar: Record<string, unknown>) {
+type LiveVoiceProbe = {
+  twilio: { connected: boolean; detail: string };
+  elevenlabs: { connected: boolean; detail: string };
+  livekit: { connected: boolean; detail: string };
+};
+
+function elevenLabsToolCount(agent: Record<string, unknown>): number {
+  const conversation = agent.conversation_config as Record<string, unknown> | undefined;
+  const agentConfig = conversation?.agent as Record<string, unknown> | undefined;
+  const prompt = agentConfig?.prompt as Record<string, unknown> | undefined;
+  return Array.isArray(prompt?.tool_ids) ? prompt.tool_ids.length : 0;
+}
+
+function expectedTwilioRoute(client: ClientConfig): string {
+  return client.voicePipeline === "livekit-cascade"
+    ? process.env.LIVEKIT_TWILIO_VOICE_URL || ""
+    : process.env.ELEVENLABS_TWILIO_VOICE_URL || "";
+}
+
+function routeMatchesPipeline(client: ClientConfig, actual: string, expected: string): boolean {
+  if (!actual) return false;
+  if (expected) return actual.replace(/\/$/, "") === expected.replace(/\/$/, "");
+  if (client.voicePipeline !== "elevenlabs-convai") return false;
+  try {
+    return new URL(actual).hostname.endsWith("elevenlabs.io");
+  } catch {
+    return false;
+  }
+}
+
+export async function probeLiveVoiceProviders(
+  store: PlatformStore,
+  client: ClientConfig,
+  dependencies: {
+    findNumber?: typeof findOwnedTwilioNumber;
+    fetchAgent?: (agentId: string) => Promise<Record<string, unknown>>;
+    fetchLiveKit?: (url: string) => Promise<boolean>;
+  } = {},
+): Promise<LiveVoiceProbe> {
+  const number = (await store.getTwilioConnection(client.id))?.selectedPhoneNumber ||
+    client.inboundNumbers[0] || "";
+  let twilio: LiveVoiceProbe["twilio"] = {
+    connected: false,
+    detail: number ? "Unable to verify the assigned number" : "No inbound number assigned",
+  };
+  if (number) {
+    try {
+      const connection = await store.getTwilioConnection(client.id);
+      const credentials = connection?.mode === "customer_oauth" &&
+        connection.accountSid &&
+        connection.apiKeySid &&
+        connection.encryptedApiKeySecret
+        ? {
+            accountSid: connection.accountSid,
+            apiKeySid: connection.apiKeySid,
+            apiKeySecret: decryptTwilioCredential(connection.encryptedApiKeySecret),
+          }
+        : undefined;
+      const owned = await (dependencies.findNumber || findOwnedTwilioNumber)(number, credentials);
+      const expected = expectedTwilioRoute(client);
+      const routeOk = Boolean(owned && routeMatchesPipeline(client, owned.voiceUrl || "", expected));
+      twilio = {
+        connected: routeOk,
+        detail: !owned
+          ? "Assigned number was not found in Twilio"
+          : routeOk
+            ? "Number verified and routed to the selected voice provider"
+            : "Number exists, but its voice route does not match this workspace",
+      };
+    } catch {
+      twilio = { connected: false, detail: "Twilio live verification failed" };
+    }
+  }
+
+  let elevenlabs: LiveVoiceProbe["elevenlabs"] = {
+    connected: false,
+    detail: client.elevenlabsAgentId ? "Unable to verify the assigned agent" : "Assign this workspace's ElevenLabs agent ID",
+  };
+  if (client.voicePipeline === "elevenlabs-convai" && client.elevenlabsAgentId) {
+    try {
+      const fetchAgent = dependencies.fetchAgent || ((agentId: string) => {
+        const key = process.env.ELEVENLABS_API_KEY || "";
+        if (!key) throw new Error("elevenlabs_not_configured");
+        return new ElevenLabsManagementClient({ apiKey: key }).getAgent(agentId);
+      });
+      const agent = await fetchAgent(client.elevenlabsAgentId);
+      const toolsReady = !client.enabledFeatures.includes("booking") || elevenLabsToolCount(agent) >= 2;
+      elevenlabs = {
+        connected: toolsReady,
+        detail: toolsReady
+          ? "Agent verified with required realtime tools"
+          : "Agent exists, but required booking tools are missing",
+      };
+    } catch {
+      elevenlabs = { connected: false, detail: "ElevenLabs live verification failed" };
+    }
+  }
+  let livekit: LiveVoiceProbe["livekit"] = {
+    connected: false,
+    detail: client.voicePipeline === "livekit-cascade"
+      ? "LiveKit runtime verification failed"
+      : "This workspace uses ElevenLabs",
+  };
+  if (client.voicePipeline === "livekit-cascade") {
+    const runtimeBase = process.env.VOICE_RUNTIME_PUBLIC_BASE_URL || "";
+    try {
+      const fetchLiveKit = dependencies.fetchLiveKit || (async (url: string) => {
+        const response = await fetch(new URL("/health", url), { signal: AbortSignal.timeout(5_000) });
+        return response.ok;
+      });
+      const connected = Boolean(runtimeBase) && await fetchLiveKit(runtimeBase);
+      livekit = {
+        connected,
+        detail: connected ? "LiveKit voice runtime is healthy" : "LiveKit voice runtime is unavailable",
+      };
+    } catch {
+      livekit = { connected: false, detail: "LiveKit runtime verification failed" };
+    }
+  }
+  return { twilio, elevenlabs, livekit };
+}
+
+export function integrationList(
+  client: ClientConfig,
+  calendar: Record<string, unknown>,
+  live?: LiveVoiceProbe,
+) {
   const now = new Date().toISOString();
   return [
-    { id: "twilio", name: "Twilio", connected: Boolean(client.inboundNumbers.length), detail: client.inboundNumbers.length ? "Inbound numbers route directly to ElevenLabs" : "No inbound number assigned", lastCheckedAt: now },
-    { id: "elevenlabs", name: "ElevenLabs", connected: client.voicePipeline === "elevenlabs-convai" && Boolean(client.elevenlabsAgentId), detail: client.elevenlabsAgentId ? "Realtime speech, barge-in and agent conversation" : "Assign this workspace's ElevenLabs agent ID", lastCheckedAt: now },
+    { id: "twilio", name: "Twilio", connected: live?.twilio.connected ?? false, detail: live?.twilio.detail || "Live verification has not run", lastCheckedAt: now },
+    { id: "elevenlabs", name: "ElevenLabs", connected: live?.elevenlabs.connected ?? false, detail: live?.elevenlabs.detail || "Live verification has not run", lastCheckedAt: now },
+    { id: "livekit", name: "LiveKit", connected: live?.livekit.connected ?? false, detail: live?.livekit.detail || "Live verification has not run", lastCheckedAt: now },
     { id: "calcom", name: "Cal.com", connected: Boolean(calendar.ok), detail: calendar.ok ? `${calendar.slotCount || 0} slots available in the next 7 days` : calendarDetail(calendar), lastCheckedAt: String(calendar.probedAt || now) },
     { id: "gemini", name: "Gemini", connected: Boolean(process.env.GEMINI_API_KEY), detail: "Knowledge embeddings", lastCheckedAt: now },
     { id: "stripe", name: "Stripe", connected: Boolean(process.env.STRIPE_SECRET_KEY), detail: "Billing webhook", lastCheckedAt: now },
@@ -790,6 +926,7 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
   const { req, res, url, store, actor, send } = ctx;
   const route = url.pathname.slice("/api/v1".length) || "/";
 
+  if (await handleProviderComparisonRoute(ctx, route)) return true;
   if (await handleProviderUsageRoute(ctx, route)) return true;
   if (await handleProviderSwitchRoute(ctx, route)) return true;
 
@@ -817,6 +954,112 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
     return true;
   }
 
+  const featureEntitlementsMatch =
+    route.match(/^\/admin\/clients\/([^/]+)\/feature-entitlements$/);
+  if (featureEntitlementsMatch && (req.method === "GET" || req.method === "PATCH")) {
+    if (!canAdministerPlatform(actor)) {
+      send(res, 403, { error: "platform_admin_required" });
+      return true;
+    }
+    const id = decodeURIComponent(featureEntitlementsMatch[1]);
+    const client = await store.getClient(id);
+    if (!client) {
+      send(res, 404, { error: "client_not_found" });
+      return true;
+    }
+    const existing = await store.getTenantFeatureEntitlements(id);
+    if (req.method === "GET") {
+      send(res, 200, {
+        clientId: id,
+        whatsappEnabled: existing?.whatsappEnabled ?? false,
+        autoMinuteBlocksEnabled: existing?.autoMinuteBlocksEnabled ?? false,
+        updatedAt: existing?.updatedAt,
+      });
+      return true;
+    }
+    const body = await readJson<{
+      whatsappEnabled?: unknown;
+      autoMinuteBlocksEnabled?: unknown;
+      confirmation?: unknown;
+    }>(ctx);
+    if (
+      body.whatsappEnabled !== undefined && typeof body.whatsappEnabled !== "boolean" ||
+      body.autoMinuteBlocksEnabled !== undefined && typeof body.autoMinuteBlocksEnabled !== "boolean" ||
+      body.whatsappEnabled === undefined && body.autoMinuteBlocksEnabled === undefined
+    ) {
+      send(res, 400, { error: "valid_feature_entitlements_required" });
+      return true;
+    }
+    const autoMinuteBlocksEnabled = body.autoMinuteBlocksEnabled ??
+      existing?.autoMinuteBlocksEnabled ?? false;
+    if (
+      autoMinuteBlocksEnabled &&
+      !existing?.autoMinuteBlocksEnabled &&
+      body.confirmation !== "ENABLE_AUTO_MINUTE_BLOCKS"
+    ) {
+      send(res, 409, { error: "auto_minute_blocks_confirmation_required" });
+      return true;
+    }
+    const now = new Date().toISOString();
+    const updated = {
+      clientId: id,
+      whatsappEnabled: body.whatsappEnabled ?? existing?.whatsappEnabled ?? false,
+      autoMinuteBlocksEnabled,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+    };
+    await store.upsertTenantFeatureEntitlements(updated);
+    await store.appendOperatorAudit({
+      id: newId("audit_"),
+      clientId: id,
+      actorId: actor.subject,
+      action: "features.entitlements_updated",
+      detail: {
+        whatsappEnabled: updated.whatsappEnabled,
+        autoMinuteBlocksEnabled: updated.autoMinuteBlocksEnabled,
+      },
+      createdAt: now,
+    });
+    send(res, 200, {
+      clientId: id,
+      whatsappEnabled: updated.whatsappEnabled,
+      autoMinuteBlocksEnabled: updated.autoMinuteBlocksEnabled,
+      updatedAt: updated.updatedAt,
+    });
+    return true;
+  }
+
+  const managedWhatsAppStatusMatch =
+    route.match(/^\/admin\/clients\/([^/]+)\/managed-whatsapp-status$/);
+  if (managedWhatsAppStatusMatch && (req.method === "GET" || req.method === "PUT")) {
+    if (!canAdministerPlatform(actor)) {
+      send(res, 403, { error: "platform_admin_required" });
+      return true;
+    }
+    const id = decodeURIComponent(managedWhatsAppStatusMatch[1]);
+    const managedClient = await store.getClient(id);
+    if (!managedClient) {
+      send(res, 404, { error: "client_not_found" });
+      return true;
+    }
+    if (req.method === "PUT") {
+      const body = await readJson<{ sender?: unknown; confirmation?: unknown }>(ctx);
+      const configured = await configureManagedWhatsAppSender({
+        store,
+        clientId: id,
+        sender: typeof body.sender === "string" ? body.sender : "",
+        actorId: actor.subject,
+        confirmation: typeof body.confirmation === "string" ? body.confirmation : undefined,
+      });
+      if (!configured.ok) {
+        send(res, configured.status, { error: configured.error });
+        return true;
+      }
+    }
+    send(res, 200, await managedWhatsAppReadiness({ store, clientId: id }));
+    return true;
+  }
+
   if (route === "/admin/summary" && req.method === "GET") {
     if (!canAdministerPlatform(actor)) {
       send(res, 403, { error: "platform_admin_required" });
@@ -832,6 +1075,8 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       const ledger = await store.listCreditLedger(client.id);
       const plan = subscription?.planTier ||
         (isPlanTier(client.subscribedProduct) ? client.subscribedProduct : "starter");
+      const messaging = await whatsappAllowanceSnapshot(store, client.id, plan);
+      const features = await store.getTenantFeatureEntitlements(client.id);
       return {
         clientId: client.id,
         plan,
@@ -842,6 +1087,10 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
         failedCalls: calls.filter((call) =>
           call.status === "failed" && call.createdAt.startsWith(month)
         ).length,
+        includedMessages: messaging.includedMessages,
+        usedMessages: messaging.usedMessages,
+        remainingMessages: messaging.remainingMessages,
+        whatsappEnabled: features?.whatsappEnabled ?? false,
       };
     }));
     const mrrPence = items.reduce((sum, item) => {
@@ -852,6 +1101,8 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       month,
       mrrPence,
       totalUsedMinutes: items.reduce((sum, item) => sum + item.usedMinutes, 0),
+      totalUsedMessages: items.reduce((sum, item) => sum + item.usedMessages, 0),
+      totalIncludedMessages: items.reduce((sum, item) => sum + item.includedMessages, 0),
       totalFailedCalls: items.reduce((sum, item) => sum + item.failedCalls, 0),
       failedBillingEvents: failedBillingEvents.map((event) => ({
         id: event.id,
@@ -1308,9 +1559,12 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
     const periodSummary = selected
       ? await store.getAnalyticsSummary(selected.id, { from, to })
       : undefined;
-    const calendar = selected
-      ? await probeTenantCalendar(store, selected)
-      : { ok: false, error: "calcom_not_configured" };
+    const [calendar, liveVoice] = selected
+      ? await Promise.all([
+          probeTenantCalendar(store, selected),
+          probeLiveVoiceProviders(store, selected),
+        ])
+      : [{ ok: false, error: "calcom_not_configured" }, undefined];
     send(res, 200, {
       clients: clients.map((item) => safeEditableClient(item)),
       client: selected ? safeEditableClient(selected) : null,
@@ -1329,7 +1583,7 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
         outbound: periodSummary.outboundCalls,
       } : undefined,
       recentCalls: calls,
-      integrations: selected ? integrationList(selected, calendar) : [],
+      integrations: selected ? integrationList(selected, calendar, liveVoice) : [],
       actor: {
         email: actor.email,
         role: actor.role,
@@ -3145,10 +3399,12 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
     const client = await requireClient(ctx, id);
     if (!client) return true;
     const month = url.searchParams.get("month") || new Date().toISOString().slice(0, 7);
-    const [usage, ledger, subscription] = await Promise.all([
+    const [usage, ledger, subscription, features, purchases] = await Promise.all([
       store.getUsage(id, month),
       store.listCreditLedger(id),
       store.getCurrentSubscription(id),
+      store.getTenantFeatureEntitlements(id),
+      store.listOveragePurchases(id),
     ]);
     const plan = subscription?.planTier || (isPlanTier(client.subscribedProduct) ? client.subscribedProduct : "starter");
     const monthStart = `${month}-01T00:00:00.000Z`;
@@ -3168,6 +3424,17 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
         .filter((entry) => entry.kind === "usage" && entry.minutes < 0)
         .reduce((sum, entry) => sum + entry.minutes, 0),
     );
+    const messagePeriod = await store.getMessageUsagePeriod(
+      id,
+      "whatsapp",
+      billingPeriodStart,
+    );
+    const includedMessages = messagePeriod?.includedMessages ??
+      planDefinition(plan).includedMessages;
+    const usedMessages = messagePeriod?.usedMessages ?? 0;
+    const periodPurchases = purchases.filter((purchase) =>
+      purchase.createdAt >= billingPeriodStart && purchase.createdAt < billingPeriodEnd
+    );
     send(res, 200, {
       ...(usage || {
       clientId: id,
@@ -3186,6 +3453,32 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       allocatedMinutes: periodAllocatedMinutes,
       usedMinutes: periodUsedMinutes,
       remainingMinutes: Math.max(0, remainingMinutes),
+      messaging: {
+        whatsapp: {
+          includedMessages,
+          usedMessages,
+          remainingMessages: Math.max(0, includedMessages - usedMessages),
+          periodStart: messagePeriod?.periodStart || billingPeriodStart,
+          periodEnd: messagePeriod?.periodEnd || billingPeriodEnd,
+          limitReached: usedMessages >= includedMessages,
+        },
+      },
+      overage: {
+        autoPurchaseEnabled: features?.autoMinuteBlocksEnabled ?? false,
+        blockMinutes: MINUTE_BLOCK_MINUTES,
+        blockPriceMinor: MINUTE_BLOCK_AMOUNT_MINOR,
+        currency: MINUTE_BLOCK_CURRENCY,
+        purchases: periodPurchases.map((purchase) => ({
+          id: purchase.id,
+          boundaryMinutes: purchase.boundaryMinutes,
+          grantedMinutes: purchase.grantedMinutes,
+          amountMinor: purchase.amountMinor,
+          currency: purchase.currency,
+          status: purchase.status,
+          purchasedAt: purchase.createdAt,
+          completedAt: purchase.completedAt,
+        })),
+      },
     });
     return true;
   }
@@ -3313,6 +3606,7 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
   if (route === "/calendar/bookings" && req.method === "GET") {
     const client = await requireClient(ctx, clientId(url));
     if (!client) return true;
+    const mappings = await store.listCalendarEventTypes(client.id);
     const projected = (await store.listBookingRecords(client.id)).map((booking) => ({
       uid: booking.providerBookingId || booking.id,
       title: booking.serviceSlug,
@@ -3323,6 +3617,7 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       attendeeEmail: booking.attendeeEmail,
       sourceCallId: booking.callId,
     }));
+    const knownBookingUids = projected.map((booking) => booking.uid).filter(Boolean);
     let tenant;
     try {
       tenant = (await resolveCalcomTenantConnection(store, client)).tenant;
@@ -3333,7 +3628,12 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
     {
       try {
         const result = await calcom.listBookings(tenant, { status: "upcoming" });
-        const remote = result.bookings.map((booking) => ({
+        const remote = result.bookings
+          .filter((booking) => calcom.bookingBelongsToTenant(booking, {
+            eventTypes: mappings,
+            knownBookingUids,
+          }))
+          .map((booking) => ({
             uid: booking.uid,
             title: booking.title,
             start: booking.start,
@@ -3377,24 +3677,50 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       return true;
     }
     const tenant = (await resolveCalcomTenantConnection(store, client)).tenant;
+    const bookingUid = calendarAction[1];
+    const mappings = await store.listCalendarEventTypes(client.id);
+    const projectedMatch = (await store.listBookingRecords(client.id))
+      .find((booking) => booking.providerBookingId === bookingUid);
+    if (!projectedMatch) {
+      try {
+        const remoteBooking = await calcom.getBooking(tenant, bookingUid);
+        if (!calcom.bookingBelongsToTenant(remoteBooking, { eventTypes: mappings })) {
+          send(res, 404, { error: "booking_not_found" });
+          return true;
+        }
+      } catch {
+        send(res, 404, { error: "booking_not_found" });
+        return true;
+      }
+    }
     const result = calendarAction[2] === "cancel"
-      ? await calcom.cancelBooking(tenant, calendarAction[1])
+      ? await calcom.cancelBooking(tenant, bookingUid)
       : await calcom.rescheduleBooking(tenant, {
-          bookingUid: calendarAction[1],
+          bookingUid,
           start: String(body.newStart || body.start || ""),
         });
-    const projected = (await store.listBookingRecords(client.id))
-      .find((booking) => booking.providerBookingId === calendarAction[1]);
-    if (projected) {
-      if (calendarAction[2] === "cancel") projected.status = "cancelled";
+    if (projectedMatch) {
+      if (calendarAction[2] === "cancel") projectedMatch.status = "cancelled";
       else {
         const nextStart = String(body.newStart || body.start || "");
-        const duration = Date.parse(projected.endsAt) - Date.parse(projected.startsAt);
-        projected.startsAt = new Date(nextStart).toISOString();
-        projected.endsAt = new Date(Date.parse(nextStart) + Math.max(0, duration)).toISOString();
+        const duration = Date.parse(projectedMatch.endsAt) - Date.parse(projectedMatch.startsAt);
+        projectedMatch.startsAt = new Date(nextStart).toISOString();
+        projectedMatch.endsAt = new Date(Date.parse(nextStart) + Math.max(0, duration)).toISOString();
       }
-      projected.updatedAt = new Date().toISOString();
-      await store.saveBookingRecord(projected);
+      projectedMatch.updatedAt = new Date().toISOString();
+      await store.saveBookingRecord(projectedMatch);
+      if (calendarAction[2] === "cancel" && projectedMatch.attendeePhone) {
+        try {
+          await enqueueWhatsAppCancellationFollowup({
+            store,
+            clientId: client.id,
+            attendeePhone: projectedMatch.attendeePhone,
+            bookingUid,
+          });
+        } catch {
+          // Calendar state is authoritative; a follow-up outbox failure must not undo it.
+        }
+      }
     }
     send(res, 200, result);
     return true;
@@ -3417,6 +3743,27 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       return true;
     }
     if (!(await requireManageClient(ctx, body.clientId))) return true;
+    const outboundClient = await store.getPublishedClient(body.clientId);
+    const outboundTwimlUrl = outboundClient?.voicePipeline === "livekit-cascade"
+      ? process.env.OUTBOUND_LIVEKIT_TWIML_URL || process.env.OUTBOUND_TWIML_URL
+      : process.env.OUTBOUND_ELEVENLABS_TWIML_URL || process.env.OUTBOUND_TWIML_URL;
+    if (
+      process.env.OUTBOUND_AUTOMATION_ENABLED !== "true" ||
+      !outboundTwimlUrl ||
+      !process.env.API_PUBLIC_BASE_URL ||
+      !outboundClient?.outboundCallerId
+    ) {
+      send(res, 503, {
+        error: "outbound_not_ready",
+        missing: [
+          ...(process.env.OUTBOUND_AUTOMATION_ENABLED === "true" ? [] : ["OUTBOUND_AUTOMATION_ENABLED"]),
+          ...(outboundTwimlUrl ? [] : ["outbound provider TwiML URL"]),
+          ...(process.env.API_PUBLIC_BASE_URL ? [] : ["API_PUBLIC_BASE_URL"]),
+          ...(outboundClient?.outboundCallerId ? [] : ["client.outboundCallerId"]),
+        ],
+      });
+      return true;
+    }
     const job: OutboundJob = {
       id: newId("job_"),
       clientId: body.clientId,
@@ -3449,6 +3796,18 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       return true;
     }
     if (jobAction[2] === "approve") {
+      const outboundClient = await store.getPublishedClient(job.clientId);
+      const outboundTwimlUrl = outboundClient?.voicePipeline === "livekit-cascade"
+        ? process.env.OUTBOUND_LIVEKIT_TWIML_URL || process.env.OUTBOUND_TWIML_URL
+        : process.env.OUTBOUND_ELEVENLABS_TWIML_URL || process.env.OUTBOUND_TWIML_URL;
+      if (
+        process.env.OUTBOUND_AUTOMATION_ENABLED !== "true" ||
+        !outboundTwimlUrl ||
+        !outboundClient?.outboundCallerId
+      ) {
+        send(res, 503, { error: "outbound_not_ready" });
+        return true;
+      }
       job.approved = true;
       job.status = "approved";
       await store.saveJob(job);
@@ -3684,8 +4043,30 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
     if (!client) return true;
     const previous = (await store.listCalendarConnections(client.id))
       .find((item) => item.provider === "calcom");
-    if (previous?.mode === "managed" && previous.status === "active") {
-      send(res, 200, { status: "active", mode: "managed", idempotent: true });
+    if (["managed", "shared"].includes(previous?.mode || "") && previous?.status === "active") {
+      send(res, 200, { status: "active", mode: previous.mode, idempotent: true });
+      return true;
+    }
+    const modes = calcomConnectionModes();
+    if (!modes.managed && modes.shared) {
+      const now = new Date().toISOString();
+      await store.upsertCalendarConnection({
+        id: previous?.id || `calendar_${client.id}_primary`,
+        clientId: client.id,
+        provider: "calcom",
+        externalAccountId: process.env.CALCOM_USERNAME,
+        mode: "shared",
+        credentialRef: "CALCOM_API_KEY",
+        scopes: [],
+        status: "active",
+        metadata: {
+          sharedAt: now,
+          isolation: "tenant_prefixed_event_types",
+        },
+        createdAt: previous?.createdAt || now,
+        updatedAt: now,
+      });
+      send(res, 201, { status: "active", mode: "shared" });
       return true;
     }
     try {
@@ -3788,8 +4169,11 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
   if (route === "/integrations/status" && req.method === "GET") {
     const client = await requireClient(ctx, clientId(url));
     if (!client) return true;
-    const calendar = await probeTenantCalendar(store, client);
-    send(res, 200, { items: integrationList(client, calendar) });
+    const [calendar, liveVoice] = await Promise.all([
+      probeTenantCalendar(store, client),
+      probeLiveVoiceProviders(store, client),
+    ]);
+    send(res, 200, { items: integrationList(client, calendar, liveVoice) });
     return true;
   }
 

@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createHash, createHmac } from "node:crypto";
-import { BLADES_HAIR_ID, MemoryStore, seedStore } from "@robinexis/database";
+import {
+  BLADES_HAIR_ID,
+  MemoryStore,
+  seedStore,
+  type NotificationDelivery,
+} from "@robinexis/database";
 import { FakeCalendar } from "@robinexis/integrations";
 import {
   runVoiceTool,
@@ -14,7 +19,58 @@ const oldRuntimeSecret = process.env.VOICE_RUNTIME_INTERNAL_SECRET;
 afterEach(() => {
   if (oldRuntimeSecret === undefined) delete process.env.VOICE_RUNTIME_INTERNAL_SECRET;
   else process.env.VOICE_RUNTIME_INTERNAL_SECRET = oldRuntimeSecret;
+  delete process.env.WHATSAPP_ENABLED;
+  delete process.env.WHATSAPP_BOOKING_CONFIRMATION_CONTENT_SID;
+  delete process.env.WHATSAPP_MANAGED_SENDERS_JSON;
 });
+
+const NOW = "2026-09-17T12:00:00.000Z";
+
+async function enableWhatsApp(store: MemoryStore) {
+  process.env.WHATSAPP_ENABLED = "true";
+  process.env.WHATSAPP_BOOKING_CONFIRMATION_CONTENT_SID = "HXbooking";
+  process.env.WHATSAPP_BOOKING_REMINDER_CONTENT_SID = "HXreminder";
+  process.env.WHATSAPP_MANAGED_SENDERS_JSON = JSON.stringify({
+    "whatsapp:+14155238886": BLADES_HAIR_ID,
+  });
+  const client = await store.getClient(BLADES_HAIR_ID);
+  await store.upsertClient({ ...client!, phoneAcquisitionMode: "robinexis_account" });
+  await store.upsertTenantFeatureEntitlements({
+    clientId: BLADES_HAIR_ID,
+    whatsappEnabled: true,
+    autoMinuteBlocksEnabled: false,
+    createdAt: NOW,
+    updatedAt: NOW,
+  });
+  await store.upsertProviderResource({
+    id: "resource_blades_wa",
+    clientId: BLADES_HAIR_ID,
+    provider: "twilio",
+    resourceType: "whatsapp_sender",
+    providerResourceId: "+14155238886",
+    lifecycleStatus: "active",
+    metadata: { address: "whatsapp:+14155238886" },
+    createdAt: NOW,
+    updatedAt: NOW,
+  });
+}
+
+async function offerSlot(
+  store: MemoryStore,
+  calendar: FakeCalendar,
+  conversationId: string,
+  start: string,
+  eventTypeSlug = "30min",
+) {
+  const instant = Date.parse(start);
+  const result = await runVoiceTool(store, "check-availability", {
+    eventTypeSlug,
+    start: new Date(instant - 60 * 60_000).toISOString(),
+    end: new Date(instant + 60 * 60_000).toISOString(),
+    conversationId,
+  }, { store, calendar });
+  expect(result.status).toBe(200);
+}
 
 describe("ElevenLabs voice tool routes", () => {
   it("requires a non-empty shared secret", () => {
@@ -105,7 +161,16 @@ describe("ElevenLabs voice tool routes", () => {
       status: 200,
       body: { ok: true, slots: ["2026-09-02T10:00:00.000Z"] },
     });
-    expect(await store.getCall("conv_availability")).toBeUndefined();
+    expect(await store.getCall("conv_availability")).toMatchObject({
+      clientId: BLADES_HAIR_ID,
+      objective: "Voice receptionist booking",
+      promptVersionId: "provider-managed-voice",
+      collected: {
+        eventTypeSlug: "30min",
+        start: "2026-09-02T00:00:00.000Z",
+      },
+      toolHistory: [expect.objectContaining({ name: "check_availability" })],
+    });
   });
 
   it("supports a second published tenant selected by its server-bound secret", async () => {
@@ -206,6 +271,7 @@ describe("ElevenLabs voice tool routes", () => {
       conversationId: "conv_test",
       idempotencyKey: "conv_test:booking",
     };
+    await offerSlot(store, calendar, input.conversationId, input.start);
     const first = await runVoiceTool(store, "create-booking", input, { store, calendar });
     const second = await runVoiceTool(store, "create-booking", input, { store, calendar });
     expect(first.status).toBe(200);
@@ -220,12 +286,58 @@ describe("ElevenLabs voice tool routes", () => {
         attendeeName: "Gultham",
       },
     ]);
+    expect(await store.getCall("conv_test")).toMatchObject({
+      contactPhone: "+923424432411",
+      appointmentId: "bk_1",
+      collected: {
+        eventTypeSlug: "30min",
+        start: "2026-09-02T10:00:00.000Z",
+        attendeeName: "Gultham",
+        attendeePhone: "+923424432411",
+        callerConfirmed: true,
+        bookingUid: "bk_1",
+      },
+    });
+  });
+
+  it("merges later tool state without erasing the existing conversation", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    const now = new Date().toISOString();
+    await store.saveCall({
+      id: "call_livekit_memory",
+      clientId: BLADES_HAIR_ID,
+      direction: "inbound",
+      objective: "Browser provider comparison",
+      promptVersionId: "prompt_livekit",
+      transcript: [{ role: "caller", text: "Monday please", at: now }],
+      collected: { preferredDay: "Monday" },
+      toolHistory: [],
+      state: "tool",
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    });
+    const result = await runVoiceContractTool(
+      store,
+      "get_business_info",
+      { conversationId: "call_livekit_memory", topic: "hours" },
+      { store, clientId: BLADES_HAIR_ID },
+    );
+    expect(result.status).toBe(200);
+    expect(await store.getCall("call_livekit_memory")).toMatchObject({
+      objective: "Browser provider comparison",
+      promptVersionId: "prompt_livekit",
+      transcript: [{ role: "caller", text: "Monday please", at: now }],
+      collected: { preferredDay: "Monday" },
+      toolHistory: [expect.objectContaining({ name: "get_business_info" })],
+    });
   });
 
   it("does not book an unavailable or unconfirmed slot", async () => {
     const store = new MemoryStore();
     await seedStore(store);
-    const calendar = new FakeCalendar([]);
+    const calendar = new FakeCalendar(["2026-09-02T10:00:00.000Z"]);
     const base = {
       clientId: BLADES_HAIR_ID,
       eventTypeSlug: "30min",
@@ -234,9 +346,11 @@ describe("ElevenLabs voice tool routes", () => {
       attendeePhone: "+923424432411",
       conversationId: "conv_test",
     };
+    await offerSlot(store, calendar, base.conversationId, base.start);
     expect(
       (await runVoiceTool(store, "create-booking", { ...base, callerConfirmed: false }, { store, calendar })).body.error,
     ).toBe("caller_confirmation_required");
+    calendar.slots = [];
     expect(
       (await runVoiceTool(store, "create-booking", { ...base, callerConfirmed: true }, { store, calendar })).body.error,
     ).toBe("slot_no_longer_free");
@@ -293,8 +407,9 @@ describe("ElevenLabs voice tool routes", () => {
     await seedStore(store);
     const calendar = new FakeCalendar(["2026-09-02T10:00:00.000Z"]);
     calendar.create = () => {
-      throw new Error("Cal.com timeout");
+      throw new Error("Cal.com HTTP 400: attendeeEmail=jason@example.com");
     };
+    await offerSlot(store, calendar, "conv_uk_mobile", "2026-09-02T10:00:00.000Z");
     const result = await runVoiceTool(
       store,
       "create-booking",
@@ -310,9 +425,167 @@ describe("ElevenLabs voice tool routes", () => {
       },
       { store, calendar },
     );
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       status: 503,
       body: { ok: false, error: "booking_temporarily_unavailable" },
     });
+    expect(result.body.recoveryAction).toBe("retry_once_then_offer_callback");
+    const savedCall = await store.getCall("conv_uk_mobile");
+    expect(savedCall?.toolHistory.at(-1)?.result)
+      .toEqual({ error: "booking_temporarily_unavailable" });
+    expect(JSON.stringify(savedCall)).not.toContain("jason@example.com");
+  });
+
+  it("carries an accepted counter-offer, rejects guessed phone digits, and books once", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    const offeredStart = "2026-09-21T14:00:00.000Z"; // 3pm Europe/London (BST)
+    const calendar = new FakeCalendar([offeredStart]);
+    const conversationId = "conv_jason_counter_offer";
+    await offerSlot(store, calendar, conversationId, offeredStart);
+
+    const base = {
+      eventTypeSlug: "30min",
+      attendeeName: "Jason",
+      callerConfirmed: true,
+      conversationId,
+    };
+    const wrongOriginalTime = await runVoiceTool(store, "create-booking", {
+      ...base,
+      start: "2026-09-21T15:00:00.000Z",
+      attendeePhone: "07443 245443",
+    }, { store, calendar });
+    expect(wrongOriginalTime).toMatchObject({
+      status: 409,
+      body: { error: "slot_not_offered", recoveryAction: "check_availability_and_offer_returned_slot" },
+    });
+
+    const guessedPhone = await runVoiceTool(store, "create-booking", {
+      ...base,
+      start: "2026-09-21T15:00:00+01:00",
+      attendeePhone: "4443245443",
+    }, { store, calendar });
+    expect(guessedPhone).toMatchObject({
+      status: 400,
+      body: {
+        error: "attendee_phone_invalid_ask_for_complete_number_from_beginning",
+        recoveryAction: "ask_for_complete_phone_from_beginning",
+      },
+    });
+
+    const corrected = {
+      ...base,
+      start: "2026-09-21T15:00:00+01:00",
+      attendeePhone: "07443 245443",
+    };
+    const first = await runVoiceTool(store, "create-booking", corrected, { store, calendar });
+    const replay = await runVoiceTool(store, "create-booking", corrected, { store, calendar });
+    expect(first).toMatchObject({ status: 200, body: { bookingUid: "bk_1" } });
+    expect(replay).toMatchObject({ status: 200, body: { bookingUid: "bk_1" } });
+    expect(calendar.bookings.size).toBe(1);
+    expect(calendar.bookings.get("bk_1")?.start).toBe(offeredStart);
+    expect((await store.getCall(conversationId))?.toolHistory).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ result: { error: "slot_not_offered" } }),
+        expect.objectContaining({
+          result: { error: "attendee_phone_invalid_ask_for_complete_number_from_beginning" },
+        }),
+        expect.objectContaining({ result: expect.objectContaining({ bookingUid: "bk_1" }) }),
+      ]),
+    );
+  });
+
+  it("keeps a successful booking when WhatsApp confirmation enqueue fails", async () => {
+    class FailWhatsAppStore extends MemoryStore {
+      override async enqueueNotification(delivery: NotificationDelivery) {
+        if (delivery.idempotencyKey.startsWith("whatsapp:booking:")) {
+          throw new Error("notification_outbox_unavailable");
+        }
+        return super.enqueueNotification(delivery);
+      }
+    }
+    const store = new FailWhatsAppStore();
+    await seedStore(store);
+    await enableWhatsApp(store);
+    const calendar = new FakeCalendar(["2026-09-02T10:00:00.000Z"]);
+    await offerSlot(store, calendar, "conv_wa_fail", "2026-09-02T10:00:00.000Z");
+    const result = await runVoiceTool(
+      store,
+      "create-booking",
+      {
+        eventTypeSlug: "30min",
+        start: "2026-09-02T10:00:00.000Z",
+        attendeeName: "Gultham",
+        attendeePhone: "07446 860 675",
+        callerConfirmed: true,
+        conversationId: "conv_wa_fail",
+        idempotencyKey: "conv_wa_fail:booking",
+      },
+      { store, calendar },
+    );
+    expect(result.status).toBe(200);
+    expect(result.body.bookingUid).toBe("bk_1");
+    expect(calendar.bookings.size).toBe(1);
+    expect(await store.listNotifications(BLADES_HAIR_ID)).toEqual([]);
+  });
+
+  it("does not enqueue a second WhatsApp confirmation for a duplicate booking", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    await enableWhatsApp(store);
+    const calendar = new FakeCalendar(["2026-09-02T10:00:00.000Z"]);
+    const input = {
+      eventTypeSlug: "30min",
+      start: "2026-09-02T10:00:00.000Z",
+      attendeeName: "Gultham",
+      attendeePhone: "07446 860 675",
+      callerConfirmed: true,
+      conversationId: "conv_wa_dup",
+      idempotencyKey: "conv_wa_dup:booking",
+    };
+    await offerSlot(store, calendar, input.conversationId, input.start);
+    const first = await runVoiceTool(store, "create-booking", input, { store, calendar });
+    const second = await runVoiceTool(store, "create-booking", input, { store, calendar });
+    expect(first.body.bookingUid).toBe("bk_1");
+    expect(second.body.bookingUid).toBe("bk_1");
+    expect(calendar.bookings.size).toBe(1);
+    const confirmations = (await store.listNotifications(BLADES_HAIR_ID))
+      .filter((item) => item.idempotencyKey === "whatsapp:booking:bk_1");
+    expect(confirmations).toHaveLength(1);
+    expect(confirmations[0]?.payload?.contentSid).toBe("HXbooking");
+  });
+
+  it("queues a WhatsApp reminder for a future voice booking", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    await enableWhatsApp(store);
+    const start = "2026-09-20T10:00:00.000Z";
+    const calendar = new FakeCalendar([start]);
+    await offerSlot(store, calendar, "conv_wa_reminder", start);
+    const result = await runVoiceTool(
+      store,
+      "create-booking",
+      {
+        eventTypeSlug: "30min",
+        start,
+        attendeeName: "Gultham",
+        attendeePhone: "07446 860 675",
+        callerConfirmed: true,
+        conversationId: "conv_wa_reminder",
+        idempotencyKey: "conv_wa_reminder:booking",
+      },
+      { store, calendar },
+    );
+    expect(result.status).toBe(200);
+    expect(await store.listScheduledFollowups(BLADES_HAIR_ID)).toMatchObject([{
+      idempotencyKey: "whatsapp:reminder:bk_1",
+      status: "pending",
+      scheduledAt: "2026-09-20T09:00:00.000Z",
+      payload: expect.objectContaining({
+        contentSid: "HXreminder",
+        kind: "booking_reminder",
+        contentVariables: expect.objectContaining({ "2": "bk_1" }),
+      }),
+    }]);
   });
 });

@@ -70,7 +70,7 @@ describe("Twilio hybrid API", () => {
       status: 200,
       body: {
         status: "active",
-        accountSidMasked: "AC12…cdef",
+        accountSidMasked: "test…-sid",
         verifiedPhoneNumber: "+442079460123",
         canReconnect: false,
       },

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  costSaverStartError,
   deriveReceptionistStatus,
   formatCallDuration,
   RECEPTIONIST_STATUS_COPY,
@@ -48,5 +49,15 @@ describe("branded receptionist state", () => {
   it("uses the active workspace names in generic call status", () => {
     expect(receptionistStatusCopy("listening", "Maya", "North Street Salon").label).toBe("Maya is listening");
     expect(receptionistStatusCopy("ended", "Maya", "North Street Salon").detail).toContain("North Street Salon");
+  });
+
+  it("explains Cost Saver start failures without leaking transport errors", () => {
+    expect(costSaverStartError(new Error("Client initiated disconnect")))
+      .toBe("We couldn't reach the Cost Saver voice runtime from this browser. Check the network, then try again.");
+    expect(costSaverStartError(new DOMException("denied", "NotAllowedError")))
+      .toContain("Microphone access was blocked");
+    expect(costSaverStartError(new Error("cost_saver_runtime_not_configured")))
+      .toBe("cost_saver_runtime_not_configured");
+    expect(costSaverStartError(undefined)).toBe("The Cost Saver call could not be started.");
   });
 });

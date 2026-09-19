@@ -5,7 +5,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { api, formatDate, initials } from "../../lib/api";
 import { filterClients } from "../../lib/admin";
 import { useClient, useToast } from "../../state";
-import { Badge, Button, Card, EmptyState, ErrorState, LinkButton, LoadingState, PageHeader, SectionHeading, statusTone } from "../../components/ui";
+import { Badge, Button, Card, ConfirmDialog, EmptyState, ErrorState, LinkButton, LoadingState, PageHeader, SectionHeading, statusTone } from "../../components/ui";
 import { CreditAdjustmentDialog } from "./credit-adjustment-dialog";
 import { ServiceActionDialog } from "./service-action-dialog";
 import { ProviderSwitchPanel } from "../../components/admin/provider-switch-panel";
@@ -77,6 +77,8 @@ export function AdminCustomerDetailPage() {
   const queryClient = useQueryClient();
   const { push } = useToast();
   const [serviceDialog, setServiceDialog] = useState<"suspend" | "reactivate">();
+  const [autoChargeConfirmationOpen, setAutoChargeConfirmationOpen] = useState(false);
+  const [whatsappSender, setWhatsappSender] = useState("");
   const customer = useQuery({ queryKey: ["client", id], queryFn: () => api.client(id!), enabled: Boolean(id), retry: false });
   const summary = useQuery({ queryKey: ["admin-summary"], queryFn: api.adminSummary, retry: false });
   const control = useQuery({ queryKey: ["admin-control-plane"], queryFn: api.adminControlPlane, retry: false });
@@ -88,6 +90,18 @@ export function AdminCustomerDetailPage() {
   const audit = useQuery({
     queryKey: ["admin-audit", id],
     queryFn: () => api.adminAudit(id),
+    enabled: Boolean(id),
+    retry: false,
+  });
+  const featureEntitlements = useQuery({
+    queryKey: ["feature-entitlements", id],
+    queryFn: () => api.featureEntitlements(id!),
+    enabled: Boolean(id),
+    retry: false,
+  });
+  const managedWhatsApp = useQuery({
+    queryKey: ["managed-whatsapp-status", id],
+    queryFn: () => api.managedWhatsAppStatus(id!),
     enabled: Boolean(id),
     retry: false,
   });
@@ -109,6 +123,40 @@ export function AdminCustomerDetailPage() {
       push({ title: "Service status updated", tone: "success" });
     },
     onError: (mutationError) => push({ title: "Status update failed", message: mutationError.message, tone: "error" }),
+  });
+  const updateFeatures = useMutation({
+    mutationFn: (input: {
+      whatsappEnabled?: boolean;
+      autoMinuteBlocksEnabled?: boolean;
+      confirmation?: "ENABLE_AUTO_MINUTE_BLOCKS";
+    }) => api.updateFeatureEntitlements(id!, input),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["feature-entitlements", id] }),
+        queryClient.invalidateQueries({ queryKey: ["managed-whatsapp-status", id] }),
+      ]);
+      setAutoChargeConfirmationOpen(false);
+      push({ title: "Feature controls updated", tone: "success" });
+    },
+    onError: (mutationError) => push({ title: "Feature update failed", message: mutationError.message, tone: "error" }),
+  });
+  const configureWhatsApp = useMutation({
+    mutationFn: () => api.configureManagedWhatsApp(id!, whatsappSender),
+    onSuccess: async () => {
+      setWhatsappSender("");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["managed-whatsapp-status", id] }),
+        queryClient.invalidateQueries({ queryKey: ["feature-entitlements", id] }),
+        queryClient.invalidateQueries({ queryKey: ["client", id] }),
+        queryClient.invalidateQueries({ queryKey: ["admin-control-plane"] }),
+      ]);
+      push({ title: "Managed WhatsApp sender configured", tone: "success" });
+    },
+    onError: (mutationError) => push({
+      title: "WhatsApp setup failed",
+      message: mutationError.message,
+      tone: "error",
+    }),
   });
 
   if (customer.isLoading) return <LoadingState label="Loading customer detail…" />;
@@ -135,11 +183,74 @@ export function AdminCustomerDetailPage() {
           <div><dt>Subscription</dt><dd className="capitalize">{usage?.subscriptionStatus?.replaceAll("_", " ") || "Unavailable"}</dd></div>
           <div><dt>Used this month</dt><dd>{usage ? `${Math.round(usage.usedMinutes)} minutes` : "Unavailable"}</dd></div>
           <div><dt>Customer allowance remaining</dt><dd>{usage ? `${Math.round(usage.remainingMinutes)} minutes` : "Unavailable"}</dd></div>
+          <div><dt>WhatsApp messages remaining</dt><dd>{usage?.includedMessages
+            ? `${usage.remainingMessages ?? Math.max(0, usage.includedMessages - (usage.usedMessages ?? 0))} of ${usage.includedMessages}`
+            : "0 included on this plan"}</dd></div>
         </dl>
         <div className="row-actions"><Button variant="secondary" disabled={serviceAction.isPending} onClick={() => setServiceDialog(client.serviceStatus === "paused" ? "reactivate" : "suspend")}>{client.serviceStatus === "paused" ? "Reactivate service" : "Suspend service"}</Button><LinkButton to={`/admin/setup/${client.id}`} variant="secondary">Setup console</LinkButton></div>
       </Card>
       <ProviderSwitchPanel client={client} providerCost={providerCost} />
     </div>
+    <Card className="panel">
+      <SectionHeading title="Feature controls" description="Tenant-specific controls default off. Provider and runtime readiness are reported separately." />
+      {featureEntitlements.isLoading ? <LoadingState label="Loading feature controls…" /> : featureEntitlements.error ? <ErrorState error={featureEntitlements.error} onRetry={() => featureEntitlements.refetch()} /> : (
+        <>
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={featureEntitlements.data?.whatsappEnabled ?? false}
+              disabled={updateFeatures.isPending}
+              onChange={(event) => updateFeatures.mutate({ whatsappEnabled: event.target.checked })}
+            />
+            <span><strong>WhatsApp enabled</strong><br />Allow this tenant to use the managed WhatsApp runtime when the sender and templates are ready.</span>
+          </label>
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={featureEntitlements.data?.autoMinuteBlocksEnabled ?? false}
+              disabled={updateFeatures.isPending}
+              onChange={(event) => event.target.checked
+                ? setAutoChargeConfirmationOpen(true)
+                : updateFeatures.mutate({ autoMinuteBlocksEnabled: false })}
+            />
+            <span><strong>Automatic voice-minute blocks</strong><br />Automatically charge for another minute block when the tenant balance is exhausted.</span>
+          </label>
+        </>
+      )}
+      <hr />
+      <SectionHeading title="Managed WhatsApp status" description="Sanitized readiness only; sender identifiers, credentials, and tokens are never shown." />
+      {managedWhatsApp.isLoading ? <LoadingState label="Loading managed sender status…" /> : managedWhatsApp.error ? <ErrorState error={managedWhatsApp.error} onRetry={() => managedWhatsApp.refetch()} /> : managedWhatsApp.data && (
+        <dl className="detail-list">
+          <div><dt>Managed sender</dt><dd><Badge tone={statusTone(managedWhatsApp.data.sender?.status || "not_configured")}>{(managedWhatsApp.data.sender?.status || "not_configured").replaceAll("_", " ")}</Badge></dd></div>
+          <div><dt>Approved templates</dt><dd><Badge tone={statusTone(managedWhatsApp.data.templates?.status || "not_configured")}>{(managedWhatsApp.data.templates?.status || "not_configured").replaceAll("_", " ")}</Badge></dd></div>
+          <div><dt>Runtime</dt><dd><Badge tone={statusTone(managedWhatsApp.data.runtime?.status || "disabled")}>{managedWhatsApp.data.runtime?.status || "disabled"}</Badge></dd></div>
+        </dl>
+      )}
+      <form
+        className="admin-toolbar"
+        onSubmit={(event) => {
+          event.preventDefault();
+          configureWhatsApp.mutate();
+        }}
+      >
+        <label>
+          <span className="sr-only">Approved WhatsApp sender number</span>
+          <input
+            type="tel"
+            value={whatsappSender}
+            onChange={(event) => setWhatsappSender(event.target.value)}
+            placeholder="+44 approved WhatsApp sender"
+            autoComplete="tel"
+            required
+          />
+        </label>
+        <Button type="submit" disabled={configureWhatsApp.isPending || !whatsappSender.trim()}>
+          {managedWhatsApp.data?.sender?.configured ? "Replace managed sender" : "Configure managed sender"}
+        </Button>
+      </form>
+      <p className="muted">Enter only a sender already approved in Twilio. This also enables WhatsApp for the Pro tenant; credentials remain in Railway.</p>
+      <p className="inline-notice">The 3,000-message allowance is a Robinexis plan limit and does not guarantee or include WhatsApp provider costs.</p>
+    </Card>
     <Card className="panel">
       <SectionHeading title="Provider resources" description="Sanitized operator inventory. Credentials and provider resource identifiers remain server-side." />
       {control.isLoading ? <LoadingState label="Loading provider resources…" /> : control.error ? <ErrorState error={control.error} onRetry={() => control.refetch()} /> : resources.length ? (
@@ -152,5 +263,18 @@ export function AdminCustomerDetailPage() {
     </Card>
     <CreditAdjustmentDialog customerName={client.businessName} open={searchParams.get("adjust") === "credits"} busy={adjustment.isPending} onClose={() => setSearchParams({}, { replace: true })} onSubmit={(minutes, reason) => adjustment.mutate({ minutes, reason })} />
     <ServiceActionDialog customerName={client.businessName} action={serviceDialog} busy={serviceAction.isPending} onClose={() => setServiceDialog(undefined)} onSubmit={(action, reason) => serviceAction.mutate({ action, reason })} />
+    <ConfirmDialog
+      open={autoChargeConfirmationOpen}
+      tone="primary"
+      title="Enable automatic minute charges?"
+      description="When the voice-minute balance is exhausted, Robinexis will automatically charge this customer for additional minute blocks. Confirm that the customer has agreed to recurring overage charges."
+      confirmLabel="Enable auto-charge"
+      busy={updateFeatures.isPending}
+      onClose={() => setAutoChargeConfirmationOpen(false)}
+      onConfirm={() => updateFeatures.mutate({
+        autoMinuteBlocksEnabled: true,
+        confirmation: "ENABLE_AUTO_MINUTE_BLOCKS",
+      })}
+    />
   </>;
 }

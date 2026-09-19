@@ -1,11 +1,21 @@
 import { createHmac } from "node:crypto";
-import { describe, expect, it } from "vitest";
-import { TOOL_DEFINITIONS } from "@robinexis/tool-contracts";
-import { signPostCall } from "./apiClient.js";
+import { describe, expect, it, vi } from "vitest";
+import { RuntimeApiClient, signPostCall } from "./apiClient.js";
+import { classifySessionError, voiceKeyterms } from "./agent.js";
 import { loadVoiceRuntimeEnv } from "./env.js";
 import { parseJobMetadata, stableCallId } from "./metadata.js";
-import { normalizedUsage } from "./telemetry.js";
-import { createToolBridge } from "./toolBridge.js";
+import {
+  collectLatency,
+  createLatencyTracker,
+  normalizedUsage,
+  summarizeLatency,
+} from "./telemetry.js";
+import {
+  createToolBridge,
+  prepareToolInput,
+  rememberBookingState,
+  VOICE_TOOL_NAMES,
+} from "./toolBridge.js";
 
 const completeEnv = {
   VOICE_RUNTIME_ENABLED: "true",
@@ -32,6 +42,12 @@ describe("voice runtime safety contracts", () => {
       llmProvider: "groq",
       groqModel: "openai/gpt-oss-120b",
       elevenLabsTtsModel: "eleven_flash_v2_5",
+      deepgramModel: "nova-3",
+      deepgramEndpointingMs: 300,
+      endpointingMinDelayMs: 850,
+      endpointingMaxDelayMs: 3_500,
+      interruptionMinDurationMs: 400,
+      interruptionMinWords: 1,
     });
     expect(() => loadVoiceRuntimeEnv({ ...completeEnv, VOICE_LLM_PROVIDER: "invalid" }))
       .toThrow("invalid_voice_llm_provider");
@@ -62,7 +78,31 @@ describe("voice runtime safety contracts", () => {
     expect(signPostCall(body, "secret", 123)).toBe(expected);
   });
 
-  it("bridges every provider-neutral tool without caller-selected tenant fields", async () => {
+  it("authenticates runtime config and signs post-call delivery", async () => {
+    const fetchImpl = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ tenantId: "tenant-a" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const client = new RuntimeApiClient(
+      "https://api.example/",
+      "internal-secret",
+      "signing-secret",
+      fetchImpl,
+    );
+    await client.getPublishedConfig("tenant/a", "deployment-1");
+    expect(fetchImpl.mock.calls[0][0]).toContain("tenant%2Fa?deploymentId=deployment-1");
+    expect(fetchImpl.mock.calls[0][1]?.headers).toEqual({
+      "x-voice-runtime-secret": "internal-secret",
+    });
+    const payload = { tenantId: "tenant-a", callId: "call-1" } as never;
+    await client.sendPostCall(payload);
+    const request = fetchImpl.mock.calls[1][1]!;
+    const headers = request.headers as Record<string, string>;
+    expect(headers["x-voice-runtime-signature"]).toMatch(/^[a-f0-9]{64}$/);
+    expect(headers["x-voice-runtime-timestamp"]).toMatch(/^\d+$/);
+    expect(request.body).toBe(JSON.stringify(payload));
+  });
+
+  it("bridges only voice tools without caller-selected tenant fields", async () => {
     const requests: Array<[RequestInfo | URL, RequestInit | undefined]> = [];
     const fetchImpl: typeof fetch = async (input, init) => {
       requests.push([input, init]);
@@ -77,13 +117,109 @@ describe("voice runtime safety contracts", () => {
       history,
       fetchImpl,
     });
-    expect(tools.map((tool) => tool.name)).toEqual(TOOL_DEFINITIONS.map((tool) => tool.name));
+    expect(tools.map((tool) => tool.name)).toEqual(VOICE_TOOL_NAMES);
     await (tools[0] as any).execute({ clientId: "bad", tenantId: "bad", topic: "hours" }, {});
     const request = requests[0][1]!;
     expect(request.headers).toMatchObject({ "x-voice-tool-secret": "tenant-bound-secret" });
     expect(request.headers).toMatchObject({ "x-voice-tool-tenant": "tenant-a" });
     expect(JSON.parse(String(request.body))).toEqual({ topic: "hours", conversationId: "call_stable" });
     expect(history[0].result).toEqual({ ok: true });
+  });
+
+  it("returns structured tool rejections to the model and classifies rate limits", async () => {
+    const history: Array<any> = [];
+    const tools = createToolBridge({
+      apiBaseUrl: "https://api.example",
+      tenantId: "tenant-a",
+      toolSecret: "secret",
+      callId: "call-1",
+      history,
+      fetchImpl: async () => new Response(JSON.stringify({
+        ok: false,
+        error: "attendee_phone_invalid_ask_for_complete_number_from_beginning",
+      }), { status: 400 }),
+    });
+    const booking = tools.find((tool) => tool.name === "create_booking")!;
+    await expect((booking as any).execute({ attendeePhone: "short" }, {})).resolves.toEqual({
+      ok: false,
+      error: "attendee_phone_invalid_ask_for_complete_number_from_beginning",
+    });
+    expect(history[0].result).toMatchObject({ ok: false });
+    expect(classifySessionError(new Error("429 tokens per minute"))).toBe("rate_limit");
+    expect(classifySessionError(new Error("LLM completion failed"))).toBe("llm");
+  });
+
+  it("retains corrected booking details inside one call without cross-call leakage", () => {
+    const first = {};
+    rememberBookingState(first, {
+      eventTypeSlug: "gentlemans-cut",
+      start: "2026-09-21T10:00:00.000Z",
+      attendeeName: "Michael",
+    }, { ok: true });
+    rememberBookingState(first, {
+      start: "2026-09-21T11:30:00.000Z",
+      attendeePhone: "07443 443532",
+      callerConfirmed: true,
+    }, { ok: true, bookingUid: "bk_123" });
+    expect(first).toEqual({
+      eventTypeSlug: "gentlemans-cut",
+      start: "2026-09-21T11:30:00.000Z",
+      attendeeName: "Michael",
+      attendeePhone: "07443 443532",
+      callerConfirmed: true,
+      bookingUid: "bk_123",
+    });
+    expect({}).not.toHaveProperty("attendeeName");
+  });
+
+  it("uses the exact offered slot and derives correction-safe booking idempotency", () => {
+    const ledger = {
+      eventTypeSlug: "gentlemans-cut",
+      offeredSlots: ["2026-09-21T14:00:00.000Z"],
+      attendeeName: "Jason",
+    };
+    const first = prepareToolInput("create_booking", {
+      start: "2026-09-21T15:00:00+01:00",
+      attendeePhone: "07443 245443",
+      callerConfirmed: true,
+    }, ledger, "call-jason");
+    const replay = prepareToolInput("create_booking", {
+      start: "2026-09-21T14:00:00.000Z",
+      attendeePhone: "07443 245443",
+      callerConfirmed: true,
+    }, ledger, "call-jason");
+    const corrected = prepareToolInput("create_booking", {
+      start: "2026-09-21T14:00:00.000Z",
+      attendeePhone: "07911 123456",
+      callerConfirmed: true,
+    }, ledger, "call-jason");
+
+    expect(first).toMatchObject({
+      conversationId: "call-jason",
+      eventTypeSlug: "gentlemans-cut",
+      attendeeName: "Jason",
+      start: "2026-09-21T14:00:00.000Z",
+    });
+    expect(first.idempotencyKey).toBe(replay.idempotencyKey);
+    expect(corrected.idempotencyKey).not.toBe(first.idempotencyKey);
+  });
+
+  it("builds tenant speech keyterms without duplicate or empty values", () => {
+    expect(voiceKeyterms({
+      businessName: "Blades Hair",
+      location: "Cullum Street",
+      services: [
+        { title: "Gentleman's Cut", slug: "gentlemans-cut" },
+        { title: "Gentleman's Cut", slug: "gentlemans-cut" },
+      ],
+      staff: ["Sophie", ""],
+    })).toEqual([
+      "Blades Hair",
+      "Cullum Street",
+      "Gentleman's Cut",
+      "gentlemans-cut",
+      "Sophie",
+    ]);
   });
 
   it("normalizes LiveKit and model usage into provider-neutral units", () => {
@@ -96,6 +232,19 @@ describe("voice runtime safety contracts", () => {
       stt: { provider: "deepgram", audioSeconds: 2.5 },
       llm: { provider: "groq", inputTokens: 10, outputTokens: 4 },
       tts: { provider: "elevenlabs", characters: 80, audioSeconds: 1.5 },
+    });
+  });
+
+  it("reports latency count, latest value, p50, and p95 instead of a misleading minimum", () => {
+    const tracker = createLatencyTracker();
+    for (const ttftMs of [100, 200, 300, 900]) {
+      collectLatency(tracker, { type: "llm_metrics", ttftMs } as never);
+    }
+    expect(summarizeLatency(tracker).llmTtft).toEqual({
+      count: 4,
+      lastMs: 900,
+      p50Ms: 200,
+      p95Ms: 900,
     });
   });
 });

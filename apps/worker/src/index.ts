@@ -3,20 +3,36 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { config as loadEnv } from "dotenv";
-import { loadDatabaseEnv } from "@robinexis/database";
-import { getStore, seedStore, structuredLog } from "@robinexis/database";
+import {
+  getStore,
+  loadDatabaseEnv,
+  seedStore,
+  shouldSeedDemoData,
+  structuredLog,
+} from "@robinexis/database";
 import {
   checkAvailability,
   enqueueLifecycleEmail,
   processNotificationDeliveries,
+  processInboundWhatsAppMessages,
+  processScheduledWhatsAppFollowups,
   reconcileStripe,
   resolveCalcomTenantConnection,
 } from "@robinexis/integrations";
+import {
+  createKnowledgeSearchCallback,
+  GeminiEmbeddingProvider,
+  KnowledgeService,
+} from "@robinexis/knowledge";
 import { reconcileBillingAccess } from "./billingAccess.js";
+import { processOutboundJobs } from "./outboundJobs.js";
+import { captureWorkerError, initializeWorkerTelemetry } from "./telemetry.js";
 
+// This service also supervises the isolated LiveKit voice runtime process.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 loadEnv({ path: path.resolve(__dirname, "../../../.env") });
 loadDatabaseEnv();
+initializeWorkerTelemetry();
 
 const POLL = Number(process.env.WORKER_POLL_MS) || 15_000;
 const RETENTION_DAYS = Math.max(1, Number(process.env.DATA_RETENTION_DAYS) || 90);
@@ -281,16 +297,38 @@ async function tick() {
     }
   }
 
-  for (const job of await store.dueJobs(now.toISOString(), 20)) {
-    job.status = "failed";
-    job.disposition = "failed";
-    job.lastError = "outbound_voice_gateway_retired";
-    await store.saveJob(job);
-    structuredLog("outbound_retired", { jobId: job.id, clientId: job.clientId });
+  const outbound = await processOutboundJobs({ store, now });
+  if (outbound.examined) {
+    structuredLog("outbound_jobs_processed", { ...outbound, workerId: WORKER_ID });
   }
   const notifications = await processNotificationDeliveries({ store, workerId: WORKER_ID, now });
   if (notifications.delivered || notifications.retried || notifications.deadLettered) {
     structuredLog("notification_outbox_processed", { ...notifications, workerId: WORKER_ID });
+  }
+  if (
+    process.env.WHATSAPP_ENABLED === "true" &&
+    process.env.WHATSAPP_BRAIN_PROCESSOR_ENABLED === "true"
+  ) {
+    const apiKey = process.env.GEMINI_API_KEY || "";
+    const searchKnowledge = apiKey
+      ? createKnowledgeSearchCallback(
+          new KnowledgeService(store, new GeminiEmbeddingProvider({ apiKey })),
+        )
+      : undefined;
+    const messages = await processInboundWhatsAppMessages({
+      store,
+      workerId: WORKER_ID,
+      now,
+      dependencies: { searchKnowledge },
+    });
+    const followups = await processScheduledWhatsAppFollowups({
+      store,
+      workerId: WORKER_ID,
+      now,
+    });
+    if (messages.claimed || followups.claimed) {
+      structuredLog("whatsapp_brain_processed", { ...messages, followups, workerId: WORKER_ID });
+    }
   }
   await retryProvisioningRuns(store);
   await monitorCalendarHealth(store);
@@ -310,6 +348,7 @@ async function runTick() {
     await tick();
     lastTickSucceededAt = Date.now();
   } catch (error) {
+    captureWorkerError(error, "worker_tick");
     lastTickFailedAt = Date.now();
     throw error;
   } finally {
@@ -322,13 +361,16 @@ async function main() {
     structuredLog("worker_health_listening", { port: HEALTH_PORT, path: "/health" });
   });
   const store = await getStore();
-  if ((await store.listClients()).length === 0) await seedStore(store);
+  if ((await store.listClients()).length === 0 && shouldSeedDemoData()) await seedStore(store);
   structuredLog("worker_start", {
     pollMs: POLL,
     healthPort: HEALTH_PORT,
     healthStaleMs: HEALTH_STALE_MS,
     retentionDays: RETENTION_DAYS,
     stripeConfigured: Boolean(process.env.STRIPE_SECRET_KEY),
+    voiceRuntimeEnabled: process.env.VOICE_RUNTIME_ENABLED === "true",
+    livekitAgentName: process.env.LIVEKIT_AGENT_NAME || "robinexis-alternate-runtime",
+    voiceTurnPolicy: "stt-vad-stop-after-question-three-slots",
   });
   if (!process.env.STRIPE_SECRET_KEY) {
     structuredLog("worker_misconfigured", { missing: ["STRIPE_SECRET_KEY"] });
@@ -344,6 +386,7 @@ async function main() {
 }
 
 main().catch((e) => {
+  captureWorkerError(e, "worker_start");
   console.error(e);
   process.exit(1);
 });

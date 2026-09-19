@@ -124,6 +124,12 @@ async function openWorkspaceSession(
     if (path === `/api/v1/clients/${client.id}/notifications/status`) return route.fulfill({ json: { pending: 0, failed: 0 } });
     if (path === `/api/v1/clients/${client.id}/twilio-connection`) return route.fulfill({ json: { mode: "robinexis_account", status: "active", selectedPhoneNumber: "+441130000000", canReconnect: true } });
     if (path === `/api/v1/clients/${client.id}/calendar-connection`) return route.fulfill({ json: { mode: "managed", status: "active", destinationCalendarId: "calendar_1", availableCalendars: [], canReconnect: true } });
+    if (path === `/api/v1/admin/clients/${client.id}/feature-entitlements`) return route.fulfill({ json: { whatsappEnabled: false, autoMinuteBlocksEnabled: false } });
+    if (path === `/api/v1/admin/clients/${client.id}/managed-whatsapp-status`) return route.fulfill({ json: {
+      sender: { status: "not_configured" },
+      templates: { status: "not_configured" },
+      runtime: { status: "disabled" },
+    } });
     if (path === "/api/v1/audit" || path === "/api/v1/admin/audit") return route.fulfill({ json: { items: [] } });
     if (path === "/api/v1/memberships") return route.fulfill({ json: { items: role === "salon" ? [{ id: "member_1", clientId: client.id, email: "owner@demo-salon.test", role: "owner", createdAt: "2026-09-01T00:00:00.000Z" }] : [] } });
     if (path === "/api/v1/usage") return route.fulfill({ json: { clientId: client.id, month: "2026-08", inboundMinutes: 10, outboundMinutes: 2 } });
@@ -316,7 +322,7 @@ test("all operator areas render against their backend contracts", async ({ page 
     ["/app/playground", "Hear your receptionist before customers do"],
     ["/app/calls", "Every conversation, accounted for"],
     ["/app/analytics", "Know what’s happening on the phone"],
-    ["/app/calendar", "Bookings and availability in one view"],
+    ["/app/calendar", "This workspace’s bookings and availability"],
     ["/app/calendar/settings", "Control when and how bookings happen"],
     ["/app/phone", "Ownership, routing and health"],
     ["/app/usage", "Know exactly what is included"],
@@ -497,9 +503,11 @@ test("viewer control planes are read-only on mobile", async ({ page }) => {
 
 test("booking workflow exposes filters and details", async ({ page }) => {
   await openWorkspaceSession(page);
-  await page.goto("/app/calendar");
+  await page.goto("/app/w/client_demo/bookings");
   await expect(page.getByPlaceholder("Search customer, email or title…")).toBeVisible();
-  await expect(page.getByText("Alex Customer")).toBeVisible();
+  const customer = page.getByText("Alex Customer");
+  await customer.scrollIntoViewIfNeeded();
+  await expect(customer).toBeVisible({ timeout: 15_000 });
   await page.getByRole("button", { name: "Details" }).click();
   await expect(page.getByRole("dialog").getByText("alex@example.test")).toBeVisible();
   await expectNoPageOverflow(page);

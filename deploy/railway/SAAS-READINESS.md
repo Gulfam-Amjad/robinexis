@@ -1,6 +1,6 @@
 # Robinexis SaaS readiness
 
-Updated: 2026-09-15
+Updated: 2026-09-18
 
 ## Shipped in the launch candidate
 
@@ -25,18 +25,34 @@ Updated: 2026-09-15
 - Automatic provisioning foundation: resumable onboarding jobs, reviewed website extraction, hybrid Twilio,
   connected/managed Cal.com, isolated ElevenLabs builds, readiness-only synthetic booking checks, owner-only
   two-phase activation, provider compensation, durable lifecycle mail, and client/operator control planes.
+- Handover hardening: hosted environments cannot auto-seed demo tenants, API replicas do not own production
+  migrations, production web builds fail closed on auth/API/Supabase configuration, browser voice CSP and
+  microphone policy are explicit, and Sentry SDKs are wired without default PII.
+- Outbound jobs use an explicit, feature-gated Twilio dispatcher with suppression, calling-window, idempotent
+  claim, retry, and readiness checks instead of silently failing through the retired gateway path.
 
 ## Safety state
 
-- Production Blades resources were not mutated. The read-only baseline is green.
+- Production revision `6647d49e4c3f` is live on Railway API/worker and the `robinexis`
+  Vercel production project.
+- Blades provider identity and routing were preserved. Its internal Starter trial was reconciled
+  from `paused` to `trialing`, onboarding is `active`, and a fresh local-only baseline was captured.
+- Blades Cal.com mappings are live for both 15- and 30-minute services. A disposable booking was
+  accepted and cancelled successfully.
+- The cheap LiveKit runtime is registered in production. The isolated staging room/audio canary,
+  quality gate, ElevenLabs → LiveKit switch, post-call usage persistence, and rollback all passed.
+- Production browser comparison readiness is green. A Cost Saver session connected, returned audio,
+  and persisted LiveKit, Deepgram, Groq, and ElevenLabs component usage without changing phone routing.
 - `SAAS_PROVISIONING_ENABLED=false` remains unchanged in API and worker.
 - No live Stripe charge was created. Checkout verification used Stripe's `4242` test card in an isolated sandbox.
-- Production was not promoted automatically; this candidate remains on `feat/multi-tenant-saas-conversion`.
+- Stripe staging checkout, portal, signed webhook, replay idempotency, subscription, and one allowance
+  grant passed in test mode. Production remained in live mode and its keys were not changed.
+- Production and staging remain single-replica because Redis is not provisioned.
+- See `CLIENT-HANDOVER.md` for the automated gate and the separate live-provider sign-off.
 
 ## Release-gated limitations
 
-- Automatic activation remains disabled. The code is deployed only to isolated staging; paid production users
-  continue through operator-assisted setup.
+- Automatic activation remains disabled. Paid production users continue through operator-assisted setup.
 - Invitation and lifecycle requests are workflows, not destructive automation. An operator approves exports,
   ownership changes, and deletion.
 - Redis code is ready, but Railway refused another resource on the current free-plan resource limit. Keep one
@@ -46,13 +62,14 @@ Updated: 2026-09-15
 
 ## Manual owner inputs still required
 
-1. Replace the invalid/placeholder Railway staging Stripe key with a claimed test-mode key and webhook secret.
-2. Upgrade Railway or provide a Redis/Upstash URL.
-3. Provide Firecrawl, Cal.com OAuth/Platform, disposable Twilio/ElevenLabs staging, and Resend credentials.
-4. Enable Supabase backups/PITR and approve a staging restore drill.
-5. Provide legal company/address/company-number/VAT/privacy/refund facts and solicitor approval.
-6. Add the exact protected Blades Twilio provider resource IDs to `TWILIO_PROTECTED_RESOURCE_IDS`.
-7. Authenticate GitHub CLI if a pull request must be created from the command line.
+1. Rotate the staging Stripe test secret because it was shared in chat; production live keys are unaffected.
+2. Upgrade Railway or provide a Redis/Upstash URL before increasing API replicas.
+3. Enable Supabase backups/PITR and approve a staging restore drill.
+4. Provide legal company/address/company-number/VAT/privacy/refund facts and solicitor approval.
+5. Add the exact protected Blades Twilio provider resource IDs to `TWILIO_PROTECTED_RESOURCE_IDS`.
+6. Repair or replace the malformed legacy Twilio verified caller ID, then complete the controlled
+   inbound Blades call gate. Routing and agent probes are green, but this call must not be reported as passed yet.
+7. Replace Railway's inaccessible `Gulfam-Amjad/robinexis` source with the client release branch after acceptance.
 8. Apply the Framer links: Starter `/signup?plan=starter`, Pro `/signup?plan=pro`, Enterprise
    `/enterprise-contact` on `https://app.robinexis.com`.
 

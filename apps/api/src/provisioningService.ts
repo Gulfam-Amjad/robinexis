@@ -309,7 +309,8 @@ function availabilityTool(apiBaseUrl: string, secretId: string) {
   return {
     type: "webhook",
     name: "check_availability",
-    description: "Check this business's live calendar. Offer only returned slots.",
+    description:
+      "Check this business's live calendar. Offer only returned slots and preserve the exact accepted slot value for create_booking.",
     api_schema: {
       url: `${apiBaseUrl}/api/v1/voice-tools/check-availability`,
       method: "POST",
@@ -334,7 +335,8 @@ function bookingTool(apiBaseUrl: string, secretId: string) {
   return {
     type: "webhook",
     name: "create_booking",
-    description: "Create a booking only after a returned slot and explicit caller confirmation.",
+    description:
+      "Create a booking only with the exact accepted slot returned by availability and after explicit confirmation of service, time, name, and the complete phone number. Follow recoveryAction on errors and never announce success without a booking UID.",
     api_schema: {
       url: `${apiBaseUrl}/api/v1/voice-tools/create-booking`,
       method: "POST",
@@ -343,16 +345,23 @@ function bookingTool(apiBaseUrl: string, secretId: string) {
       request_body_schema: {
         type: "object",
         properties: {
-          conversationId: { type: "string" },
-          eventTypeSlug: { type: "string" },
-          start: { type: "string" },
-          attendeeName: { type: "string" },
-          attendeePhone: { type: "string" },
-          attendeeEmail: { type: "string" },
-          attendeeTimeZone: { type: "string" },
-          notes: { type: "string" },
-          callerConfirmed: { type: "boolean" },
-          idempotencyKey: { type: "string" },
+          conversationId: { type: "string", description: "Stable ElevenLabs conversation ID." },
+          eventTypeSlug: { type: "string", description: "Configured service slug selected by the caller." },
+          start: { type: "string", description: "Exact ISO 8601 slot returned by availability." },
+          attendeeName: { type: "string", description: "Caller name for the booking." },
+          attendeePhone: {
+            type: "string",
+            description:
+              "Complete caller phone exactly as confirmed. National or E.164 format is accepted; never add or infer digits.",
+          },
+          attendeeEmail: { type: "string", description: "Caller email when provided." },
+          attendeeTimeZone: { type: "string", description: "IANA timezone confirmed with the caller." },
+          notes: { type: "string", description: "Short booking notes without sensitive data." },
+          callerConfirmed: { type: "boolean", description: "True only after explicit caller confirmation." },
+          idempotencyKey: {
+            type: "string",
+            description: "Optional stable key. The server derives a correction-safe key when omitted.",
+          },
         },
         required: [
           "conversationId",
@@ -361,7 +370,6 @@ function bookingTool(apiBaseUrl: string, secretId: string) {
           "attendeeName",
           "attendeePhone",
           "callerConfirmed",
-          "idempotencyKey",
         ],
       },
     },

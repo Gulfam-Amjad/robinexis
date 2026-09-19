@@ -5,6 +5,7 @@ import {
   type CallSession,
   type PlatformStore,
 } from "@robinexis/database";
+import { resolveMinuteAccess } from "@robinexis/integrations";
 
 type WebhookResult = { status: number; body: Record<string, unknown> };
 
@@ -174,6 +175,10 @@ export async function ingestElevenLabsWebhook(
       referenceId: `${call.id}:${durationSeconds}`,
       description: `${call.direction} call usage`,
       createdAt: call.updatedAt,
+    });
+    await resolveMinuteAccess(store, client, {
+      mode: "settlement",
+      now: new Date(call.updatedAt),
     });
     const configuredRate = Number(process.env.ELEVENLABS_ESTIMATED_COST_PER_MINUTE_PENCE);
     const ratePence = Number.isFinite(configuredRate) && configuredRate >= 0 ? configuredRate : 0;

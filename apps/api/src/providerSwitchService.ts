@@ -344,9 +344,11 @@ export class ProviderSwitchService {
     const operation = (await this.store.listProviderSwitchOperations(clientId)).find((item) => item.id === operationId);
     if (!operation) throw new Error("provider_switch_not_found");
     if (operation.status === "rolled_back") return this.view(operation);
-    if (operation.status !== "succeeded" || !operation.rollbackSnapshotId || !operation.fromDeploymentId) {
+    const retryableRollback = operation.status === "succeeded" || operation.status === "failed";
+    if (!retryableRollback || !operation.rollbackSnapshotId || !operation.fromDeploymentId) {
       throw new Error("provider_switch_not_rollbackable");
     }
+    operation.error = undefined;
     const deployments = await this.store.listProviderDeployments(clientId);
     const source = deployments.find((item) => item.id === operation.fromDeploymentId)!;
     const target = deployments.find((item) => item.id === operation.toDeploymentId)!;

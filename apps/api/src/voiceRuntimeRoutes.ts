@@ -8,6 +8,7 @@ import {
   type PlatformStore,
   type ProviderUsageCostEvent,
 } from "@robinexis/database";
+import { resolveMinuteAccess } from "@robinexis/integrations";
 
 type Result = { status: number; body: Record<string, unknown> };
 
@@ -166,6 +167,10 @@ export async function ingestVoiceRuntimePostCall(
       referenceId: `${payload.callId}:${payload.durationSeconds}`,
       description: `${payload.direction} call usage`,
       createdAt: payload.endedAt,
+    });
+    await resolveMinuteAccess(store, client, {
+      mode: "settlement",
+      now: new Date(payload.endedAt),
     });
   }
   for (const event of usageEvents(payload)) await store.appendProviderUsageCostEvent(event);

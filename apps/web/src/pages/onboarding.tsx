@@ -7,9 +7,10 @@ import type {
   OnboardingWizardStep,
   WebsiteIntelligenceFact,
 } from "@robinexis/api-contracts";
-import { Check, ChevronLeft, ChevronRight, Globe2, Loader2, Save, ShieldCheck, Sparkles } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Globe2, Loader2, Save, ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
+import { Logo } from "../components/layout";
 import { Button, Field } from "../components/ui";
 import { ApiError, api } from "../lib/api";
 import { useSession } from "../state";
@@ -134,7 +135,7 @@ function SetupProgress({
   const report = provisioning?.output?.readinessReport;
   return (
     <main className="onboarding-page">
-      <header className="onboarding-header"><Link className="logo" to="/"><span className="logo-mark"><Sparkles size={18} /></span><span>Robinexis</span></Link></header>
+      <header className="onboarding-header"><Logo /></header>
       <section className="onboarding-status-card">
         <span className="eyebrow">Assisted setup</span>
         <h1>{needsAttention ? "We need one more detail" : awaitingApproval ? "Your receptionist is ready for approval" : inProgress ? "Your setup is in progress" : queued ? "Your setup is in the queue" : "Your setup is ready"}</h1>
@@ -175,7 +176,7 @@ function SetupProgress({
 function OnboardingUnavailable({ onRetry, retrying }: { onRetry: () => void; retrying: boolean }) {
   return (
     <main className="onboarding-page">
-      <header className="onboarding-header"><Link className="logo" to="/"><span className="logo-mark"><Sparkles size={18} /></span><span>Robinexis</span></Link></header>
+      <header className="onboarding-header"><Logo /></header>
       <section className="onboarding-status-card" role="alert">
         <span className="eyebrow">Assisted setup</span>
         <h1>We couldn’t load your setup</h1>
@@ -372,7 +373,7 @@ export function SelfServeOnboardingPage() {
   return (
     <main className="onboarding-page">
       <header className="onboarding-header">
-        <Link className="logo" to="/"><span className="logo-mark"><Sparkles size={18} /></span><span>Robinexis</span></Link>
+        <Logo />
         <span><Save size={14} /> Saved securely to your workspace</span>
       </header>
       <div className="onboarding-shell">

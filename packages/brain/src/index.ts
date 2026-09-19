@@ -1,6 +1,7 @@
 export { compilePrompt, greetingFor } from "./compiler.js";
 export {
   BrainSession,
+  type BrainSessionOptions,
   type BrainStreamCallbacks,
   type ToolExecutor,
   type TurnResult,

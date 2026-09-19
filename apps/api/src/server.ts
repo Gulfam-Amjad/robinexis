@@ -8,15 +8,21 @@ import {
   getRedis,
   migrate,
   seedStore,
+  shouldRunMigrationsOnStart,
+  shouldSeedDemoData,
   structuredLog,
 } from "@robinexis/database";
 import {
+  applyManagedWhatsAppStatus,
   applyOutboundStatus,
   ElevenLabsManagementClient,
   handleStripeWebhook,
+  ingestManagedWhatsApp,
+  validateManagedWhatsAppWebhook,
   validateTwilioWebhook,
 } from "@robinexis/integrations";
 import { TOOL_NAMES, type ToolName } from "@robinexis/tool-contracts";
+// Shared booking safeguards are part of the deployed voice-tool boundary.
 import { applyCors, authenticateRequest, describeAuthMode } from "./auth.js";
 import { ingestElevenLabsWebhook } from "./elevenLabsWebhook.js";
 import {
@@ -33,7 +39,7 @@ import {
   runtimeConfigFor,
   voiceRuntimeAuthorized,
 } from "./voiceRuntimeRoutes.js";
-import { initializeBackendTelemetry } from "./telemetry.js";
+import { captureBackendError, initializeBackendTelemetry } from "./telemetry.js";
 import { liveKitInboundTwiml } from "./liveKitTelephonyRoutes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -226,6 +232,47 @@ const server = http.createServer(async (req, res) => {
       send(res, result.status, result.body, "application/xml");
       return;
     }
+    if (url.pathname === "/webhooks/twilio/whatsapp/inbound" && req.method === "POST") {
+      const raw = await readRaw(req);
+      const form = new URLSearchParams(raw.toString("utf8"));
+      const params = Object.fromEntries(form.entries());
+      const signature = String(req.headers["x-twilio-signature"] ?? "");
+      const validation = validateManagedWhatsAppWebhook({
+        signature, pathname: url.pathname, search: url.search, params,
+      });
+      if (!validation.ok) {
+        send(res, validation.error === "whatsapp_webhook_not_configured" ? 503 : 403, {
+          error: validation.error,
+        });
+        return;
+      }
+      const result = await ingestManagedWhatsApp({ store, params: form });
+      send(res, result.status, result.body);
+      return;
+    }
+    if (url.pathname === "/webhooks/twilio/whatsapp/status" && req.method === "POST") {
+      const raw = await readRaw(req);
+      const form = new URLSearchParams(raw.toString("utf8"));
+      const params = Object.fromEntries(form.entries());
+      const signature = String(req.headers["x-twilio-signature"] ?? "");
+      const validation = validateManagedWhatsAppWebhook({
+        signature, pathname: url.pathname, search: url.search, params,
+      });
+      if (!validation.ok) {
+        send(res, validation.error === "whatsapp_webhook_not_configured" ? 503 : 403, {
+          error: validation.error,
+        });
+        return;
+      }
+      const result = await applyManagedWhatsAppStatus({
+        store,
+        clientId: url.searchParams.get("clientId") || "",
+        notificationId: url.searchParams.get("notificationId") || "",
+        params: form,
+      });
+      send(res, result.status, result.body);
+      return;
+    }
     if (url.pathname === "/webhooks/twilio/number-status" && req.method === "POST") {
       const raw = await readRaw(req);
       const form = new URLSearchParams(raw.toString());
@@ -370,6 +417,7 @@ const server = http.createServer(async (req, res) => {
     }
     send(res, 404, { error: "not_found" });
   } catch (err) {
+    captureBackendError(err, { component: "api_request" });
     structuredLog("api_error", { err: String(err) });
     send(
       res,
@@ -380,12 +428,12 @@ const server = http.createServer(async (req, res) => {
 });
 
 async function start() {
-  if (process.env.DATABASE_URL && process.env.RUN_MIGRATIONS_ON_START !== "false") {
-    await migrate(process.env.DATABASE_URL);
+  if (shouldRunMigrationsOnStart()) {
+    await migrate(process.env.DATABASE_URL!);
   }
   const store = await getStore();
   const clients = await store.listClients();
-  if (clients.length === 0) await seedStore(store);
+  if (clients.length === 0 && shouldSeedDemoData()) await seedStore(store);
   server.listen(PORT, () => {
     console.log(`[api] listening on :${PORT}`);
     console.log(`[api] auth: ${describeAuthMode()}`);
@@ -393,6 +441,7 @@ async function start() {
 }
 
 start().catch((err) => {
+  captureBackendError(err, { component: "api_start" });
   structuredLog("api_start_failed", { err: String(err) });
   process.exit(1);
 });

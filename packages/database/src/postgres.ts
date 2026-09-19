@@ -23,12 +23,16 @@ import type {
   KnowledgeDocumentListOptions,
   KnowledgeSearchOptions,
   Location,
+  MessageEvent,
+  MessageSession,
+  MessageUsagePeriod,
   OperatorAuditRecord,
   OnboardingGap,
   OnboardingJob,
   OnboardingOutboxEvent,
   OnboardingWizardState,
   NotificationDelivery,
+  OveragePurchaseRecord,
   OutboundJob,
   Page,
   PhoneEndpoint,
@@ -47,6 +51,8 @@ import type {
   StripeEvent,
   Subscription,
   Suppression,
+  ScheduledFollowup,
+  TenantFeatureEntitlements,
   TenantRequest,
   ToolActionRow,
   TwilioConnection,
@@ -1131,15 +1137,15 @@ export class PostgresStore implements PlatformStore {
       `INSERT INTO notification_deliveries
        (id,client_id,operation_id,idempotency_key,channel,recipient,template,status,provider_id,
         attempt_count,max_attempts,next_attempt_at,lease_owner,lease_expires_at,last_error,
-        delivered_at,dead_lettered_at,created_at,updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+        delivered_at,dead_lettered_at,created_at,updated_at,payload)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
        ON CONFLICT (client_id,idempotency_key) DO NOTHING RETURNING id`,
       [delivery.id, delivery.clientId, delivery.operationId, delivery.idempotencyKey,
         delivery.channel, delivery.recipient, delivery.template, delivery.status,
         delivery.providerId ?? null, delivery.attemptCount, delivery.maxAttempts,
         delivery.nextAttemptAt, delivery.leaseOwner ?? null, delivery.leaseExpiresAt ?? null,
         delivery.lastError ?? null, delivery.deliveredAt ?? null, delivery.deadLetteredAt ?? null,
-        delivery.createdAt, delivery.updatedAt],
+        delivery.createdAt, delivery.updatedAt, delivery.payload ?? {}],
     );
     return r.rowCount === 1;
   }
@@ -1187,6 +1193,13 @@ export class PostgresStore implements PlatformStore {
     );
     return r.rowCount === 1;
   }
+  async getNotification(clientId: string, id: string) {
+    const r = await this.pool.query(
+      "SELECT * FROM notification_deliveries WHERE client_id=$1 AND id=$2",
+      [clientId, id],
+    );
+    return r.rows[0] ? notificationFromRow(r.rows[0]) : undefined;
+  }
   async listNotifications(clientId: string, limit = 100) {
     const r = await this.pool.query(
       "SELECT * FROM notification_deliveries WHERE client_id=$1 ORDER BY created_at DESC,id DESC LIMIT $2",
@@ -1210,6 +1223,388 @@ export class PostgresStore implements PlatformStore {
       oldestPendingAt: row.oldest_pending_at?.toISOString?.() || row.oldest_pending_at || undefined,
       providerFailures24h: Number(row.failures),
     };
+  }
+  async getTenantFeatureEntitlements(clientId: string) {
+    const r = await this.pool.query(
+      "SELECT * FROM tenant_feature_entitlements WHERE client_id=$1",
+      [clientId],
+    );
+    return r.rows[0] ? tenantFeatureEntitlementsFromRow(r.rows[0]) : undefined;
+  }
+  async upsertTenantFeatureEntitlements(entitlements: TenantFeatureEntitlements) {
+    await this.pool.query(
+      `INSERT INTO tenant_feature_entitlements
+       (client_id,whatsapp_enabled,auto_minute_blocks_enabled,created_at,updated_at)
+       VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (client_id) DO UPDATE SET whatsapp_enabled=EXCLUDED.whatsapp_enabled,
+         auto_minute_blocks_enabled=EXCLUDED.auto_minute_blocks_enabled,
+         updated_at=EXCLUDED.updated_at`,
+      [entitlements.clientId, entitlements.whatsappEnabled,
+        entitlements.autoMinuteBlocksEnabled, entitlements.createdAt, entitlements.updatedAt],
+    );
+  }
+  async getMessageUsagePeriod(
+    clientId: string,
+    channel: MessageUsagePeriod["channel"],
+    periodStart: string,
+  ) {
+    const r = await this.pool.query(
+      "SELECT * FROM message_usage_periods WHERE client_id=$1 AND channel=$2 AND period_start=$3",
+      [clientId, channel, periodStart],
+    );
+    return r.rows[0] ? messageUsagePeriodFromRow(r.rows[0]) : undefined;
+  }
+  async upsertMessageUsagePeriod(period: MessageUsagePeriod) {
+    await this.pool.query(
+      `INSERT INTO message_usage_periods
+       (id,client_id,channel,period_start,period_end,included_messages,used_messages,created_at,updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       ON CONFLICT (client_id,channel,period_start) DO UPDATE SET
+         period_end=EXCLUDED.period_end,included_messages=EXCLUDED.included_messages,
+         used_messages=EXCLUDED.used_messages,updated_at=EXCLUDED.updated_at`,
+      [period.id, period.clientId, period.channel, period.periodStart, period.periodEnd,
+        period.includedMessages, period.usedMessages, period.createdAt, period.updatedAt],
+    );
+  }
+  async consumeMessageAllowance(
+    clientId: string,
+    channel: MessageUsagePeriod["channel"],
+    periodStart: string,
+    units: number,
+    nowIso: string,
+  ) {
+    if (!Number.isInteger(units) || units <= 0) throw new Error("message_units_must_be_positive_integer");
+    const r = await this.pool.query(
+      `UPDATE message_usage_periods SET used_messages=used_messages+$4,updated_at=$5
+       WHERE client_id=$1 AND channel=$2 AND period_start=$3
+         AND used_messages+$4 <= included_messages
+       RETURNING *`,
+      [clientId, channel, periodStart, units, nowIso],
+    );
+    return r.rows[0] ? messageUsagePeriodFromRow(r.rows[0]) : undefined;
+  }
+  async saveMessageSession(session: MessageSession) {
+    await this.pool.query(
+      `INSERT INTO message_sessions
+       (id,client_id,channel,contact_address,sender_address,status,service_window_expires_at,
+        state,created_at,updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status,
+         service_window_expires_at=EXCLUDED.service_window_expires_at,state=EXCLUDED.state,
+         updated_at=EXCLUDED.updated_at
+       WHERE message_sessions.client_id=EXCLUDED.client_id`,
+      [session.id, session.clientId, session.channel, session.contactAddress, session.senderAddress,
+        session.status, session.serviceWindowExpiresAt ?? null, session.state,
+        session.createdAt, session.updatedAt],
+    );
+  }
+  async getOrCreateMessageSession(session: MessageSession) {
+    const r = await this.pool.query(
+      `INSERT INTO message_sessions
+       (id,client_id,channel,contact_address,sender_address,status,service_window_expires_at,
+        state,created_at,updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       ON CONFLICT (client_id,channel,contact_address,sender_address)
+       DO UPDATE SET client_id=EXCLUDED.client_id
+       RETURNING *`,
+      [session.id, session.clientId, session.channel, session.contactAddress, session.senderAddress,
+        session.status, session.serviceWindowExpiresAt ?? null, session.state,
+        session.createdAt, session.updatedAt],
+    );
+    return messageSessionFromRow(r.rows[0]);
+  }
+  async getMessageSession(clientId: string, id: string) {
+    const r = await this.pool.query(
+      "SELECT * FROM message_sessions WHERE client_id=$1 AND id=$2",
+      [clientId, id],
+    );
+    return r.rows[0] ? messageSessionFromRow(r.rows[0]) : undefined;
+  }
+  async findMessageSession(
+    clientId: string,
+    channel: MessageSession["channel"],
+    contactAddress: string,
+    senderAddress: string,
+  ) {
+    const r = await this.pool.query(
+      `SELECT * FROM message_sessions
+       WHERE client_id=$1 AND channel=$2 AND contact_address=$3 AND sender_address=$4`,
+      [clientId, channel, contactAddress, senderAddress],
+    );
+    return r.rows[0] ? messageSessionFromRow(r.rows[0]) : undefined;
+  }
+  async appendMessageEvent(event: MessageEvent) {
+    const r = await this.pool.query(
+      `INSERT INTO message_events
+       (id,client_id,session_id,channel,direction,provider,provider_message_id,idempotency_key,
+        status,body,billable_units,metadata,occurred_at,created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+       ON CONFLICT DO NOTHING RETURNING id`,
+      [event.id, event.clientId, event.sessionId, event.channel, event.direction, event.provider,
+        event.providerMessageId ?? null, event.idempotencyKey, event.status, event.body ?? null,
+        event.billableUnits, event.metadata, event.occurredAt, event.createdAt],
+    );
+    return r.rowCount === 1;
+  }
+  async claimInboundMessageEvents(workerId: string, nowIso: string, leaseSeconds: number, limit: number) {
+    const r = await this.pool.query(
+      `WITH claimable AS (
+         SELECT id FROM message_events
+         WHERE direction='inbound' AND channel='whatsapp'
+           AND (status='received' OR
+             (status='processing' AND processing_lease_expires_at <= $2::timestamptz))
+         ORDER BY occurred_at,created_at,id FOR UPDATE SKIP LOCKED LIMIT $4
+       )
+       UPDATE message_events e SET status='processing',processing_lease_owner=$1,
+         processing_lease_expires_at=$2::timestamptz+($3::int*interval '1 second'),
+         processing_attempt_count=e.processing_attempt_count+1,processing_error=NULL
+       FROM claimable WHERE e.id=claimable.id RETURNING e.*`,
+      [workerId, nowIso, Math.max(1, leaseSeconds), Math.max(0, limit)],
+    );
+    return r.rows.map(messageEventFromRow);
+  }
+  async completeInboundMessageEvent(
+    clientId: string,
+    id: string,
+    workerId: string,
+    processedAt: string,
+  ) {
+    const r = await this.pool.query(
+      `UPDATE message_events SET status='processed',processed_at=$4,
+         processing_lease_owner=NULL,processing_lease_expires_at=NULL,processing_error=NULL
+       WHERE client_id=$1 AND id=$2 AND status='processing' AND processing_lease_owner=$3
+       RETURNING id`,
+      [clientId, id, workerId, processedAt],
+    );
+    return r.rowCount === 1;
+  }
+  async retryInboundMessageEvent(
+    clientId: string,
+    id: string,
+    workerId: string,
+    error: string,
+    retryAt: string,
+    maxAttempts: number,
+  ) {
+    const r = await this.pool.query(
+      `UPDATE message_events SET
+         status=CASE WHEN processing_attempt_count >= $6 THEN 'failed' ELSE 'processing' END,
+         processing_error=$4,
+         processing_lease_owner=CASE WHEN processing_attempt_count >= $6 THEN NULL ELSE $3 END,
+         processing_lease_expires_at=CASE WHEN processing_attempt_count >= $6 THEN NULL ELSE $5::timestamptz END
+       WHERE client_id=$1 AND id=$2 AND status='processing' AND processing_lease_owner=$3
+       RETURNING status`,
+      [clientId, id, workerId, error, retryAt, Math.max(1, maxAttempts)],
+    );
+    return r.rows[0]?.status === "processing";
+  }
+  async reserveMessageEventAllowance(
+    event: MessageEvent,
+    period: MessageUsagePeriod,
+    persistSuppressedOnExhaustion = false,
+  ) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const duplicate = await client.query(
+        "SELECT 1 FROM message_events WHERE client_id=$1 AND idempotency_key=$2",
+        [event.clientId, event.idempotencyKey],
+      );
+      if (duplicate.rowCount) {
+        await client.query("ROLLBACK");
+        return "duplicate" as const;
+      }
+      await client.query(
+        `INSERT INTO message_usage_periods
+         (id,client_id,channel,period_start,period_end,included_messages,used_messages,created_at,updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,0,$7,$8)
+         ON CONFLICT (client_id,channel,period_start) DO NOTHING`,
+        [period.id, period.clientId, period.channel, period.periodStart, period.periodEnd,
+          period.includedMessages, period.createdAt, period.updatedAt],
+      );
+      const allowance = await client.query(
+        `UPDATE message_usage_periods SET used_messages=used_messages+$4,updated_at=$5
+         WHERE client_id=$1 AND channel=$2 AND period_start=$3
+           AND used_messages+$4 <= included_messages RETURNING id`,
+        [event.clientId, event.channel, period.periodStart, event.billableUnits, event.occurredAt],
+      );
+      if (!allowance.rowCount) {
+        if (!persistSuppressedOnExhaustion) {
+          await client.query("ROLLBACK");
+          return "exhausted" as const;
+        }
+        const suppressed = await client.query(
+          `INSERT INTO message_events
+           (id,client_id,session_id,channel,direction,provider,provider_message_id,idempotency_key,
+            status,body,billable_units,metadata,occurred_at,created_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'suppressed',$9,0,$10,$11,$12)
+           ON CONFLICT DO NOTHING RETURNING id`,
+          [event.id, event.clientId, event.sessionId, event.channel, event.direction, event.provider,
+            event.providerMessageId ?? null, event.idempotencyKey, event.body ?? null,
+            {
+              ...event.metadata,
+              reason: "whatsapp_message_allowance_exhausted",
+              rejected: true,
+            },
+            event.occurredAt, event.createdAt],
+        );
+        if (!suppressed.rowCount) {
+          await client.query("ROLLBACK");
+          return "duplicate" as const;
+        }
+        await client.query("COMMIT");
+        return "exhausted" as const;
+      }
+      const inserted = await client.query(
+        `INSERT INTO message_events
+         (id,client_id,session_id,channel,direction,provider,provider_message_id,idempotency_key,
+          status,body,billable_units,metadata,occurred_at,created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+         ON CONFLICT DO NOTHING RETURNING id`,
+        [event.id, event.clientId, event.sessionId, event.channel, event.direction, event.provider,
+          event.providerMessageId ?? null, event.idempotencyKey, event.status, event.body ?? null,
+          event.billableUnits, event.metadata, event.occurredAt, event.createdAt],
+      );
+      if (!inserted.rowCount) {
+        await client.query("ROLLBACK");
+        return "duplicate" as const;
+      }
+      await client.query("COMMIT");
+      return "reserved" as const;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+  async updateMessageEventProviderStatus(
+    clientId: string,
+    idempotencyKey: string,
+    providerMessageId: string,
+    status: MessageEvent["status"],
+    metadata: Record<string, unknown>,
+    occurredAt: string,
+  ) {
+    const r = await this.pool.query(
+      `UPDATE message_events SET provider_message_id=$3,
+         status=CASE
+           WHEN status='delivered' THEN status
+           WHEN status='failed' AND $4<>'delivered' THEN status
+           ELSE $4
+         END,
+         metadata=metadata || $5::jsonb,occurred_at=$6
+       WHERE client_id=$1 AND idempotency_key=$2 RETURNING id`,
+      [clientId, idempotencyKey, providerMessageId, status, metadata, occurredAt],
+    );
+    return r.rowCount === 1;
+  }
+  async findMessageEventByProviderId(clientId: string, provider: string, providerMessageId: string) {
+    const r = await this.pool.query(
+      `SELECT * FROM message_events
+       WHERE client_id=$1 AND provider=$2 AND provider_message_id=$3`,
+      [clientId, provider, providerMessageId],
+    );
+    return r.rows[0] ? messageEventFromRow(r.rows[0]) : undefined;
+  }
+  async listMessageEvents(clientId: string, sessionId: string) {
+    const r = await this.pool.query(
+      `SELECT * FROM message_events WHERE client_id=$1 AND session_id=$2
+       ORDER BY occurred_at,id`,
+      [clientId, sessionId],
+    );
+    return r.rows.map(messageEventFromRow);
+  }
+  async enqueueScheduledFollowup(followup: ScheduledFollowup) {
+    const r = await this.pool.query(
+      `INSERT INTO scheduled_followups
+       (id,client_id,session_id,channel,recipient,template,idempotency_key,payload,status,
+        scheduled_at,attempt_count,max_attempts,lease_owner,lease_expires_at,last_error,
+        completed_at,created_at,updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+       ON CONFLICT (client_id,idempotency_key) DO NOTHING RETURNING id`,
+      [followup.id, followup.clientId, followup.sessionId ?? null, followup.channel,
+        followup.recipient, followup.template, followup.idempotencyKey, followup.payload,
+        followup.status, followup.scheduledAt, followup.attemptCount, followup.maxAttempts,
+        followup.leaseOwner ?? null, followup.leaseExpiresAt ?? null, followup.lastError ?? null,
+        followup.completedAt ?? null, followup.createdAt, followup.updatedAt],
+    );
+    return r.rowCount === 1;
+  }
+  async claimScheduledFollowups(workerId: string, nowIso: string, leaseSeconds: number, limit: number) {
+    const r = await this.pool.query(
+      `WITH claimable AS (
+         SELECT id FROM scheduled_followups
+         WHERE attempt_count < max_attempts AND scheduled_at <= $2::timestamptz
+           AND (status='pending' OR (status='leased' AND lease_expires_at <= $2::timestamptz))
+         ORDER BY scheduled_at,created_at,id FOR UPDATE SKIP LOCKED LIMIT $4
+       )
+       UPDATE scheduled_followups f SET status='leased',lease_owner=$1,
+         lease_expires_at=$2::timestamptz+($3::int*interval '1 second'),
+         attempt_count=f.attempt_count+1,updated_at=$2
+       FROM claimable WHERE f.id=claimable.id RETURNING f.*`,
+      [workerId, nowIso, Math.max(1, leaseSeconds), Math.max(0, limit)],
+    );
+    return r.rows.map(scheduledFollowupFromRow);
+  }
+  async saveScheduledFollowup(followup: ScheduledFollowup, leaseOwner?: string) {
+    const r = await this.pool.query(
+      `UPDATE scheduled_followups SET status=$3,scheduled_at=$4,attempt_count=$5,max_attempts=$6,
+         lease_owner=$7,lease_expires_at=$8,last_error=$9,completed_at=$10,payload=$11,updated_at=$12
+       WHERE client_id=$1 AND id=$2 AND ($13::text IS NULL OR lease_owner=$13) RETURNING id`,
+      [followup.clientId, followup.id, followup.status, followup.scheduledAt,
+        followup.attemptCount, followup.maxAttempts, followup.leaseOwner ?? null,
+        followup.leaseExpiresAt ?? null, followup.lastError ?? null, followup.completedAt ?? null,
+        followup.payload, followup.updatedAt, leaseOwner ?? null],
+    );
+    return r.rowCount === 1;
+  }
+  async listScheduledFollowups(clientId: string) {
+    const r = await this.pool.query(
+      "SELECT * FROM scheduled_followups WHERE client_id=$1 ORDER BY scheduled_at,id",
+      [clientId],
+    );
+    return r.rows.map(scheduledFollowupFromRow);
+  }
+  async claimOveragePurchase(purchase: OveragePurchaseRecord) {
+    const r = await this.pool.query(
+      `INSERT INTO overage_purchase_records
+       (id,client_id,idempotency_key,boundary_minutes,granted_minutes,amount_minor,currency,status,
+        stripe_payment_id,credit_ledger_entry_id,failure_code,created_at,updated_at,completed_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+       ON CONFLICT DO NOTHING RETURNING id`,
+      [purchase.id, purchase.clientId, purchase.idempotencyKey, purchase.boundaryMinutes,
+        purchase.grantedMinutes, purchase.amountMinor, purchase.currency, purchase.status,
+        purchase.stripePaymentId ?? null, purchase.creditLedgerEntryId ?? null,
+        purchase.failureCode ?? null, purchase.createdAt, purchase.updatedAt,
+        purchase.completedAt ?? null],
+    );
+    return r.rowCount === 1;
+  }
+  async saveOveragePurchase(purchase: OveragePurchaseRecord) {
+    const r = await this.pool.query(
+      `UPDATE overage_purchase_records SET status=$3,stripe_payment_id=$4,
+         credit_ledger_entry_id=$5,failure_code=$6,updated_at=$7,completed_at=$8
+       WHERE client_id=$1 AND id=$2`,
+      [purchase.clientId, purchase.id, purchase.status, purchase.stripePaymentId ?? null,
+        purchase.creditLedgerEntryId ?? null, purchase.failureCode ?? null,
+        purchase.updatedAt, purchase.completedAt ?? null],
+    );
+    if (r.rowCount !== 1) throw new Error("overage_purchase_not_found");
+  }
+  async getOveragePurchaseByIdempotency(clientId: string, idempotencyKey: string) {
+    const r = await this.pool.query(
+      "SELECT * FROM overage_purchase_records WHERE client_id=$1 AND idempotency_key=$2",
+      [clientId, idempotencyKey],
+    );
+    return r.rows[0] ? overagePurchaseFromRow(r.rows[0]) : undefined;
+  }
+  async listOveragePurchases(clientId: string) {
+    const r = await this.pool.query(
+      "SELECT * FROM overage_purchase_records WHERE client_id=$1 ORDER BY created_at DESC,id DESC",
+      [clientId],
+    );
+    return r.rows.map(overagePurchaseFromRow);
   }
   async saveWebsiteSource(source: WebsiteSource) {
     await this.pool.query(
@@ -1331,24 +1726,29 @@ export class PostgresStore implements PlatformStore {
     );
   }
   async upsertProviderResource(resource: ProviderResource) {
-    const conflict = resource.providerResourceId
-      ? `ON CONFLICT (client_id,provider,provider_resource_id)
-           WHERE provider_resource_id IS NOT NULL
-         DO UPDATE SET lifecycle_status=EXCLUDED.lifecycle_status,
-           credential_ref=EXCLUDED.credential_ref,
-           encrypted_credential=EXCLUDED.encrypted_credential,metadata=EXCLUDED.metadata,
-           last_error=EXCLUDED.last_error,updated_at=EXCLUDED.updated_at`
-      : `ON CONFLICT (id) DO UPDATE SET provider_resource_id=EXCLUDED.provider_resource_id,
-           lifecycle_status=EXCLUDED.lifecycle_status,credential_ref=EXCLUDED.credential_ref,
-           encrypted_credential=EXCLUDED.encrypted_credential,metadata=EXCLUDED.metadata,
-           last_error=EXCLUDED.last_error,updated_at=EXCLUDED.updated_at
-         WHERE provider_resources.client_id=EXCLUDED.client_id`;
     await this.pool.query(
       `INSERT INTO provider_resources
        (id,client_id,provider,resource_type,provider_resource_id,lifecycle_status,credential_ref,
         encrypted_credential,metadata,last_error,created_at,updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-       ${conflict}`,
+       VALUES (
+         COALESCE((
+           SELECT id FROM provider_resources
+           WHERE client_id=$2 AND provider=$3 AND provider_resource_id=$5 AND $5 IS NOT NULL
+           LIMIT 1
+         ),$1),
+         $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12
+       )
+       ON CONFLICT (id) DO UPDATE SET
+         resource_type=EXCLUDED.resource_type,
+         provider_resource_id=EXCLUDED.provider_resource_id,
+         lifecycle_status=EXCLUDED.lifecycle_status,
+         credential_ref=EXCLUDED.credential_ref,
+         encrypted_credential=EXCLUDED.encrypted_credential,
+         metadata=EXCLUDED.metadata,
+         last_error=EXCLUDED.last_error,
+         updated_at=EXCLUDED.updated_at
+       WHERE provider_resources.client_id=EXCLUDED.client_id
+         AND provider_resources.provider=EXCLUDED.provider`,
       [resource.id,resource.clientId,resource.provider,resource.resourceType,resource.providerResourceId ?? null,
         resource.lifecycleStatus,resource.credentialRef ?? null,resource.encryptedCredential ?? null,
         resource.metadata,resource.lastError ?? null,resource.createdAt,resource.updatedAt],
@@ -2244,7 +2644,8 @@ function notificationFromRow(row: Record<string, any>): NotificationDelivery {
   return {
     id: row.id, clientId: row.client_id, operationId: row.operation_id,
     idempotencyKey: row.idempotency_key, channel: row.channel, recipient: row.recipient,
-    template: row.template, status: row.status, providerId: row.provider_id ?? undefined,
+    template: row.template, payload: row.payload ?? {}, status: row.status,
+    providerId: row.provider_id ?? undefined,
     attemptCount: Number(row.attempt_count), maxAttempts: Number(row.max_attempts),
     nextAttemptAt: toIso(row.next_attempt_at), leaseOwner: row.lease_owner ?? undefined,
     leaseExpiresAt: row.lease_expires_at ? toIso(row.lease_expires_at) : undefined,
@@ -2252,6 +2653,79 @@ function notificationFromRow(row: Record<string, any>): NotificationDelivery {
     deliveredAt: row.delivered_at ? toIso(row.delivered_at) : undefined,
     deadLetteredAt: row.dead_lettered_at ? toIso(row.dead_lettered_at) : undefined,
     createdAt: toIso(row.created_at), updatedAt: toIso(row.updated_at),
+  };
+}
+
+function tenantFeatureEntitlementsFromRow(row: Record<string, any>): TenantFeatureEntitlements {
+  return {
+    clientId: row.client_id,
+    whatsappEnabled: Boolean(row.whatsapp_enabled),
+    autoMinuteBlocksEnabled: Boolean(row.auto_minute_blocks_enabled),
+    createdAt: toIso(row.created_at),
+    updatedAt: toIso(row.updated_at),
+  };
+}
+
+function messageUsagePeriodFromRow(row: Record<string, any>): MessageUsagePeriod {
+  return {
+    id: row.id, clientId: row.client_id, channel: row.channel,
+    periodStart: toIso(row.period_start), periodEnd: toIso(row.period_end),
+    includedMessages: Number(row.included_messages), usedMessages: Number(row.used_messages),
+    createdAt: toIso(row.created_at), updatedAt: toIso(row.updated_at),
+  };
+}
+
+function messageSessionFromRow(row: Record<string, any>): MessageSession {
+  return {
+    id: row.id, clientId: row.client_id, channel: row.channel,
+    contactAddress: row.contact_address, senderAddress: row.sender_address, status: row.status,
+    serviceWindowExpiresAt: row.service_window_expires_at
+      ? toIso(row.service_window_expires_at) : undefined,
+    state: row.state ?? {}, createdAt: toIso(row.created_at), updatedAt: toIso(row.updated_at),
+  };
+}
+
+function messageEventFromRow(row: Record<string, any>): MessageEvent {
+  return {
+    id: row.id, clientId: row.client_id, sessionId: row.session_id, channel: row.channel,
+    direction: row.direction, provider: row.provider,
+    providerMessageId: row.provider_message_id ?? undefined,
+    idempotencyKey: row.idempotency_key, status: row.status, body: row.body ?? undefined,
+    billableUnits: Number(row.billable_units), metadata: row.metadata ?? {},
+    processingAttemptCount: Number(row.processing_attempt_count ?? 0),
+    processingLeaseOwner: row.processing_lease_owner ?? undefined,
+    processingLeaseExpiresAt: row.processing_lease_expires_at
+      ? toIso(row.processing_lease_expires_at) : undefined,
+    processingError: row.processing_error ?? undefined,
+    processedAt: row.processed_at ? toIso(row.processed_at) : undefined,
+    occurredAt: toIso(row.occurred_at), createdAt: toIso(row.created_at),
+  };
+}
+
+function scheduledFollowupFromRow(row: Record<string, any>): ScheduledFollowup {
+  return {
+    id: row.id, clientId: row.client_id, sessionId: row.session_id ?? undefined,
+    channel: row.channel, recipient: row.recipient, template: row.template,
+    idempotencyKey: row.idempotency_key, payload: row.payload ?? {}, status: row.status,
+    scheduledAt: toIso(row.scheduled_at), attemptCount: Number(row.attempt_count),
+    maxAttempts: Number(row.max_attempts), leaseOwner: row.lease_owner ?? undefined,
+    leaseExpiresAt: row.lease_expires_at ? toIso(row.lease_expires_at) : undefined,
+    lastError: row.last_error ?? undefined,
+    completedAt: row.completed_at ? toIso(row.completed_at) : undefined,
+    createdAt: toIso(row.created_at), updatedAt: toIso(row.updated_at),
+  };
+}
+
+function overagePurchaseFromRow(row: Record<string, any>): OveragePurchaseRecord {
+  return {
+    id: row.id, clientId: row.client_id, idempotencyKey: row.idempotency_key,
+    boundaryMinutes: Number(row.boundary_minutes), grantedMinutes: Number(row.granted_minutes),
+    amountMinor: Number(row.amount_minor), currency: row.currency, status: row.status,
+    stripePaymentId: row.stripe_payment_id ?? undefined,
+    creditLedgerEntryId: row.credit_ledger_entry_id ?? undefined,
+    failureCode: row.failure_code ?? undefined,
+    createdAt: toIso(row.created_at), updatedAt: toIso(row.updated_at),
+    completedAt: row.completed_at ? toIso(row.completed_at) : undefined,
   };
 }
 

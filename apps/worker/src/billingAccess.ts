@@ -7,7 +7,9 @@ import {
 import {
   ElevenLabsManagementClient,
   LiveKitVoiceProviderAdapter,
+  resolveMinuteAccess,
   TwilioVoiceRoutingClient,
+  type MinuteAccessOptions,
   type VoiceProviderAdapter,
 } from "@robinexis/integrations";
 
@@ -25,6 +27,7 @@ export async function reconcileBillingAccess(
   options: {
     management?: PhoneAssignmentManager;
     livekitAdapter?: Pick<VoiceProviderAdapter, "suspend" | "restore">;
+    minuteAccess?: MinuteAccessOptions;
     now?: Date;
   } = {},
 ) {
@@ -50,7 +53,7 @@ export async function reconcileBillingAccess(
     const activeProvider = activeDeployment?.provider || client.voicePipeline;
     if (activeProvider === "livekit-cascade") {
       if (!activeDeployment || !livekitAdapter) continue;
-      const entitlement = await billingEntitlement(store, client, now);
+      const entitlement = await billingEntitlement(store, client, now, options.minuteAccess);
       const assignmentState = String(activeDeployment.config.assignmentState || "assigned");
       try {
         const context = {
@@ -95,7 +98,7 @@ export async function reconcileBillingAccess(
         resource.lifecycleStatus === "active");
     if (!resources.length) continue;
 
-    const { shouldAssign, reason } = await billingEntitlement(store, client, now);
+    const { shouldAssign, reason } = await billingEntitlement(store, client, now, options.minuteAccess);
 
     for (const resource of resources) {
       const assignmentState = String(resource.metadata.assignmentState || "assigned");
@@ -169,25 +172,15 @@ async function billingEntitlement(
   store: PlatformStore,
   client: Parameters<typeof isAiServiceEnabled>[0] & { id: string },
   now: Date,
+  minuteAccess?: MinuteAccessOptions,
 ) {
-  const subscription = await store.getCurrentSubscription(client.id);
-  const access = isAiServiceEnabled(client);
-  const trialExpired = Boolean(
-    subscription?.status === "trialing" &&
-    subscription.trialEndsAt &&
-    Date.parse(subscription.trialEndsAt) <= now.getTime(),
+  const access = await resolveMinuteAccess(
+    store,
+    client as Parameters<typeof resolveMinuteAccess>[1],
+    { mode: "access", ...minuteAccess, now },
   );
-  const creditsExhausted = subscription?.provider === "stripe"
-    ? await store.getCreditBalance(client.id) <= 0
-    : false;
   return {
-    shouldAssign: access.inbound && !trialExpired && !creditsExhausted,
-    reason: !access.inbound
-      ? access.reason
-      : trialExpired
-        ? "trial_expired"
-        : creditsExhausted
-          ? "minute_allowance_exhausted"
-          : "entitled",
+    shouldAssign: access.allowed,
+    reason: access.reason,
   };
 }

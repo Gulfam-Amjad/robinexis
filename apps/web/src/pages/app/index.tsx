@@ -69,7 +69,7 @@ import type {
   PublicCalendarConnection,
   TimeseriesPoint,
 } from "@robinexis/api-contracts";
-import { api, formatDate } from "../../lib/api";
+import { api, formatDate, formatMinorCurrency } from "../../lib/api";
 import { usePermissions } from "../../lib/permissions";
 import { workspacePath } from "../../lib/navigation";
 import { workspaceReceptionistDemo } from "../../lib/receptionistDemo";
@@ -163,7 +163,9 @@ function OverviewContent({ clientId }: { clientId: string }) {
   const answerRate = summary?.totalCalls
     ? Math.round(((summary.answeredCalls || 0) / summary.totalCalls) * 100)
     : 0;
-  const essentialConnections = ["elevenlabs", "calcom", "twilio"];
+  const essentialConnections = client.data?.voicePipeline === "livekit-cascade"
+    ? ["livekit", "calcom", "twilio"]
+    : ["elevenlabs", "calcom", "twilio"];
   const readyConnections = essentialConnections.filter((id) => integration(id)?.connected).length;
   const today = new Date().toISOString().slice(0, 10);
   const todayBookings = (bookings.data || []).filter((booking) => booking.start.slice(0, 10) === today);
@@ -213,7 +215,7 @@ function OverviewContent({ clientId }: { clientId: string }) {
         </Card>
         <Card className="panel">
           <SectionHeading title="Today’s bookings" description={`${todayBookings.length} appointment${todayBookings.length === 1 ? "" : "s"} returned`} action={<Link to={workspacePath(clientId, "bookings")} className="subtle-link">Open bookings <ChevronRight size={14} /></Link>} />
-          {bookings.isLoading ? <SkeletonRows count={3} /> : bookings.error ? <p className="muted">Bookings are temporarily unavailable.</p> : todayBookings.length ? <div className="team-list">{todayBookings.slice(0, 4).map((booking) => <div className="team-row" key={booking.uid}><CalendarCheck2 /><div><strong>{booking.attendeeName || "Customer"}</strong><small>{formatDate(booking.start, { hour: "2-digit", minute: "2-digit" })} · {booking.title || "Appointment"}</small></div><Badge tone="success">{booking.status || "confirmed"}</Badge></div>)}</div> : <EmptyState icon={CalendarDays} title="No bookings today" description="New appointments made by your receptionist will appear here." />}
+          {bookings.isLoading ? <SkeletonRows count={3} /> : bookings.error ? <p className="muted">Bookings are temporarily unavailable.</p> : todayBookings.length ? <div className="team-list">{todayBookings.slice(0, 4).map((booking) => <div className="team-row" key={booking.uid}><CalendarCheck2 /><div><strong>{booking.attendeeName || "Customer"}</strong><small>{formatDate(booking.start, { hour: "2-digit", minute: "2-digit" })} · {booking.title || "Appointment"}</small></div><Badge tone="success">{booking.status || "confirmed"}</Badge></div>)}</div> : <EmptyState icon={CalendarDays} title="No bookings today" description="Appointments this receptionist books for this business will appear here." />}
         </Card>
       </div>
       <div className="overview-grid">
@@ -997,27 +999,27 @@ function CalendarContent({ clientId }: { clientId: string }) {
   const nextBooking = [...(bookings.data || [])].sort((left, right) => new Date(left.start).getTime() - new Date(right.start).getTime())[0];
   return (
     <>
-      <PageHeader eyebrow="Bookings" title="Bookings and availability in one view" description="Find customers, review confirmed appointments, and make intentional changes." actions={<Link className="button button-secondary button-md" to={workspacePath(clientId, "bookings/settings")}><Link2 size={15} /> Booking rules</Link>} />
+      <PageHeader eyebrow="Bookings" title="This workspace’s bookings and availability" description="Appointments for this business only. Cal.com stays in the background as the booking engine — staff do not need that admin login." actions={<Link className="button button-secondary button-md" to={workspacePath(clientId, "bookings/settings")}><Link2 size={15} /> Booking rules</Link>} />
       <div className="calendar-summary">
         <Card><CalendarCheck2 /><div><strong>{bookings.data?.length || 0}</strong><span>Appointments returned</span></div></Card>
         <Card><Clock3 /><div><strong>{nextBooking ? formatDate(nextBooking.start, { day: "2-digit", month: "short" }) : "—"}</strong><span>Next appointment</span></div></Card>
         <Card><CalendarDays /><div><strong>{eventSlug ? slots.data?.length ?? "…" : "—"}</strong><span>{eventSlug ? "Available slots returned" : "Choose an event type"}</span></div></Card>
       </div>
-      <Card className="panel availability-panel">
-        <SectionHeading title="Check live availability" description="Choose one of your bookable services. Robinexis only shows times returned by the connected calendar." />
-        <div className="availability-controls"><Field label="Service"><select value={eventSlug} onChange={(event) => setEventSlug(event.target.value)}><option value="">Choose a service</option>{(client.data?.services || []).map((service) => <option key={service.slug} value={service.slug}>{service.title} · {service.durationMinutes} min</option>)}</select></Field><Button variant="secondary" onClick={() => slots.refetch()} disabled={!eventSlug.trim() || slots.isFetching}><RefreshCw size={15} /> {slots.isFetching ? "Checking…" : "Check times"}</Button></div>
-        {slots.error ? <ErrorState error={slots.error} /> : eventSlug && <div className="slot-grid">{(slots.data || []).slice(0, 8).map((slot) => <span key={slot.start}>{formatDate(slot.start)}</span>)}{!slots.isLoading && !slots.data?.length && <p className="muted">No slots were returned for this event type.</p>}</div>}
-      </Card>
       <Card className={`panel ${canEdit ? "" : "calendar-readonly"}`}>
         <SectionHeading title="Appointments" description={`${filteredBookings.length} of ${bookings.data?.length || 0} bookings shown`} />
         <div className="filter-bar booking-filters">
           <label className="search-field"><span className="sr-only">Search booking customers</span><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search customer, email or title…" /></label>
           <label className="filter-control"><span className="sr-only">Filter booking status</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">All statuses</option>{statusOptions.map((value) => <option value={value} key={value}>{value.replaceAll("_", " ")}</option>)}</select></label>
-          <label className="filter-control"><span className="sr-only">Filter booking time</span><select value={timeWindow} onChange={(event) => setTimeWindow(event.target.value)}><option value="all">All upcoming times</option><option value="today">Today</option><option value="week">Next 7 days</option></select></label>
+          <label className="filter-control"><span className="sr-only">Filter booking time</span><select value={timeWindow} onChange={(event) => setTimeWindow(event.target.value)}><option value="all">All times</option><option value="today">Today</option><option value="week">Next 7 days</option></select></label>
         </div>
         {bookings.isLoading ? <SkeletonRows count={5} /> : bookings.error ? <ErrorState error={bookings.error} onRetry={() => bookings.refetch()} /> : !bookings.data?.length ? <EmptyState icon={CalendarDays} title="No appointments returned" description="Connect a calendar and add services so your receptionist can offer real availability." action={<LinkButton to={workspacePath(clientId, "connections")} variant="secondary">Connect calendar</LinkButton>} /> : !grouped.length ? <EmptyState icon={Search} title="No matching bookings" description="Clear or broaden the customer, status, and time filters." action={<Button variant="secondary" onClick={() => { setSearch(""); setStatus(""); setTimeWindow("all"); }}>Clear filters</Button>} /> : (
           <div className="agenda">{grouped.map(([day, items]) => <div className="agenda-day" key={day}><div className="agenda-date"><strong>{new Date(day).toLocaleDateString("en-GB", { day: "2-digit" })}</strong><span>{new Date(day).toLocaleDateString("en-GB", { month: "short", weekday: "short" })}</span></div><div>{items.map((booking) => <div className="booking-row" key={booking.uid}><span className="booking-time">{new Date(booking.start).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</span><i /><div><strong>{booking.attendeeName || "Customer name not supplied"}</strong><small>{booking.title || booking.attendeeEmail || "No booking details supplied"}</small></div>{booking.status ? <Badge tone={statusTone(booking.status)}>{booking.status.replaceAll("_", " ")}</Badge> : <Badge tone="neutral">Status unavailable</Badge>}<div className="row-actions"><Button size="sm" variant="ghost" onClick={() => setSelectedBooking(booking)}>Details</Button>{canEdit && <Button size="sm" variant="ghost" disabled={calendarAction.isPending} onClick={() => setRescheduleTarget(booking)}>Reschedule</Button>}{canEdit && <button aria-label={`Cancel appointment for ${booking.attendeeName || "customer"}`} className="icon-button danger-icon" disabled={calendarAction.isPending} onClick={() => setCancelTarget(booking)}><XCircle size={17} /></button>}</div></div>)}</div></div>)}</div>
         )}
+      </Card>
+      <Card className="panel availability-panel">
+        <SectionHeading title="Check live availability" description="Choose one of your bookable services. Robinexis only shows times returned by the connected calendar." />
+        <div className="availability-controls"><Field label="Service"><select value={eventSlug} onChange={(event) => setEventSlug(event.target.value)}><option value="">Choose a service</option>{(client.data?.services || []).map((service) => <option key={service.slug} value={service.slug}>{service.title} · {service.durationMinutes} min</option>)}</select></Field><Button variant="secondary" onClick={() => slots.refetch()} disabled={!eventSlug.trim() || slots.isFetching}><RefreshCw size={15} /> {slots.isFetching ? "Checking…" : "Check times"}</Button></div>
+        {slots.error ? <ErrorState error={slots.error} /> : eventSlug && <div className="slot-grid">{(slots.data || []).slice(0, 8).map((slot) => <span key={slot.start}>{formatDate(slot.start)}</span>)}{!slots.isLoading && !slots.data?.length && <p className="muted">No slots were returned for this event type.</p>}</div>}
       </Card>
       <BookingDetailDialog booking={selectedBooking} canEdit={canEdit} onClose={() => setSelectedBooking(null)} onReschedule={(booking) => { setSelectedBooking(null); setRescheduleTarget(booking); }} onCancel={(booking) => { setSelectedBooking(null); setCancelTarget(booking); }} />
       {canEdit && <ConfirmDialog open={Boolean(cancelTarget)} title="Cancel this appointment?" description={`${cancelTarget?.attendeeName || "This customer"} is booked for ${formatDate(cancelTarget?.start)}. Confirming updates the connected calendar immediately.`} confirmLabel="Confirm cancellation" busy={calendarAction.isPending} onClose={() => setCancelTarget(null)} onConfirm={() => { if (cancelTarget) calendarAction.mutate({ uid: cancelTarget.uid, action: "cancel" }, { onSuccess: () => setCancelTarget(null) }); }} />}
@@ -1084,7 +1086,7 @@ function CampaignsContent({ clientId }: { clientId: string }) {
 }
 
 function JobTable({ jobs, onAction }: { jobs: Job[]; onAction: (id: string, type: "approve" | "cancel") => void }) {
-  return <div className="table-scroll"><table className="mobile-card-table"><caption className="sr-only">Outbound call jobs</caption><thead><tr><th scope="col">Contact</th><th scope="col">Campaign</th><th scope="col">Scheduled</th><th scope="col">Status</th><th scope="col">Attempts</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead><tbody>{jobs.map((job) => <tr key={job.id}><td data-label="Contact"><strong>{job.contactName || job.contactPhone}</strong><small className="block">{job.contactName ? job.contactPhone : job.purpose}</small></td><td data-label="Campaign" className="capitalize">{job.campaign.replaceAll("-", " ")}</td><td data-label="Scheduled">{formatDate(job.scheduledAt)}</td><td data-label="Status"><Badge tone={statusTone(job.status)}>{job.status}</Badge></td><td data-label="Attempts">{job.attemptCount}/{job.maxAttempts}</td><td data-label="Actions"><div className="row-actions">{job.status === "pending" && <Button size="sm" onClick={() => onAction(job.id, "approve")}>Approve</Button>}{!["completed", "cancelled", "failed"].includes(job.status) && <button aria-label={`Cancel job for ${job.contactName || job.contactPhone}`} className="icon-button danger-icon" onClick={() => onAction(job.id, "cancel")}><XCircle size={17} /></button>}</div></td></tr>)}</tbody></table></div>;
+  return <div className="table-scroll"><table className="mobile-card-table"><caption className="sr-only">Outbound call jobs</caption><thead><tr><th scope="col">Contact</th><th scope="col">Campaign</th><th scope="col">Scheduled</th><th scope="col">Status</th><th scope="col">Attempts</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead><tbody>{jobs.map((job) => <tr key={job.id}><td data-label="Contact"><strong>{job.contactName || job.contactPhone}</strong><small className="block">{job.contactName ? job.contactPhone : job.purpose}</small></td><td data-label="Campaign" className="capitalize">{job.campaign.replaceAll("-", " ")}</td><td data-label="Scheduled">{formatDate(job.scheduledAt)}</td><td data-label="Status"><Badge tone={statusTone(job.status)}>{job.status}</Badge>{job.lastError && <small className="block">{job.lastError.replaceAll("_", " ")}</small>}</td><td data-label="Attempts">{job.attemptCount}/{job.maxAttempts}</td><td data-label="Actions"><div className="row-actions">{job.status === "pending" && <Button size="sm" onClick={() => onAction(job.id, "approve")}>Approve</Button>}{!["completed", "cancelled", "failed", "suppressed"].includes(job.status) && <button aria-label={`Cancel job for ${job.contactName || job.contactPhone}`} className="icon-button danger-icon" onClick={() => onAction(job.id, "cancel")}><XCircle size={17} /></button>}</div></td></tr>)}</tbody></table></div>;
 }
 
 const documentSchema = z.object({ title: z.string().min(2, "Add a title"), source: z.string().optional(), content: z.string().optional() });
@@ -1127,7 +1129,7 @@ function KnowledgeContent({ clientId }: { clientId: string }) {
 
 function calendarModeLabel(mode: NonNullable<PublicCalendarConnection["mode"]>): string {
   if (mode === "managed") return "Managed Cal.com";
-  if (mode === "shared") return "Robinexis calendar";
+  if (mode === "shared") return "Robinexis Cal.com backend";
   return "Existing Cal.com";
 }
 
@@ -1258,8 +1260,8 @@ function IntegrationsContent({ clientId }: { clientId: string }) {
         : <a className="button button-secondary button-sm" href="mailto:hello@robinexis.com?subject=Robinexis%20integration%20setup">Configure server-side</a>)}</Card>; })}</div>
       {canEditWorkspace && <Card className="form-card">
         <SectionHeading title="Booking calendar" description={calendarModes.oauth || calendarModes.managed
-          ? "Connect an existing Cal.com account or create a tenant-isolated managed user. Tokens stay encrypted on the server."
-          : "Bookings run on the Robinexis Cal.com account with booking types created for this workspace only. Credentials stay server-side."} />
+          ? "Connect this customer’s Cal.com account, or create a tenant-isolated managed user. Tokens stay encrypted on the server."
+          : "Cal.com is the operator backend. This workspace only books its own event types. For a live customer, connect their calendar instead of sharing the Robinexis account."} />
         {calcomConnection.isLoading ? <LoadingState label="Checking calendar connection…" /> : <>
           <div className="form-actions">
             <Badge tone={calcomConnection.data?.status === "active" ? "success" : "neutral"}>
@@ -1492,6 +1494,41 @@ function UsageContent({ clientId }: { clientId: string }) {
           <div className="usage-unmetered"><ShieldCheck /><div><strong>Usage is still measured</strong><p>The API has not supplied a plan limit, so Robinexis won’t display a made-up allowance.</p></div></div>
         )}
       </Card>
+      {usage.data?.messaging?.whatsapp && (
+        <Card className="panel">
+          <SectionHeading
+            title="WhatsApp allowance"
+            description={`${usage.data.messaging.whatsapp.usedMessages} of ${usage.data.messaging.whatsapp.includedMessages} messages used this billing period`}
+          />
+          <dl className="detail-list">
+            <div><dt>Included</dt><dd>{usage.data.messaging.whatsapp.includedMessages}</dd></div>
+            <div><dt>Used</dt><dd>{usage.data.messaging.whatsapp.usedMessages}</dd></div>
+            <div><dt>Remaining</dt><dd>{usage.data.messaging.whatsapp.remainingMessages}</dd></div>
+            <div><dt>Limit status</dt><dd><Badge tone={usage.data.messaging.whatsapp.limitReached ? "danger" : "success"}>{usage.data.messaging.whatsapp.limitReached ? "Limit reached" : "Within allowance"}</Badge></dd></div>
+          </dl>
+          <p className="inline-notice">The message allowance is a Robinexis plan limit. It does not guarantee or cover WhatsApp provider charges.</p>
+        </Card>
+      )}
+      {usage.data?.overage && (
+        <Card className="panel">
+          <SectionHeading
+            title="Additional voice-minute blocks"
+            description={`${usage.data.overage.blockMinutes} minutes per block at ${formatMinorCurrency(usage.data.overage.blockPriceMinor, usage.data.overage.currency)}`}
+          />
+          <p className="muted">Automatic block purchase is {usage.data.overage.autoPurchaseEnabled ? "enabled" : "off"} for this workspace.</p>
+          {usage.data.overage.purchases.length ? (
+            <div className="team-list">
+              {usage.data.overage.purchases.map((purchase) => (
+                <div className="team-row" key={purchase.id}>
+                  <CircleDollarSign />
+                  <div><strong>{purchase.grantedMinutes} voice minutes</strong><small>{formatMinorCurrency(purchase.amountMinor, purchase.currency)} · {formatDate(purchase.purchasedAt)}</small></div>
+                  <Badge tone={statusTone(purchase.status)}>{purchase.status}</Badge>
+                </div>
+              ))}
+            </div>
+          ) : <p className="muted">No additional minute blocks were purchased in this billing period.</p>}
+        </Card>
+      )}
       {plan && <Card className="panel"><SectionHeading title={`${plan.name} plan limits`} description="Commercial limits for this workspace, separate from Robinexis provider accounts." /><dl className="detail-list"><div><dt>Included voice minutes</dt><dd>{plan.includedMinutes}</dd></div><div><dt>Locations</dt><dd>{plan.locationLimit ?? "Custom"}</dd></div><div><dt>Calendars</dt><dd>{plan.calendarLimit ?? "Custom"}</dd></div><div><dt>Billing period</dt><dd>{usage.data?.billingPeriodStart && usage.data?.billingPeriodEnd ? `${formatDate(usage.data.billingPeriodStart, { dateStyle: "medium" })} – ${formatDate(usage.data.billingPeriodEnd, { dateStyle: "medium" })}` : "Not reported"}</dd></div></dl></Card>}
     </>
   );
@@ -1525,6 +1562,7 @@ function BillingContent({ clientId }: { clientId: string }) {
         <Card className="panel usage-card"><SectionHeading title="Monthly usage" description={`Billing period ${usage.data?.month || "current month"}`} /><div className="usage-count"><strong>{meteredUsed}</strong><span>{allowance ? `of ${allowance} minutes` : "minutes recorded"}</span></div>{usagePercent !== undefined && <div className="progress"><i style={{ width: `${usagePercent}%` }} /></div>}<p><ShieldCheck /> {`${usage.data?.inboundMinutes || 0} inbound · ${usage.data?.outboundMinutes || 0} outbound minutes`}</p></Card>
       </div>
       <Card className="panel"><SectionHeading title="Billing details" description="Every plan begins with a three-day trial backed by a payment card secured by Stripe." /><div className="deferred-row"><CircleDollarSign /><div><strong>Stripe manages payment details</strong><p>Checkout receives only tenant billing metadata; voice, calendar and salon credentials stay in Robinexis.</p></div><a className="button button-secondary button-md" href="mailto:hello@robinexis.com">Contact billing</a></div></Card>
+      {usage.data?.overage && <Card className="panel"><SectionHeading title="Automatic minute blocks" description={`Each additional ${usage.data.overage.blockMinutes}-minute block costs ${formatMinorCurrency(usage.data.overage.blockPriceMinor, usage.data.overage.currency)}.`} /><p className="muted">{usage.data.overage.autoPurchaseEnabled ? "Enabled by a Robinexis operator with explicit auto-charge confirmation." : "Off. Calls stop when the available voice-minute balance is exhausted."}</p><LinkButton to="/usage" variant="secondary">View block receipts</LinkButton></Card>}
     </>
   );
 }

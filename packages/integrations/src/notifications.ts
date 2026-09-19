@@ -2,11 +2,12 @@ import { twilioClient } from "./twilioOutbound.js";
 import { structuredLog } from "@robinexis/database";
 
 export async function sendNotification(input: {
-  channel: "sms" | "email";
+  channel: "sms" | "email" | "whatsapp";
   to: string;
   template: string;
   bookingUid?: string;
   idempotencyKey?: string;
+  payload?: Record<string, unknown>;
 }): Promise<{ providerId: string }> {
   if (input.channel === "email") {
     if (process.env.EMAIL_DELIVERY_MODE === "log") {
@@ -36,12 +37,37 @@ export async function sendNotification(input: {
     return { providerId: result.id };
   }
   const client = twilioClient();
-  const from = process.env.TWILIO_SMS_NUMBER || process.env.TWILIO_PHONE_NUMBER;
-  if (!client || !from) throw new Error("twilio_sms_not_configured");
+  const from = input.channel === "whatsapp"
+    ? String(input.payload?.from || "")
+    : process.env.TWILIO_SMS_NUMBER || process.env.TWILIO_PHONE_NUMBER || "";
+  if (!client || !from) throw new Error(`twilio_${input.channel}_not_configured`);
+  const to = input.channel === "whatsapp" && !input.to.startsWith("whatsapp:")
+    ? `whatsapp:${input.to}`
+    : input.to;
+  const normalizedFrom = input.channel === "whatsapp" && !from.startsWith("whatsapp:")
+    ? `whatsapp:${from}`
+    : from;
+  const contentSid = typeof input.payload?.contentSid === "string" ? input.payload.contentSid : undefined;
+  const contentVariables = input.payload?.contentVariables &&
+    typeof input.payload.contentVariables === "object"
+    ? JSON.stringify(input.payload.contentVariables)
+    : undefined;
+  const callbackBase = (process.env.API_PUBLIC_BASE_URL || "").replace(/\/$/, "");
+  const notificationId = typeof input.payload?.notificationId === "string"
+    ? input.payload.notificationId
+    : undefined;
+  const clientId = typeof input.payload?.clientId === "string" ? input.payload.clientId : undefined;
   const message = await client.messages.create({
-    to: input.to,
-    from,
-    body: input.template,
+    to,
+    from: normalizedFrom,
+    ...(contentSid
+      ? { contentSid, contentVariables }
+      : { body: input.template }),
+    ...(input.channel === "whatsapp" && callbackBase && notificationId && clientId
+      ? {
+          statusCallback: `${callbackBase}/webhooks/twilio/whatsapp/status?clientId=${encodeURIComponent(clientId)}&notificationId=${encodeURIComponent(notificationId)}`,
+        }
+      : {}),
   });
   return { providerId: message.sid };
 }

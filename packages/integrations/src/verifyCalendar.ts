@@ -58,7 +58,11 @@ async function main() {
   };
 
   const exec = createToolExecutor({ store });
-  const eventTypeSlug = process.env.CALCOM_EVENT_TYPE_SLUG || "15min";
+  const eventTypeMapping = (await store.listCalendarEventTypes(client.id))
+    .find((item) => item.serviceSlug === "15min" && item.status === "active");
+  const eventTypeSlug = process.env.CALCOM_EVENT_TYPE_SLUG ||
+    eventTypeMapping?.providerSlug ||
+    "15min";
   const from = new Date(Date.now() + 24 * 60 * 60 * 1000);
   const to = new Date(Date.now() + 8 * 24 * 60 * 60 * 1000);
 
@@ -69,13 +73,12 @@ async function main() {
     client,
   });
   const availabilityData = report("check_availability", availability);
-  if (!availabilityData) return;
+  if (!availabilityData) throw new Error("calendar_check_availability_failed");
 
   const slots = (availabilityData as { slots?: string[] }).slots ?? [];
   const slot = slots[0];
   if (!slot) {
-    console.log("[FAIL] no free slots returned — open availability on the event type first");
-    return;
+    throw new Error("no_free_slots_returned");
   }
 
   let attendeeEmail = process.env.CALCOM_CHECK_EMAIL;
@@ -86,8 +89,7 @@ async function main() {
       : undefined;
   }
   if (!attendeeEmail) {
-    console.log("[FAIL] no deliverable attendee email — set CALCOM_CHECK_EMAIL to a mailbox you own");
-    return;
+    throw new Error("no_deliverable_attendee_email_set_CALCOM_CHECK_EMAIL");
   }
   console.log(`  attendee=${attendeeEmail}`);
 
@@ -97,6 +99,7 @@ async function main() {
       eventTypeSlug,
       start: slot,
       attendeeName: "Robinexis Calendar Check",
+      attendeePhone: "+447700900000",
       attendeeEmail,
       attendeeTimeZone: "Europe/London",
       notes: "Automated check from npm run check:calcom — safe to ignore.",
@@ -107,12 +110,11 @@ async function main() {
     client,
   });
   const bookingData = report(`create_booking at ${slot}`, booking);
-  if (!bookingData) return;
+  if (!bookingData) throw new Error("calendar_check_booking_failed");
 
   const uid = (bookingData as { uid?: string }).uid;
   if (!uid) {
-    console.log("[WARN] booking succeeded but returned no uid — cannot clean up automatically");
-    return;
+    throw new Error("calendar_check_missing_booking_uid_cleanup_impossible");
   }
 
   if (keep) {
@@ -132,6 +134,7 @@ async function main() {
     client,
   });
   report(`cancel_booking ${uid}`, cancelled);
+  if (!cancelled.ok) throw new Error(`calendar_check_cleanup_failed:${cancelled.error}`);
 }
 
 main()

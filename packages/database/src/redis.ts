@@ -34,6 +34,12 @@ export class RedisSessionCache {
     return (await this.client.ping()) === "PONG";
   }
 
+  async close(): Promise<void> {
+    if (!this.client) return;
+    await this.client.quit();
+    this.client = null;
+  }
+
   async incrementRateLimit(key: string, windowMs: number): Promise<{ count: number; resetMs: number } | undefined> {
     if (!this.client) return undefined;
     const result = await this.client.eval(

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { API_KEY_STORAGE, api, formatDate, initials } from "./api.js";
+import { API_KEY_STORAGE, api, formatDate, formatMinorCurrency, initials } from "./api.js";
 
 const values = new Map<string, string>();
 vi.stubGlobal("sessionStorage", {
@@ -76,9 +76,60 @@ describe("Robinexis API client", () => {
     expect(fetchMock.mock.calls[1]?.[0]).toEqual(expect.stringContaining("/calendar-connection/destination"));
     expect(String(fetchMock.mock.calls[1]?.[1]?.body)).not.toMatch(/token|secret/i);
   });
+
+  it("uses operator feature-control endpoints and sends explicit auto-charge confirmation", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        clientId: "client_1",
+        whatsappEnabled: false,
+        autoMinuteBlocksEnabled: false,
+      }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        clientId: "client_1",
+        whatsappEnabled: false,
+        autoMinuteBlocksEnabled: true,
+      }), { status: 200, headers: { "Content-Type": "application/json" } }));
+
+    await api.featureEntitlements("client_1");
+    await api.updateFeatureEntitlements("client_1", {
+      autoMinuteBlocksEnabled: true,
+      confirmation: "ENABLE_AUTO_MINUTE_BLOCKS",
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toEqual(expect.stringContaining(
+      "/api/v1/admin/clients/client_1/feature-entitlements",
+    ));
+    expect(fetchMock.mock.calls[1]?.[1]).toEqual(expect.objectContaining({
+      method: "PATCH",
+      body: JSON.stringify({
+        autoMinuteBlocksEnabled: true,
+        confirmation: "ENABLE_AUTO_MINUTE_BLOCKS",
+      }),
+    }));
+  });
+
+  it("requests a server-minted provider comparison session without exposing credentials", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      url: "wss://project.livekit.cloud",
+      token: "short-lived-token",
+      roomName: "comparison-room",
+      expiresInSeconds: 300,
+      clientId: "client_blades_hair",
+    }), { status: 201, headers: { "Content-Type": "application/json" } }));
+
+    const session = await api.createProviderComparisonSession();
+
+    expect(session.token).toBe("short-lived-token");
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/api/v1/admin/provider-comparison/session"),
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock.mock.calls[0]?.[1]).not.toHaveProperty("body");
+  });
 });
 
 describe("format helpers", () => {
   it("creates readable initials", () => expect(initials("Smith England Salon")).toBe("SE"));
   it("does not break on invalid dates", () => expect(formatDate("not-a-date")).toBe("not-a-date"));
+  it("formats minor-unit overage prices", () => expect(formatMinorCurrency(1_500, "USD")).toBe("US$15.00"));
 });

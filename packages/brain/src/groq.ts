@@ -23,8 +23,10 @@ export class GroqDriver implements LlmDriver {
   constructor(
     apiKey = process.env.GROQ_API_KEY ?? "",
     private model = process.env.GROQ_LLM_MODEL || "openai/gpt-oss-120b",
+    private maxCompletionTokens = Number(process.env.GROQ_MAX_COMPLETION_TOKENS) || 512,
   ) {
     if (!apiKey) throw new Error("GROQ_API_KEY is required for the conversational brain");
+    this.maxCompletionTokens = Math.max(64, Math.min(Math.floor(this.maxCompletionTokens), 1024));
     this.client = new Groq({ apiKey });
   }
 
@@ -47,7 +49,7 @@ export class GroqDriver implements LlmDriver {
         messages,
         tools,
         tool_choice: "auto",
-        max_completion_tokens: 1024,
+        max_completion_tokens: this.maxCompletionTokens,
         reasoning_effort: reasoningEffort(),
         stream: true,
       },

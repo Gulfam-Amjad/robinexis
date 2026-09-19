@@ -64,7 +64,8 @@ export const TOOL_DEFINITIONS = [
   },
   {
     name: "check_availability",
-    description: "Read live calendar slots. Only slots this tool returns may be offered to the caller.",
+    description:
+      "Read live calendar slots. Only slots this tool returns may be offered. Preserve the exact returned slot value for create_booking; do not reconstruct a local time.",
     input_schema: {
       type: "object",
       properties: {
@@ -79,15 +80,18 @@ export const TOOL_DEFINITIONS = [
   {
     name: "create_booking",
     description:
-      "Create a confirmed appointment. Call only after the caller explicitly confirmed service, time, name, and mobile. attendeeEmail is optional — omit it if they did not give one. Always pass attendeePhone and an idempotencyKey.",
+      "Create a confirmed appointment. Use the exact start returned by check_availability after the caller accepts it. Call only after the caller explicitly confirmed service, time, name, and a complete mobile. Never combine uncertain phone fragments, add a prefix, or invent digits; ask for the complete number again. attendeeEmail and idempotencyKey are optional because the server derives safe defaults. Announce success only when this tool returns a booking UID. Follow recoveryAction on errors.",
     input_schema: {
       type: "object",
       properties: {
         eventTypeSlug: { type: "string" },
-        start: { type: "string" },
+        start: { type: "string", description: "Exact ISO slot returned by check_availability." },
         attendeeName: { type: "string" },
         attendeeEmail: { type: "string" },
-        attendeePhone: { type: "string" },
+        attendeePhone: {
+          type: "string",
+          description: "Complete number exactly as confirmed; never repair or add missing digits.",
+        },
         attendeeTimeZone: { type: "string" },
         notes: { type: "string" },
         idempotencyKey: { type: "string" },
@@ -97,7 +101,7 @@ export const TOOL_DEFINITIONS = [
         "eventTypeSlug",
         "start",
         "attendeeName",
-        "idempotencyKey",
+        "attendeePhone",
         "callerConfirmed",
       ],
     },

@@ -10,6 +10,7 @@ import {
 
 afterEach(() => {
   delete process.env.PLAN_STARTER_INCLUDED_MINUTES;
+  delete process.env.PLAN_PRO_INCLUDED_MESSAGES;
   delete process.env.OUTBOUND_AUTOMATION_ENABLED;
   delete process.env.CHEAP_VOICE_DEFAULT_ENABLED;
   delete process.env.VOICE_RUNTIME_ENABLED;
@@ -40,6 +41,12 @@ describe("plan catalog", () => {
   it("allows minutes to be changed without scattering magic numbers", () => {
     process.env.PLAN_STARTER_INCLUDED_MINUTES = "420";
     expect(planCatalog().starter.includedMinutes).toBe(420);
+  });
+
+  it("includes the Pro messaging allowance with an environment override", () => {
+    expect(planCatalog().pro.includedMessages).toBe(3_000);
+    process.env.PLAN_PRO_INCLUDED_MESSAGES = "3500";
+    expect(planCatalog().pro.includedMessages).toBe(3_500);
   });
 
   it("keeps entitlement separate from unavailable outbound automation", () => {

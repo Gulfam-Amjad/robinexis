@@ -35,14 +35,20 @@ export function ReceptionistCall({
   config = BLADES_RECEPTIONIST_DEMO,
   compact = false,
   showShare = false,
+  disabled = false,
+  requestStart,
+  onActiveChange,
 }: {
   config?: ReceptionistDemoConfig;
   compact?: boolean;
   showShare?: boolean;
+  disabled?: boolean;
+  requestStart?: () => boolean;
+  onActiveChange?: (active: boolean) => void;
 }) {
   return (
     <ConversationProvider agentId={config.agentId}>
-      <ReceptionistCallExperience config={config} compact={compact} showShare={showShare} />
+      <ReceptionistCallExperience config={config} compact={compact} showShare={showShare} disabled={disabled} requestStart={requestStart} onActiveChange={onActiveChange} />
     </ConversationProvider>
   );
 }
@@ -51,10 +57,16 @@ function ReceptionistCallExperience({
   config,
   compact,
   showShare,
+  disabled,
+  requestStart,
+  onActiveChange,
 }: {
   config: ReceptionistDemoConfig;
   compact: boolean;
   showShare: boolean;
+  disabled: boolean;
+  requestStart?: () => boolean;
+  onActiveChange?: (active: boolean) => void;
 }) {
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [phase, setPhase] = useState<LocalCallPhase>("idle");
@@ -66,9 +78,14 @@ function ReceptionistCallExperience({
   const hadConnected = useRef(false);
   const lastLevelUpdate = useRef(0);
   const transcriptEnd = useRef<HTMLDivElement>(null);
+  const activeChangeRef = useRef(onActiveChange);
+  const requestStartRef = useRef(requestStart);
+  activeChangeRef.current = onActiveChange;
+  requestStartRef.current = requestStart;
 
   const conversation = useConversation({
     onConnect: () => {
+      activeChangeRef.current?.(true);
       hadConnected.current = true;
       connectedAt.current = Date.now();
       setElapsed(0);
@@ -76,9 +93,11 @@ function ReceptionistCallExperience({
       setLocalError("");
     },
     onDisconnect: () => {
+      activeChangeRef.current?.(false);
       if (hadConnected.current) setPhase("ended");
     },
     onError: (message) => {
+      activeChangeRef.current?.(false);
       setLocalError(message || "The voice connection could not be started.");
       setPhase("idle");
     },
@@ -147,6 +166,12 @@ function ReceptionistCallExperience({
   }, [connected]);
 
   const startCall = useCallback(async () => {
+    if (disabled) return;
+    if (requestStartRef.current && !requestStartRef.current()) {
+      setLocalError("End the Cost Saver call before starting Premium.");
+      return;
+    }
+    activeChangeRef.current?.(true);
     setLocalError("");
     setTranscript([]);
     setElapsed(0);
@@ -173,13 +198,30 @@ function ReceptionistCallExperience({
             : "We couldn't access your microphone.",
       );
       setPhase("idle");
+      activeChangeRef.current?.(false);
     }
-  }, [config.agentId, conversation]);
+  }, [config.agentId, conversation, disabled]);
 
   const endCall = useCallback(() => {
     conversation.endSession();
     setPhase("ended");
+    activeChangeRef.current?.(false);
   }, [conversation]);
+
+  useEffect(() => () => {
+    conversationRef.current.endSession();
+    activeChangeRef.current?.(false);
+  }, []);
+
+  useEffect(() => {
+    if (!disabled) return;
+    if (conversation.status === "connected" || conversation.status === "connecting" ||
+        phase === "permission" || phase === "starting") {
+      conversation.endSession();
+      setPhase("ended");
+      activeChangeRef.current?.(false);
+    }
+  }, [conversation, disabled, phase]);
 
   const copyText = useCallback(async (text: string, label: string) => {
     await navigator.clipboard.writeText(text);
@@ -251,9 +293,9 @@ function ReceptionistCallExperience({
 
         <div className="voice-controls">
           {!connected && conversation.status !== "connecting" ? (
-            <Button className="voice-start" onClick={startCall}>
+            <Button className="voice-start" disabled={disabled} onClick={startCall}>
               {uiStatus === "ended" || uiStatus === "error" ? <RotateCcw /> : <Phone />}
-              {uiStatus === "ended" || uiStatus === "error" ? "Start another call" : `Talk to ${config.agentName}`}
+              {disabled ? "End the Cost Saver call first" : uiStatus === "ended" || uiStatus === "error" ? "Start another call" : `Talk to ${config.agentName}`}
             </Button>
           ) : (
             <>

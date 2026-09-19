@@ -16,6 +16,7 @@ import {
   PlugZap,
   Search,
   Settings,
+  Scale,
   Sparkles,
   Store,
   ListChecks,
@@ -38,6 +39,7 @@ const adminNavigation = [
   { label: "Customers", to: "/admin/customers", icon: Users },
   { label: "Voice routing", to: "/admin/voice-routing", icon: Network },
   { label: "Usage & cost", to: "/admin/usage-cost", icon: CircleDollarSign },
+  { label: "Voice comparison", to: "/admin/provider-comparison", icon: Scale },
   { label: "Control plane", to: "/admin/control-plane", icon: ListChecks },
   { label: "Add customer", to: "/admin/clients/new", icon: Users },
 ] as const;
@@ -64,7 +66,9 @@ const workspaceIcons: Record<WorkspaceNavigationIcon, LucideIcon> = {
 export function Logo({ light = false }: { light?: boolean }) {
   return (
     <Link className={`logo ${light ? "logo-light" : ""}`} to="/">
-      <span className="logo-mark"><Sparkles size={18} /></span>
+      <span className="logo-mark">
+        <img src="/logo.png" alt="" width={34} height={34} />
+      </span>
       <span>Robinexis</span>
     </Link>
   );

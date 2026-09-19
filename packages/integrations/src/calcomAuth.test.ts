@@ -92,7 +92,8 @@ describe("Cal.com dual connection security", () => {
     const second = encryptCalcomCredential("access-token");
     expect(first).not.toBe(second);
     expect(decryptCalcomCredential(first)).toBe("access-token");
-    expect(() => decryptCalcomCredential(`${first.slice(0, -1)}x`)).toThrow();
+    const replacement = first.endsWith("x") ? "y" : "x";
+    expect(() => decryptCalcomCredential(`${first.slice(0, -1)}${replacement}`)).toThrow();
   });
 
   it("exchanges the authorization code against POST /v2/auth/oauth2/token", async () => {

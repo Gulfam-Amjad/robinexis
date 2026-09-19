@@ -104,7 +104,6 @@ export async function createEventType(
       lengthInMinutes: input.durationMinutes,
       length: input.durationMinutes,
       hidden: true,
-      locations: [{ type: "phone" }],
       beforeEventBuffer: input.bufferBeforeMinutes || 0,
       afterEventBuffer: input.bufferAfterMinutes || 0,
       minimumBookingNotice: input.minimumNoticeMinutes || 0,
@@ -240,8 +239,92 @@ export interface CalcomBooking {
   status?: string;
   start?: string;
   end?: string;
+  eventTypeId?: string;
+  eventTypeSlug?: string;
   attendees?: Array<{ name?: string; email?: string; timeZone?: string }>;
   metadata?: Record<string, unknown>;
+}
+
+export interface TenantCalendarEventTypeRef {
+  providerEventTypeId: string;
+  providerSlug: string;
+}
+
+function nestedRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function firstString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value;
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  }
+  return undefined;
+}
+
+export function normalizeCalcomBooking(raw: unknown): CalcomBooking | undefined {
+  const item = nestedRecord(raw);
+  if (!item) return undefined;
+  const eventType = nestedRecord(item.eventType);
+  const uid = firstString(item.uid, item.id);
+  if (!uid) return undefined;
+  const attendees = Array.isArray(item.attendees)
+    ? item.attendees.map((attendee) => {
+        const row = nestedRecord(attendee) || {};
+        return {
+          name: firstString(row.name),
+          email: firstString(row.email),
+          timeZone: firstString(row.timeZone, row.timezone),
+        };
+      })
+    : undefined;
+  return {
+    uid,
+    title: firstString(item.title),
+    status: firstString(item.status),
+    start: firstString(item.start, item.startTime),
+    end: firstString(item.end, item.endTime),
+    eventTypeId: firstString(item.eventTypeId, eventType?.id),
+    eventTypeSlug: firstString(item.eventTypeSlug, eventType?.slug),
+    attendees,
+    metadata: nestedRecord(item.metadata),
+  };
+}
+
+/**
+ * Shared-account Cal.com lists every workspace's bookings. Keep a tenant
+ * diary to mapped event types plus booking UIDs this workspace already stored.
+ */
+export function bookingBelongsToTenant(
+  booking: Pick<CalcomBooking, "uid" | "eventTypeId" | "eventTypeSlug">,
+  input: {
+    eventTypes: TenantCalendarEventTypeRef[];
+    knownBookingUids?: Iterable<string>;
+  },
+): boolean {
+  if (booking.uid && input.knownBookingUids) {
+    for (const uid of input.knownBookingUids) {
+      if (uid && uid === booking.uid) return true;
+    }
+  }
+  for (const eventType of input.eventTypes) {
+    if (booking.eventTypeId && String(eventType.providerEventTypeId) === String(booking.eventTypeId)) {
+      return true;
+    }
+    if (booking.eventTypeSlug && eventType.providerSlug === booking.eventTypeSlug) return true;
+  }
+  return false;
+}
+
+function bookingsFromListPayload(data: unknown): CalcomBooking[] {
+  const rows = Array.isArray(data)
+    ? data
+    : Array.isArray(nestedRecord(data)?.bookings)
+      ? nestedRecord(data)!.bookings as unknown[]
+      : [];
+  return rows.map(normalizeCalcomBooking).filter((booking): booking is CalcomBooking => Boolean(booking));
 }
 
 export async function listBookings(
@@ -268,12 +351,23 @@ export async function listBookings(
     "2024-08-13",
   )) as {
     status?: string;
-    data?: CalcomBooking[] | { bookings?: CalcomBooking[] };
+    data?: unknown;
   };
   return {
-    bookings: Array.isArray(json.data) ? json.data : json.data?.bookings ?? [],
+    bookings: bookingsFromListPayload(json.data),
     status: json.status,
   };
+}
+
+export async function getBooking(tenant: CalcomTenant, bookingUid: string): Promise<CalcomBooking> {
+  const json = (await calcomFetch(
+    tenant,
+    `/bookings/${encodeURIComponent(bookingUid)}`,
+    "2024-08-13",
+  )) as { data?: unknown };
+  const booking = normalizeCalcomBooking(nestedRecord(json.data) ?? json.data);
+  if (!booking) throw new Error("calcom_booking_not_found");
+  return booking;
 }
 
 export async function getBookingReferences(

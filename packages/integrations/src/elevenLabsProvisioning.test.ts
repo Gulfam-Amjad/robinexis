@@ -57,7 +57,7 @@ describe("buildElevenLabsAgentConfig", () => {
     ]);
     expect(result.agentConfig.conversation_config.tts).toEqual({
       voice_id: "voice_123",
-      model_id: "eleven_flash_v2_5",
+      model_id: "eleven_flash_v2",
     });
     expect(result.agentConfig.conversation_config.turn).toEqual({
       turn_timeout: 7,
@@ -257,7 +257,7 @@ describe("ElevenLabsManagementClient", () => {
     const fetchMock = vi.fn<typeof fetch>();
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ type: "stored", secret_id: "secret_new", name: "tenant-tool" }))
-      .mockResolvedValueOnce(jsonResponse({ tool_id: "tool_new" }));
+      .mockResolvedValueOnce(jsonResponse({ id: "tool_new" }));
     const client = new ElevenLabsManagementClient({
       apiKey: "test-key",
       fetch: fetchMock,
@@ -276,6 +276,9 @@ describe("ElevenLabsManagementClient", () => {
       value: "raw-secret",
     });
     expect(fetchMock.mock.calls[1]?.[0]).toBe("https://api.elevenlabs.io/v1/convai/tools");
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      tool_config: { type: "webhook", name: "check_availability" },
+    });
   });
 
   it("imports an SK Twilio number with signature token, assigns it, and deletes it", async () => {

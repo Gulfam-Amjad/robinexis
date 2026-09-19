@@ -1,7 +1,11 @@
 export { createToolExecutor } from "./tools.js";
 export { FakeCalendar } from "./fakeCalendar.js";
 export * as calcom from "./calcom.js";
-export { checkAvailability, maskCalcomUsername } from "./calcom.js";
+export {
+  bookingBelongsToTenant,
+  checkAvailability,
+  maskCalcomUsername,
+} from "./calcom.js";
 export {
   CALCOM_SCOPES,
   calcomOAuthAuthorizeUrl,
@@ -29,6 +33,17 @@ export {
   replayStripeEvent,
   reconcileStripe,
 } from "./stripe.js";
+export {
+  MINUTE_BLOCK_AMOUNT_MINOR,
+  MINUTE_BLOCK_CURRENCY,
+  MINUTE_BLOCK_MINUTES,
+  resolveMinuteAccess,
+} from "./minuteAccess.js";
+export type {
+  MinuteAccessMode,
+  MinuteAccessOptions,
+  MinuteAccessResult,
+} from "./minuteAccess.js";
 export {
   cheapVoiceDefaultEnabled,
   defaultVoicePipeline,
@@ -90,11 +105,52 @@ export {
 export {
   guestEmailFromPhone,
   isDialableE164,
+  isPlausibleCustomerPhone,
   normalizeSpokenPhone,
   toDialableE164,
 } from "./phone.js";
 export { sendNotification } from "./notifications.js";
-export { enqueueLifecycleEmail, processNotificationDeliveries } from "./notificationQueue.js";
+export {
+  enqueueLifecycleEmail,
+  enqueueWhatsAppNotification,
+  processNotificationDeliveries,
+} from "./notificationQueue.js";
+export {
+  applyManagedWhatsAppStatus,
+  configureManagedWhatsAppSender,
+  enqueueWhatsAppBookingConfirmation,
+  enqueueWhatsAppBookingReminder,
+  formatWhatsAppAppointmentTime,
+  enqueueWhatsAppCancellationFollowup,
+  ingestManagedWhatsApp,
+  managedWhatsAppReadiness,
+  normalizeWhatsAppAddress,
+  resolveManagedWhatsAppTenant,
+  resolveUniqueManagedWhatsAppSender,
+  validateManagedWhatsAppWebhook,
+  type WhatsAppInboundProcessor,
+} from "./whatsapp.js";
+export {
+  ENABLE_MANAGED_WHATSAPP,
+  ROBINEXIS_WHATSAPP_TEMPLATES,
+  contentTemplateCreateBody,
+  findExistingContentSid,
+  managedWhatsAppWebhookUrls,
+  upsertEnvAssignments,
+  whatsappEnvUpdates,
+} from "./whatsappProvisioning.js";
+export type { WhatsAppContentTemplateSpec } from "./whatsappProvisioning.js";
+export {
+  hasRemainingMessageAllowance,
+  messageAllowancePeriod,
+  whatsappAllowanceSnapshot,
+} from "./messageAllowance.js";
+export {
+  processInboundWhatsAppMessages,
+  processScheduledWhatsAppFollowups,
+  type MessagingBrainDependencies,
+  type MessagingBrainResult,
+} from "./messagingBrain.js";
 export { applyOutboundStatus } from "./outboundStatus.js";
 export { finishCall } from "./finishCall.js";
 export {

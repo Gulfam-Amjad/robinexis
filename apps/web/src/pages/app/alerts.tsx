@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Bell, CheckCircle2, CircleDollarSign, PlugZap } from "lucide-react";
 import { api, formatDate } from "../../lib/api";
 import { workspacePath } from "../../lib/navigation";
+import { shouldWarnLowBalance } from "../../lib/usageAlerts";
 import { useClient } from "../../state";
 import {
   Badge, Card, EmptyState, ErrorState, LinkButton, LoadingState, PageHeader, SectionHeading,
@@ -23,7 +24,7 @@ export function AlertsPage() {
   const disconnected = (integrations.data || []).filter((item) => !item.connected && ["calcom", "twilio", "elevenlabs"].includes(item.id.toLowerCase()));
   const openRequests = (requests.data || []).filter((item) => !["completed", "rejected", "revoked"].includes(item.status));
   const alerts = [
-    ...(remaining !== undefined && remaining <= Math.max(30, (usage.data?.includedMinutes || 300) * 0.1)
+    ...(remaining !== undefined && shouldWarnLowBalance(remaining, usage.data?.includedMinutes || 300)
       ? [{ key: "usage", title: `${remaining} voice minutes remaining`, detail: usage.data?.resetAt ? `Allowance resets ${formatDate(usage.data.resetAt, { dateStyle: "medium" })}.` : "Review your plan before calls are paused.", tone: "warning" as const, icon: CircleDollarSign, to: workspacePath(clientId, "usage") }]
       : []),
     ...(!["active", "trialing"].includes(billing.data?.status || "")
