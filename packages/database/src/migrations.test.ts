@@ -140,7 +140,9 @@ describe("database migrations", () => {
       .not.toMatch(/client_id/i);
     expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS provider_alert_rules/i);
     expect(sql).not.toMatch(/ALTER TABLE credit_ledger/i);
-    expect(sql).toMatch(/REVOKE ALL ON public\.provider_deployments FROM anon, authenticated/i);
+    expect(sql).toMatch(/pg_roles WHERE rolname = role_name/i);
+    expect(sql).toMatch(/'provider_deployments'/i);
+    expect(sql).toMatch(/REVOKE ALL ON public\.%I FROM %I/i);
   });
 
   it("isolates messaging entitlements and overage records from voice credits", () => {

@@ -127,9 +127,23 @@ ALTER TABLE provider_usage_cost_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE provider_account_snapshots ENABLE ROW LEVEL SECURITY;
 ALTER TABLE provider_alert_rules ENABLE ROW LEVEL SECURITY;
 
-REVOKE ALL ON public.provider_deployments FROM anon, authenticated;
-REVOKE ALL ON public.provider_switch_operations FROM anon, authenticated;
-REVOKE ALL ON public.provider_rollback_snapshots FROM anon, authenticated;
-REVOKE ALL ON public.provider_usage_cost_events FROM anon, authenticated;
-REVOKE ALL ON public.provider_account_snapshots FROM anon, authenticated;
-REVOKE ALL ON public.provider_alert_rules FROM anon, authenticated;
+DO $$
+DECLARE
+  role_name TEXT;
+  table_name TEXT;
+BEGIN
+  FOREACH role_name IN ARRAY ARRAY['anon', 'authenticated'] LOOP
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = role_name) THEN
+      FOREACH table_name IN ARRAY ARRAY[
+        'provider_deployments',
+        'provider_switch_operations',
+        'provider_rollback_snapshots',
+        'provider_usage_cost_events',
+        'provider_account_snapshots',
+        'provider_alert_rules'
+      ] LOOP
+        EXECUTE format('REVOKE ALL ON public.%I FROM %I', table_name, role_name);
+      END LOOP;
+    END IF;
+  END LOOP;
+END $$;
