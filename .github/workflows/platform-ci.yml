@@ -20,7 +20,7 @@ jobs:
           docker run --rm
           -v "$PWD:/repo"
           ghcr.io/gitleaks/gitleaks:v8.24.3
-          dir /repo --redact --exit-code 1
+          dir /repo --redact --verbose --exit-code 1
 
   verify:
     runs-on: ubuntu-latest

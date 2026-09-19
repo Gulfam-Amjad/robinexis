@@ -9,7 +9,10 @@ import {
 } from "@robinexis/integrations";
 import type { ProductRouteContext } from "./productRoutes.js";
 import { canAdministerPlatform } from "./auth.js";
-import { ProviderSwitchService } from "./providerSwitchService.js";
+import {
+  ProviderSwitchService,
+  type ProviderAdapterRegistry,
+} from "./providerSwitchService.js";
 
 export async function handleProviderSwitchRoute(
   ctx: ProductRouteContext,
@@ -33,29 +36,38 @@ export async function handleProviderSwitchRoute(
     return true;
   }
 
-  if (action !== "launch-gate" &&
-      (!process.env.ELEVENLABS_API_KEY || !process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN)) {
-    ctx.send(ctx.res, 503, { error: "provider_management_not_configured" });
-    return true;
+  let adapters: ProviderAdapterRegistry;
+  if (action === "launch-gate") {
+    // Launch-gate evaluation is data-only. Do not require or instantiate provider
+    // credentials until an operation can actually make a provider call.
+    adapters = {} as ProviderAdapterRegistry;
+  } else {
+    if (!process.env.ELEVENLABS_API_KEY ||
+        !process.env.TWILIO_ACCOUNT_SID ||
+        !process.env.TWILIO_AUTH_TOKEN) {
+      ctx.send(ctx.res, 503, { error: "provider_management_not_configured" });
+      return true;
+    }
+    const elevenLabs = new ElevenLabsManagementClient({ apiKey: process.env.ELEVENLABS_API_KEY });
+    const routing = new TwilioVoiceRoutingClient(
+      process.env.TWILIO_ACCOUNT_SID,
+      process.env.TWILIO_AUTH_TOKEN,
+    );
+    const liveKitSip = process.env.LIVEKIT_URL &&
+      process.env.LIVEKIT_API_KEY &&
+      process.env.LIVEKIT_API_SECRET
+      ? new LiveKitSipProvisioningClient(
+        process.env.LIVEKIT_URL,
+        process.env.LIVEKIT_API_KEY,
+        process.env.LIVEKIT_API_SECRET,
+      )
+      : undefined;
+    adapters = {
+      "elevenlabs-convai": new ElevenLabsVoiceProviderAdapter(elevenLabs, routing),
+      "livekit-cascade": new LiveKitVoiceProviderAdapter(routing, liveKitSip),
+    };
   }
-  const elevenLabs = new ElevenLabsManagementClient({ apiKey: process.env.ELEVENLABS_API_KEY || "" });
-  const routing = new TwilioVoiceRoutingClient(
-    process.env.TWILIO_ACCOUNT_SID || "",
-    process.env.TWILIO_AUTH_TOKEN || "",
-  );
-  const liveKitSip = process.env.LIVEKIT_URL &&
-    process.env.LIVEKIT_API_KEY &&
-    process.env.LIVEKIT_API_SECRET
-    ? new LiveKitSipProvisioningClient(
-      process.env.LIVEKIT_URL,
-      process.env.LIVEKIT_API_KEY,
-      process.env.LIVEKIT_API_SECRET,
-    )
-    : undefined;
-  const service = new ProviderSwitchService(ctx.store, {
-    "elevenlabs-convai": new ElevenLabsVoiceProviderAdapter(elevenLabs, routing),
-    "livekit-cascade": new LiveKitVoiceProviderAdapter(routing, liveKitSip),
-  });
+  const service = new ProviderSwitchService(ctx.store, adapters);
 
   try {
     if (action === "launch-gate") {
