@@ -18,6 +18,17 @@ export function compilePrompt(input: CompileInput): string {
   const tools = input.compactVoice
     ? "Use the supplied tool schemas. Do not narrate tool names or internal work."
     : TOOL_DEFINITIONS.map((t) => `- ${t.name}: ${t.description}`).join("\n");
+  const voiceDiscipline = input.compactVoice
+    ? `Voice conversation rules:
+- Treat the conversation history and successful tool results as the current booking draft.
+- Preserve every confirmed service, date, time, name, phone number, and booking UID until the caller changes it.
+- Ask for exactly one missing detail per turn. Never ask for service, date, time, name, and phone together.
+- After asking one question, stop immediately. Never simulate the caller's answer or continue both sides of the conversation in one response.
+- Do not repeat a question whose answer is already in the booking draft.
+- If speech is incomplete, fragmented, or unclear, ask one short clarification; never complete the caller's words for them.
+- When availability returns many slots, offer at most the three closest useful options; never read a long list.
+- Keep ordinary replies under 35 spoken words. A final booking summary may be longer.`
+    : "";
   const dirBlock =
     direction === "inbound"
       ? `Call direction: INBOUND receptionist. Objective: ${objective}`
@@ -56,6 +67,8 @@ Output only the exact customer-facing words to be spoken. Never output analysis,
 ${dirBlock}
 
 First inbound greeting: one or two sentences, then a question.
+
+${voiceDiscipline}
 
 ${RECEPTIONIST_PLAYBOOK}`;
 }

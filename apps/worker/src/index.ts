@@ -368,6 +368,9 @@ async function main() {
     healthStaleMs: HEALTH_STALE_MS,
     retentionDays: RETENTION_DAYS,
     stripeConfigured: Boolean(process.env.STRIPE_SECRET_KEY),
+    voiceRuntimeEnabled: process.env.VOICE_RUNTIME_ENABLED === "true",
+    livekitAgentName: process.env.LIVEKIT_AGENT_NAME || "robinexis-alternate-runtime",
+    voiceTurnPolicy: "stt-vad-stop-after-question-three-slots",
   });
   if (!process.env.STRIPE_SECRET_KEY) {
     structuredLog("worker_misconfigured", { missing: ["STRIPE_SECRET_KEY"] });

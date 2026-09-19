@@ -28,6 +28,13 @@ export interface NormalizedUsage {
   tts: { provider: "elevenlabs"; characters: number; audioSeconds: number };
 }
 
+export interface LatencySummary {
+  count: number;
+  lastMs: number;
+  p50Ms: number;
+  p95Ms: number;
+}
+
 export interface PostCallPayload {
   version: 1;
   provider: "livekit-cascade";
@@ -43,10 +50,10 @@ export interface PostCallPayload {
   transcript: TranscriptItem[];
   toolHistory: ToolHistoryItem[];
   latency: {
-    sttMs?: number;
-    llmTtftMs?: number;
-    ttsTtfbMs?: number;
-    endToEndMs?: number;
+    stt?: LatencySummary;
+    llmTtft?: LatencySummary;
+    ttsTtfb?: LatencySummary;
+    endToEnd?: LatencySummary;
   };
   usage: NormalizedUsage;
 }

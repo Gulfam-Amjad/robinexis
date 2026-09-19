@@ -70,14 +70,20 @@ export async function voiceToolClientIdForRequest(
   return agent?.status === "active" ? agent.clientId : undefined;
 }
 
-function callFor(clientId: string, conversationId: string): CallSession {
+async function callFor(
+  store: PlatformStore,
+  clientId: string,
+  conversationId: string,
+): Promise<CallSession> {
+  const existing = await store.getCallForClient(clientId, conversationId);
+  if (existing) return existing;
   const now = new Date().toISOString();
   return {
-    id: conversationId || newId("el_call_"),
+    id: conversationId || newId("voice_call_"),
     clientId,
     direction: "inbound",
-    objective: "ElevenLabs receptionist booking",
-    promptVersionId: "elevenlabs-convai",
+    objective: "Voice receptionist booking",
+    promptVersionId: "provider-managed-voice",
     transcript: [],
     collected: {},
     toolHistory: [],
@@ -86,6 +92,41 @@ function callFor(clientId: string, conversationId: string): CallSession {
     createdAt: now,
     updatedAt: now,
   };
+}
+
+function rememberTool(
+  call: CallSession,
+  name: ToolName,
+  input: Record<string, unknown>,
+  result: unknown,
+): void {
+  const at = new Date().toISOString();
+  call.toolHistory.push({
+    name,
+    input,
+    result,
+    idempotencyKey: typeof input.idempotencyKey === "string" ? input.idempotencyKey : undefined,
+    at,
+  });
+  if (input.eventTypeSlug) call.collected.eventTypeSlug = String(input.eventTypeSlug);
+  if (input.start) call.collected.start = String(input.start);
+  if (input.attendeeName) call.collected.attendeeName = String(input.attendeeName);
+  if (input.attendeePhone) {
+    const phone = normalizeSpokenPhone(String(input.attendeePhone));
+    call.collected.attendeePhone = phone;
+    call.contactPhone = phone;
+  }
+  if (input.attendeeEmail) call.collected.attendeeEmail = String(input.attendeeEmail);
+  if (input.callerConfirmed === true) call.collected.callerConfirmed = true;
+  const bookingUid = result && typeof result === "object"
+    ? String((result as { bookingUid?: unknown; uid?: unknown }).bookingUid ||
+      (result as { uid?: unknown }).uid || "")
+    : "";
+  if (bookingUid) {
+    call.appointmentId = bookingUid;
+    call.collected.bookingUid = bookingUid;
+  }
+  call.updatedAt = at;
 }
 
 function validRange(start: string, end: string): boolean {
@@ -138,7 +179,7 @@ export async function runVoiceTool(
       if (!conversationId) {
         return { status: 400, body: { ok: false, error: "missing_conversation_id" } };
       }
-  const call = callFor(client.id, conversationId);
+  const call = await callFor(store, client.id, conversationId);
 
   if (tool === "check-availability") {
     const start = String(input.start || "");
@@ -155,6 +196,12 @@ export async function runVoiceTool(
     if (!result.ok) {
       return { status: 503, body: { ok: false, error: "calendar_temporarily_unavailable" } };
     }
+    rememberTool(call, "check_availability", {
+      eventTypeSlug,
+      start,
+      end,
+    }, result.data);
+    await store.saveCall(call);
     return { status: 200, body: { ok: true, ...result.data as object } };
   }
 
@@ -215,6 +262,16 @@ export async function runVoiceTool(
   if (!booking.uid) {
     return { status: 502, body: { ok: false, error: "booking_not_confirmed" } };
   }
+  rememberTool(call, "create_booking", {
+    eventTypeSlug,
+    start,
+    attendeeName,
+    attendeePhone,
+    attendeeEmail: String(input.attendeeEmail || "").trim() || undefined,
+    callerConfirmed: true,
+    idempotencyKey: String(input.idempotencyKey || `${conversationId}:${eventTypeSlug}:${start}`),
+  }, { bookingUid: booking.uid, bookingStatus: booking.status || "accepted" });
+  await store.saveCall(call);
   const calendarConnection = (await store.listCalendarConnections(client.id))
     .find((connection) => connection.status !== "disabled");
   const bookingId = `booking_${createHash("sha256")
@@ -237,7 +294,7 @@ export async function runVoiceTool(
     attendeePhone,
     attendeeEmail: String(input.attendeeEmail || "").trim() || undefined,
     serviceSlug: eventTypeSlug,
-    metadata: { source: "elevenlabs_voice_tool" },
+    metadata: { source: "provider_neutral_voice_tool" },
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });
@@ -288,7 +345,7 @@ export async function runVoiceContractTool(
   const conversationId = String(input.conversationId || "").trim();
   if (!conversationId) return { status: 400, body: { ok: false, error: "missing_conversation_id" } };
 
-  const call = callFor(client.id, conversationId);
+  const call = await callFor(store, client.id, conversationId);
   await store.saveCall(call);
   const result = await createToolExecutor({ ...options, store })({
     name: tool,
@@ -318,6 +375,8 @@ export async function runVoiceContractTool(
       }
     }
   }
+  rememberTool(call, tool, input, result.ok ? result.data : { error: result.error });
+  await store.saveCall(call);
   return result.ok
     ? { status: 200, body: { ok: true, ...result.data as object } }
     : { status: 503, body: { ok: false, error: result.error || "voice_tool_failed" } };

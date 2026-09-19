@@ -1,11 +1,20 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { RuntimeApiClient, signPostCall } from "./apiClient.js";
-import { classifySessionError } from "./agent.js";
+import { classifySessionError, voiceKeyterms } from "./agent.js";
 import { loadVoiceRuntimeEnv } from "./env.js";
 import { parseJobMetadata, stableCallId } from "./metadata.js";
-import { normalizedUsage } from "./telemetry.js";
-import { createToolBridge, VOICE_TOOL_NAMES } from "./toolBridge.js";
+import {
+  collectLatency,
+  createLatencyTracker,
+  normalizedUsage,
+  summarizeLatency,
+} from "./telemetry.js";
+import {
+  createToolBridge,
+  rememberBookingState,
+  VOICE_TOOL_NAMES,
+} from "./toolBridge.js";
 
 const completeEnv = {
   VOICE_RUNTIME_ENABLED: "true",
@@ -32,10 +41,12 @@ describe("voice runtime safety contracts", () => {
       llmProvider: "groq",
       groqModel: "openai/gpt-oss-120b",
       elevenLabsTtsModel: "eleven_flash_v2_5",
-      endpointingMinDelayMs: 450,
-      endpointingMaxDelayMs: 2_200,
-      interruptionMinDurationMs: 650,
-      interruptionMinWords: 2,
+      deepgramModel: "nova-3",
+      deepgramEndpointingMs: 300,
+      endpointingMinDelayMs: 850,
+      endpointingMaxDelayMs: 3_500,
+      interruptionMinDurationMs: 400,
+      interruptionMinWords: 1,
     });
     expect(() => loadVoiceRuntimeEnv({ ...completeEnv, VOICE_LLM_PROVIDER: "invalid" }))
       .toThrow("invalid_voice_llm_provider");
@@ -137,6 +148,47 @@ describe("voice runtime safety contracts", () => {
     expect(classifySessionError(new Error("LLM completion failed"))).toBe("llm");
   });
 
+  it("retains corrected booking details inside one call without cross-call leakage", () => {
+    const first = {};
+    rememberBookingState(first, {
+      eventTypeSlug: "gentlemans-cut",
+      start: "2026-09-21T10:00:00.000Z",
+      attendeeName: "Michael",
+    }, { ok: true });
+    rememberBookingState(first, {
+      start: "2026-09-21T11:30:00.000Z",
+      attendeePhone: "07443 443532",
+      callerConfirmed: true,
+    }, { ok: true, bookingUid: "bk_123" });
+    expect(first).toEqual({
+      eventTypeSlug: "gentlemans-cut",
+      start: "2026-09-21T11:30:00.000Z",
+      attendeeName: "Michael",
+      attendeePhone: "07443 443532",
+      callerConfirmed: true,
+      bookingUid: "bk_123",
+    });
+    expect({}).not.toHaveProperty("attendeeName");
+  });
+
+  it("builds tenant speech keyterms without duplicate or empty values", () => {
+    expect(voiceKeyterms({
+      businessName: "Blades Hair",
+      location: "Cullum Street",
+      services: [
+        { title: "Gentleman's Cut", slug: "gentlemans-cut" },
+        { title: "Gentleman's Cut", slug: "gentlemans-cut" },
+      ],
+      staff: ["Sophie", ""],
+    })).toEqual([
+      "Blades Hair",
+      "Cullum Street",
+      "Gentleman's Cut",
+      "gentlemans-cut",
+      "Sophie",
+    ]);
+  });
+
   it("normalizes LiveKit and model usage into provider-neutral units", () => {
     expect(normalizedUsage([
       { type: "stt_usage", audioDurationMs: 2500 },
@@ -147,6 +199,19 @@ describe("voice runtime safety contracts", () => {
       stt: { provider: "deepgram", audioSeconds: 2.5 },
       llm: { provider: "groq", inputTokens: 10, outputTokens: 4 },
       tts: { provider: "elevenlabs", characters: 80, audioSeconds: 1.5 },
+    });
+  });
+
+  it("reports latency count, latest value, p50, and p95 instead of a misleading minimum", () => {
+    const tracker = createLatencyTracker();
+    for (const ttftMs of [100, 200, 300, 900]) {
+      collectLatency(tracker, { type: "llm_metrics", ttftMs } as never);
+    }
+    expect(summarizeLatency(tracker).llmTtft).toEqual({
+      count: 4,
+      lastMs: 900,
+      p50Ms: 200,
+      p95Ms: 900,
     });
   });
 });

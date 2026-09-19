@@ -217,6 +217,7 @@ export function CostSaverCall({
     hasError: Boolean(error),
   });
   const statusCopy = receptionistStatusCopy(status, config.agentName, config.businessName);
+  const visibleTranscript = transcript.filter((turn) => turn.final);
 
   return (
     <section className="comparison-call">
@@ -257,8 +258,8 @@ export function CostSaverCall({
       <Card className="comparison-transcript">
         <SectionHeading title="Live conversation" description={connected ? "Shared Blades brief, cheaper component pipeline." : "Your transcript will appear here."} />
         <div className="transcript-feed" aria-live="polite">
-          {!transcript.length ? <div className="transcript-empty"><Headphones /><p>Start the call and compare the same salon questions.</p></div>
-            : transcript.map((turn) => <div className={`transcript-bubble transcript-bubble-${turn.role}`} key={turn.id}>
+          {!visibleTranscript.length ? <div className="transcript-empty"><Headphones /><p>Start the call and compare the same salon questions.</p></div>
+            : visibleTranscript.map((turn) => <div className={`transcript-bubble transcript-bubble-${turn.role}`} key={turn.id}>
               <span>{turn.role === "agent" ? config.agentName : "You"}</span><p>{turn.message}</p>
             </div>)}
           <div ref={transcriptEnd} />

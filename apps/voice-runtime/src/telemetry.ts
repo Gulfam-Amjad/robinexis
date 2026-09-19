@@ -1,5 +1,16 @@
 import type { AgentMetrics, ModelUsage } from "@livekit/agents";
-import type { NormalizedUsage, PostCallPayload } from "./contracts.js";
+import type { LatencySummary, NormalizedUsage, PostCallPayload } from "./contracts.js";
+
+export interface LatencyTracker {
+  stt: number[];
+  llmTtft: number[];
+  ttsTtfb: number[];
+  endToEnd: number[];
+}
+
+export function createLatencyTracker(): LatencyTracker {
+  return { stt: [], llmTtft: [], ttsTtfb: [], endToEnd: [] };
+}
 
 export function normalizedUsage(
   modelUsage: Array<Partial<ModelUsage>>,
@@ -29,19 +40,28 @@ export function normalizedUsage(
 }
 
 export function collectLatency(
-  current: PostCallPayload["latency"],
+  current: LatencyTracker,
   metrics: AgentMetrics,
-): PostCallPayload["latency"] {
-  if (metrics.type === "llm_metrics") current.llmTtftMs = minimum(current.llmTtftMs, metrics.ttftMs);
-  if (metrics.type === "tts_metrics") current.ttsTtfbMs = minimum(current.ttsTtfbMs, metrics.ttfbMs);
+): LatencyTracker {
+  if (metrics.type === "llm_metrics") append(current.llmTtft, metrics.ttftMs);
+  if (metrics.type === "tts_metrics") append(current.ttsTtfb, metrics.ttfbMs);
   if (metrics.type === "eou_metrics") {
-    current.sttMs = minimum(current.sttMs, metrics.transcriptionDelayMs);
-    current.endToEndMs = minimum(
-      current.endToEndMs,
+    append(current.stt, metrics.transcriptionDelayMs);
+    append(
+      current.endToEnd,
       metrics.endOfUtteranceDelayMs + metrics.transcriptionDelayMs,
     );
   }
   return current;
+}
+
+export function summarizeLatency(current: LatencyTracker): PostCallPayload["latency"] {
+  return {
+    stt: summary(current.stt),
+    llmTtft: summary(current.llmTtft),
+    ttsTtfb: summary(current.ttsTtfb),
+    endToEnd: summary(current.endToEnd),
+  };
 }
 
 function sum(items: Array<Partial<ModelUsage>>, key: string): number {
@@ -53,7 +73,23 @@ function finite(value: unknown): number {
   return Number.isFinite(number) && number > 0 ? number : 0;
 }
 
-function minimum(current: number | undefined, next: number): number {
+function append(values: number[], next: number): void {
   const value = finite(next);
-  return current === undefined ? value : Math.min(current, value);
+  if (value > 0) values.push(value);
+}
+
+function summary(values: number[]): LatencySummary | undefined {
+  if (!values.length) return undefined;
+  const sorted = [...values].sort((a, b) => a - b);
+  return {
+    count: sorted.length,
+    lastMs: values.at(-1)!,
+    p50Ms: percentile(sorted, 0.5),
+    p95Ms: percentile(sorted, 0.95),
+  };
+}
+
+function percentile(sorted: number[], quantile: number): number {
+  const index = Math.max(0, Math.ceil(sorted.length * quantile) - 1);
+  return sorted[index]!;
 }

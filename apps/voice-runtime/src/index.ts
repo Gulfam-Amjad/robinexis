@@ -13,7 +13,7 @@ try {
     wsURL: env.livekitUrl,
     apiKey: env.livekitApiKey,
     apiSecret: env.livekitApiSecret,
-    agentName: "robinexis-alternate-runtime",
+    agentName: process.env.LIVEKIT_AGENT_NAME?.trim() || "robinexis-alternate-runtime",
     logLevel: "info",
   }));
 } catch (error) {

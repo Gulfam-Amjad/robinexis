@@ -18,23 +18,43 @@ type ModelResult = {
 
 const CASES = [
   {
-    id: "availability",
-    input: "I want Monday at twelve. Is it available?",
-    expectedAction: "check_availability",
+    id: "unfinished_request",
+    input: "I want to set an appointment for...",
+    expectedAction: "ask_completion",
   },
   {
-    id: "silence",
-    input: "We selected Monday at 11:30. You asked which service. I gave no clear answer.",
+    id: "day",
+    input: "Monday.",
     expectedAction: "ask_service",
   },
   {
+    id: "service",
+    input: "A gentleman's cut.",
+    expectedAction: "ask_time",
+  },
+  {
+    id: "time",
+    input: "Half past eleven.",
+    expectedAction: "check_availability",
+  },
+  {
+    id: "name",
+    input: "Michael.",
+    expectedAction: "ask_phone",
+  },
+  {
     id: "incomplete_phone",
-    input: "We selected Monday at 11:30 for a gentleman's cut. My number is +44 34435609, then I add 443443532.",
+    input: "Plus forty-four, three four four, three five six zero nine.",
     expectedAction: "ask_complete_phone",
   },
   {
+    id: "complete_phone",
+    input: "Start again: zero seven four four three, four four three, five three two.",
+    expectedAction: "summarize_confirmation",
+  },
+  {
     id: "confirmed_booking",
-    input: "I explicitly confirm Monday at 11:30, gentleman's cut, Michael, mobile 07443 443532.",
+    input: "Yes, I confirm.",
     expectedAction: "create_booking",
   },
   {
@@ -53,8 +73,9 @@ function evaluationPrompt() {
   })}
 
 Quality evaluation only: for every case return one decision. Do not execute tools.
+The cases are one continuous conversation in the listed order. Retain earlier answers and apply later corrections.
 Return strict JSON: {"cases":[{"id":"...","nextAction":"...","spokenReply":"..."}]}.
-Allowed nextAction values: check_availability, ask_service, ask_complete_phone, create_booking, close.
+Allowed nextAction values: ask_completion, ask_service, ask_time, check_availability, ask_phone, ask_complete_phone, summarize_confirmation, create_booking, close.
 Never invent a calendar slot or phone digit. A spokenReply must contain only customer-facing speech.`;
 }
 
@@ -70,12 +91,21 @@ export function scoreDecisions(decisions: Decision[]): Pick<ModelResult, "score"
       ["concise", reply.length > 0 && reply.length <= 280],
       ["no_meta", !/the user|i should|analysis|reasoning|system prompt/i.test(reply)],
     ];
-    if (scenario.id === "availability") {
+    if (scenario.id === "time") {
       checks.push(["no_invented_slot", !/\b(10|11|12)(?::\d\d)?\s*(am|pm|o'clock)\b/i.test(reply)]);
     }
     if (scenario.id === "incomplete_phone") {
       checks.push(["asks_full_number", /complete|beginning|from the start|start again|full number|repeat|once more|mobile number|number again/i.test(reply)]);
       checks.push(["no_reconstructed_number", !/07443\s*443532|\+447443443532/.test(reply.replace(/[()-]/g, ""))]);
+    }
+    if (["service", "time", "name", "incomplete_phone", "complete_phone"].includes(scenario.id)) {
+      checks.push(["does_not_restart_day", !/which day|what day|preferred day/i.test(reply)]);
+    }
+    if (["time", "name", "incomplete_phone", "complete_phone"].includes(scenario.id)) {
+      checks.push(["does_not_repeat_service", !/which service|what service|cut, colour|highlights/i.test(reply)]);
+    }
+    if (scenario.id !== "complete_phone" && scenario.id !== "confirmed_booking") {
+      checks.push(["one_question", (reply.match(/\?/g) || []).length <= 1]);
     }
     const failures = checks.filter(([, ok]) => !ok).map(([name]) => name);
     const target = failures.length
@@ -104,7 +134,7 @@ async function evaluateGroq(system: string): Promise<ModelResult> {
     ],
     response_format: { type: "json_object" },
     temperature: 0,
-    max_completion_tokens: 700,
+    max_completion_tokens: 1_600,
     reasoning_effort: "low",
   });
   const scored = scoreDecisions(parseDecisions(result.choices[0]?.message.content || "{}"));
@@ -135,7 +165,7 @@ async function evaluateGoogle(system: string): Promise<ModelResult> {
         contents: [{ role: "user", parts: [{ text: JSON.stringify(CASES) }] }],
         generationConfig: {
           temperature: 0,
-          maxOutputTokens: 700,
+          maxOutputTokens: 1_600,
           responseMimeType: "application/json",
         },
       }),

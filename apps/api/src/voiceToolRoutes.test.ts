@@ -29,6 +29,7 @@ const NOW = "2026-09-17T12:00:00.000Z";
 async function enableWhatsApp(store: MemoryStore) {
   process.env.WHATSAPP_ENABLED = "true";
   process.env.WHATSAPP_BOOKING_CONFIRMATION_CONTENT_SID = "HXbooking";
+  process.env.WHATSAPP_BOOKING_REMINDER_CONTENT_SID = "HXreminder";
   process.env.WHATSAPP_MANAGED_SENDERS_JSON = JSON.stringify({
     "whatsapp:+14155238886": BLADES_HAIR_ID,
   });
@@ -143,7 +144,16 @@ describe("ElevenLabs voice tool routes", () => {
       status: 200,
       body: { ok: true, slots: ["2026-09-02T10:00:00.000Z"] },
     });
-    expect(await store.getCall("conv_availability")).toBeUndefined();
+    expect(await store.getCall("conv_availability")).toMatchObject({
+      clientId: BLADES_HAIR_ID,
+      objective: "Voice receptionist booking",
+      promptVersionId: "provider-managed-voice",
+      collected: {
+        eventTypeSlug: "30min",
+        start: "2026-09-02T00:00:00.000Z",
+      },
+      toolHistory: [expect.objectContaining({ name: "check_availability" })],
+    });
   });
 
   it("supports a second published tenant selected by its server-bound secret", async () => {
@@ -258,6 +268,52 @@ describe("ElevenLabs voice tool routes", () => {
         attendeeName: "Gultham",
       },
     ]);
+    expect(await store.getCall("conv_test")).toMatchObject({
+      contactPhone: "+923424432411",
+      appointmentId: "bk_1",
+      collected: {
+        eventTypeSlug: "30min",
+        start: "2026-09-02T10:00:00.000Z",
+        attendeeName: "Gultham",
+        attendeePhone: "+923424432411",
+        callerConfirmed: true,
+        bookingUid: "bk_1",
+      },
+    });
+  });
+
+  it("merges later tool state without erasing the existing conversation", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    const now = new Date().toISOString();
+    await store.saveCall({
+      id: "call_livekit_memory",
+      clientId: BLADES_HAIR_ID,
+      direction: "inbound",
+      objective: "Browser provider comparison",
+      promptVersionId: "prompt_livekit",
+      transcript: [{ role: "caller", text: "Monday please", at: now }],
+      collected: { preferredDay: "Monday" },
+      toolHistory: [],
+      state: "tool",
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    });
+    const result = await runVoiceContractTool(
+      store,
+      "get_business_info",
+      { conversationId: "call_livekit_memory", topic: "hours" },
+      { store, clientId: BLADES_HAIR_ID },
+    );
+    expect(result.status).toBe(200);
+    expect(await store.getCall("call_livekit_memory")).toMatchObject({
+      objective: "Browser provider comparison",
+      promptVersionId: "prompt_livekit",
+      transcript: [{ role: "caller", text: "Monday please", at: now }],
+      collected: { preferredDay: "Monday" },
+      toolHistory: [expect.objectContaining({ name: "get_business_info" })],
+    });
   });
 
   it("does not book an unavailable or unconfirmed slot", async () => {
@@ -410,5 +466,38 @@ describe("ElevenLabs voice tool routes", () => {
       .filter((item) => item.idempotencyKey === "whatsapp:booking:bk_1");
     expect(confirmations).toHaveLength(1);
     expect(confirmations[0]?.payload?.contentSid).toBe("HXbooking");
+  });
+
+  it("queues a WhatsApp reminder for a future voice booking", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    await enableWhatsApp(store);
+    const start = "2026-09-20T10:00:00.000Z";
+    const calendar = new FakeCalendar([start]);
+    const result = await runVoiceTool(
+      store,
+      "create-booking",
+      {
+        eventTypeSlug: "30min",
+        start,
+        attendeeName: "Gultham",
+        attendeePhone: "07446 860 675",
+        callerConfirmed: true,
+        conversationId: "conv_wa_reminder",
+        idempotencyKey: "conv_wa_reminder:booking",
+      },
+      { store, calendar },
+    );
+    expect(result.status).toBe(200);
+    expect(await store.listScheduledFollowups(BLADES_HAIR_ID)).toMatchObject([{
+      idempotencyKey: "whatsapp:reminder:bk_1",
+      status: "pending",
+      scheduledAt: "2026-09-20T09:00:00.000Z",
+      payload: expect.objectContaining({
+        contentSid: "HXreminder",
+        kind: "booking_reminder",
+        contentVariables: expect.objectContaining({ "2": "bk_1" }),
+      }),
+    }]);
   });
 });

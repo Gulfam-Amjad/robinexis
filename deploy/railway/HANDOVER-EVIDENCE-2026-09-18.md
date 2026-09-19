@@ -10,6 +10,40 @@ status: blocked
 
 # SaaS handover evidence — 2026-09-18
 
+## Cost Saver quality and memory release — 2026-09-19
+
+- Production API deployment `01efb147-38e6-4f9a-baed-7543f00f7842` and final worker/runtime
+  deployment `4fd79c8b-4ac0-48a9-bffa-18c0a7cc0b49` are healthy.
+- The runtime now uses explicit Deepgram STT turn completion, fixed endpointing, and VAD interruption.
+  Partial-transcript preemptive generation is disabled. This removes the LiveKit semantic inference
+  subprocess that produced `ERR_IPC_CHANNEL_CLOSED` and caused silent or partial replies.
+- Groq uses low reasoning, bounded completions, sequential tool calls, and an eight-step recovery
+  budget. Prompts require one missing field and one question per turn, stop after the question,
+  retain confirmed booking fields, and offer at most three availability choices.
+- Call/tool records now load and merge by tenant plus conversation ID. Successful tool inputs and
+  booking UIDs are returned as a compact in-call ledger; later corrections replace old values without
+  sharing state with another call. Long LiveKit histories retain the system message and latest 28 items.
+- Latency evidence now records count, latest, p50, and p95 rather than the misleading minimum.
+- Automated checks passed: 326 backend tests, 50 web tests, 10 voice-runtime tests, root/web typechecks,
+  and the rolling nine-stage Groq conversation evaluation. The evaluation passed unfinished speech,
+  retained day/service/time/name, incomplete and corrected phone, confirmation, booking intent, and
+  close at 1.756 seconds with 1,979 input and 519 output tokens.
+- Staging uses agent name `robinexis-alternate-runtime-staging`, preventing production workers from
+  claiming staging jobs in the shared LiveKit project. The final spoken canary heard the complete
+  interrupted request, stopped with a measured 330 ms audio gap, used one concise question, offered
+  one time, and persisted call `call_06f2fbb1cb1f6b93110a891a5bd14b50`. No IPC crash occurred.
+- The staging synthetic phone route was restored to ElevenLabs after the canary.
+- The final production spoken canary passed on call `call_b1ce29451bea8ce08800a7db66186747`:
+  full service/date/time comprehension, 391 ms interruption gap, one concise question, no long slot
+  list, and no runtime provider or IPC errors.
+- A separate production Cal.com canary found availability, created an accepted `15min` booking, and
+  immediately cancelled it.
+- The production API health endpoint returned HTTP 200 after deployment.
+- Web code hides interim transcription fragments, but Vercel deployment is blocked: the signed-in
+  `gulfam-amjad` account cannot access linked team `team_nmuAc2M4T93kxpePQ5to8Nst`. The live URL
+  correctly redirects unauthenticated verification to `/login`; the production room/runtime was
+  verified directly by the canary above.
+
 ## Deployed release
 
 - Runtime revision: `6647d49e4c3f`.

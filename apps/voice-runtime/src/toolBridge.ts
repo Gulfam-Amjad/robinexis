@@ -24,9 +24,19 @@ export interface ToolBridgeOptions {
   now?: () => Date;
 }
 
+export interface BookingLedger {
+  eventTypeSlug?: string;
+  start?: string;
+  attendeeName?: string;
+  attendeePhone?: string;
+  callerConfirmed?: boolean;
+  bookingUid?: string;
+}
+
 export function createToolBridge(options: ToolBridgeOptions): FunctionTool<any>[] {
   const fetchImpl = options.fetchImpl || fetch;
   const now = options.now || (() => new Date());
+  const ledger: BookingLedger = {};
   const allowed = new Set<ToolName>(VOICE_TOOL_NAMES);
   return TOOL_DEFINITIONS.filter((definition) => allowed.has(definition.name))
     .map((definition) => llm.tool<unknown, any>({
@@ -69,14 +79,15 @@ export function createToolBridge(options: ToolBridgeOptions): FunctionTool<any>[
           });
           // Keep the structured API error in the LLM context so it can ask for
           // corrected input or offer a retry instead of going silent.
-          return result;
+          return withConversationState(result, ledger);
         }
+        rememberBookingState(ledger, input, result);
         runtimeLog("voice_runtime_tool_completed", {
           tool: definition.name,
           durationMs: Date.now() - startedAt,
           status: "ok",
         });
-        return result;
+        return withConversationState(result, ledger);
       } catch (error) {
         item.error = error instanceof Error ? error.message : "voice_tool_failed";
         runtimeLog("voice_runtime_tool_completed", {
@@ -89,6 +100,32 @@ export function createToolBridge(options: ToolBridgeOptions): FunctionTool<any>[
       }
     },
   }));
+}
+
+export function rememberBookingState(
+  ledger: BookingLedger,
+  input: Record<string, unknown>,
+  result: unknown,
+): BookingLedger {
+  if (input.eventTypeSlug) ledger.eventTypeSlug = String(input.eventTypeSlug);
+  if (input.start) ledger.start = String(input.start);
+  if (input.attendeeName) ledger.attendeeName = String(input.attendeeName);
+  if (input.attendeePhone) ledger.attendeePhone = String(input.attendeePhone);
+  if (input.callerConfirmed === true) ledger.callerConfirmed = true;
+  if (result && typeof result === "object") {
+    const record = result as Record<string, unknown>;
+    const bookingUid = record.bookingUid || record.uid;
+    if (bookingUid) ledger.bookingUid = String(bookingUid);
+  }
+  return ledger;
+}
+
+function withConversationState(result: unknown, ledger: BookingLedger): unknown {
+  if (!Object.keys(ledger).length) return result;
+  if (result && typeof result === "object" && !Array.isArray(result)) {
+    return { ...result as Record<string, unknown>, conversationState: { ...ledger } };
+  }
+  return { result, conversationState: { ...ledger } };
 }
 
 function classifyToolError(message: string): string {

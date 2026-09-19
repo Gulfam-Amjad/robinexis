@@ -1,4 +1,4 @@
-import { defineAgent, AgentSessionEventTypes, voice } from "@livekit/agents";
+import { defineAgent, AgentSessionEventTypes, llm, voice } from "@livekit/agents";
 import * as deepgram from "@livekit/agents-plugin-deepgram";
 import * as elevenlabs from "@livekit/agents-plugin-elevenlabs";
 import * as google from "@livekit/agents-plugin-google";
@@ -9,7 +9,12 @@ import { loadVoiceRuntimeEnv } from "./env.js";
 import { runtimeLog } from "./logger.js";
 import { parseJobMetadata, stableCallId } from "./metadata.js";
 import { RuntimeApiClient } from "./apiClient.js";
-import { collectLatency, normalizedUsage } from "./telemetry.js";
+import {
+  collectLatency,
+  createLatencyTracker,
+  normalizedUsage,
+  summarizeLatency,
+} from "./telemetry.js";
 import { createToolBridge } from "./toolBridge.js";
 
 export default defineAgent({
@@ -26,23 +31,31 @@ export default defineAgent({
     const config = await api.getPublishedConfig(metadata.tenantId, metadata.deploymentId);
     const startedAt = new Date();
     const toolHistory: PostCallPayload["toolHistory"] = [];
-    const latency: PostCallPayload["latency"] = {};
-    let recoverySpoken = false;
+    const latency = createLatencyTracker();
+    let lastRecoveryAt = 0;
 
     const session = new voice.AgentSession({
       stt: new deepgram.STT({
         apiKey: env.deepgramApiKey,
-        model: "nova-3",
+        model: env.deepgramModel,
         language: "en-GB",
         interimResults: true,
         smartFormat: true,
+        endpointing: env.deepgramEndpointingMs,
+        fillerWords: true,
+        keyterm: voiceKeyterms(config.client),
         redact: ["pci"],
       }),
       llm: env.llmProvider === "groq"
-        ? openai.LLM.withGroq({
+        ? new openai.LLM({
           apiKey: env.groqApiKey,
+          baseURL: "https://api.groq.com/openai/v1",
           model: env.groqModel,
           temperature: 0.2,
+          toolChoice: "auto",
+          parallelToolCalls: false,
+          maxCompletionTokens: 180,
+          reasoningEffort: "low",
         })
         : new google.LLM({
           apiKey: env.googleApiKey!,
@@ -56,42 +69,47 @@ export default defineAgent({
         language: "en",
         enableLogging: false,
       }),
-      maxToolSteps: 4,
+      maxToolSteps: 8,
       turnHandling: {
+        turnDetection: "stt",
         endpointing: {
-          mode: "dynamic",
+          mode: "fixed",
           minDelay: env.endpointingMinDelayMs,
           maxDelay: env.endpointingMaxDelayMs,
         },
         interruption: {
           enabled: true,
-          mode: "adaptive",
+          mode: "vad",
           minDuration: env.interruptionMinDurationMs,
           minWords: env.interruptionMinWords,
           resumeFalseInterruption: true,
         },
         preemptiveGeneration: {
-          enabled: true,
+          enabled: false,
           preemptiveTts: false,
-          maxRetries: 1,
+          maxRetries: 0,
         },
       },
     });
     session.on(AgentSessionEventTypes.MetricsCollected, (event) => {
       collectLatency(latency, event.metrics);
+      const currentLatency = summarizeLatency(latency);
       runtimeLog("voice_runtime_metric", {
         metricType: event.metrics.type,
-        llmTtftMs: latency.llmTtftMs,
-        sttMs: latency.sttMs,
-        ttsTtfbMs: latency.ttsTtfbMs,
-        endToEndMs: latency.endToEndMs,
+        llmTtftP95Ms: currentLatency.llmTtft?.p95Ms,
+        sttP95Ms: currentLatency.stt?.p95Ms,
+        ttsTtfbP95Ms: currentLatency.ttsTtfb?.p95Ms,
+        endToEndP95Ms: currentLatency.endToEnd?.p95Ms,
       });
     });
     session.on(AgentSessionEventTypes.Error, (event) => {
       const errorType = classifySessionError(event.error);
       runtimeLog("voice_runtime_provider_error", { errorType });
-      if (!recoverySpoken && (errorType === "rate_limit" || errorType === "llm")) {
-        recoverySpoken = true;
+      if (
+        (errorType === "rate_limit" || errorType === "llm") &&
+        Date.now() - lastRecoveryAt > 5_000
+      ) {
+        lastRecoveryAt = Date.now();
         session.say("Sorry, I had trouble checking that. Please say that once more.");
       }
     });
@@ -113,7 +131,7 @@ export default defineAgent({
         durationSeconds,
         transcript: transcriptFromSession(session),
         toolHistory,
-        latency,
+        latency: summarizeLatency(latency),
         usage: normalizedUsage(session.usage.modelUsage, durationSeconds, env.llmProvider),
       };
       try {
@@ -128,13 +146,15 @@ export default defineAgent({
     await session.start({
       room: ctx.room,
       record: { audio: false, traces: false, logs: false, transcript: false, redaction: true },
-      agent: new voice.Agent({
-        instructions: compilePrompt({
+      agent: new BoundedVoiceAgent({
+        instructions: `${compilePrompt({
           client: config.client,
           direction: metadata.direction,
           objective: metadata.objective,
           compactVoice: true,
-        }),
+        })}
+
+The opening greeting is delivered separately. Do not greet again unless the caller asks you to repeat it.`,
         tools: createToolBridge({
           apiBaseUrl: env.apiBaseUrl,
           tenantId: metadata.tenantId,
@@ -144,10 +164,23 @@ export default defineAgent({
         }),
       }),
     });
-    session.say(config.client.greeting || `Hello, you've reached ${config.client.businessName}. How can I help?`);
+    session.say(
+      config.client.greeting || `Hello, you've reached ${config.client.businessName}. How can I help?`,
+      { allowInterruptions: true },
+    );
     runtimeLog("voice_runtime_session_started", { callId, tenantId: metadata.tenantId });
   },
 });
+
+class BoundedVoiceAgent extends voice.Agent {
+  override async onUserTurnCompleted(
+    chatCtx: llm.ChatContext,
+    _newMessage: llm.ChatMessage,
+  ): Promise<void> {
+    if (chatCtx.items.length <= 32) return;
+    await this.updateChatCtx(chatCtx.copy().truncate(28));
+  }
+}
 
 export function classifySessionError(error: unknown): "rate_limit" | "llm" | "stt" | "tts" | "provider" {
   const value = error && typeof error === "object"
@@ -158,6 +191,20 @@ export function classifySessionError(error: unknown): "rate_limit" | "llm" | "st
   if (/speech.to.text|transcri|stt/i.test(value)) return "stt";
   if (/text.to.speech|tts/i.test(value)) return "tts";
   return "provider";
+}
+
+export function voiceKeyterms(client: {
+  businessName: string;
+  location: string;
+  services: Array<{ title: string; slug: string }>;
+  staff: string[];
+}): string[] {
+  return [...new Set([
+    client.businessName,
+    client.location,
+    ...client.services.flatMap((service) => [service.title, service.slug]),
+    ...client.staff,
+  ].map((value) => value.trim()).filter((value) => value.length >= 2))].slice(0, 100);
 }
 
 function transcriptFromSession(session: voice.AgentSession): TranscriptItem[] {
