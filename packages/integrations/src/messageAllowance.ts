@@ -55,3 +55,36 @@ export async function hasRemainingMessageAllowance(
     return false;
   }
 }
+
+export async function whatsappAllowanceSnapshot(
+  store: PlatformStore,
+  clientId: string,
+  planTier: "starter" | "pro" | "enterprise",
+  now = new Date(),
+): Promise<{
+  includedMessages: number;
+  usedMessages: number;
+  remainingMessages: number;
+  limitReached: boolean;
+}> {
+  const includedMessages = planDefinition(planTier).includedMessages;
+  try {
+    const period = await messageAllowancePeriod(store, clientId, "whatsapp", now);
+    const usage = await store.getMessageUsagePeriod(clientId, "whatsapp", period.periodStart);
+    const usedMessages = usage?.usedMessages ?? 0;
+    const included = usage?.includedMessages ?? period.includedMessages;
+    return {
+      includedMessages: included,
+      usedMessages,
+      remainingMessages: Math.max(0, included - usedMessages),
+      limitReached: usedMessages >= included,
+    };
+  } catch {
+    return {
+      includedMessages,
+      usedMessages: 0,
+      remainingMessages: Math.max(0, includedMessages),
+      limitReached: includedMessages <= 0,
+    };
+  }
+}

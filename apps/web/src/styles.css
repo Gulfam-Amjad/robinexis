@@ -104,8 +104,10 @@ svg { flex: 0 0 auto; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .logo { align-items: center; display: inline-flex; font-size: 20px; font-weight: 850; gap: 9px; letter-spacing: -.04em; }
-.logo-mark { align-items: center; background: var(--accent); border-radius: 10px 10px 10px 3px; color: var(--on-accent); display: inline-flex; height: 34px; justify-content: center; width: 34px; }
+.logo-mark { align-items: center; background: #fff; border-radius: 8px; box-shadow: 0 0 0 1px var(--line); display: inline-flex; height: 34px; justify-content: center; overflow: hidden; width: 34px; }
+.logo-mark img { display: block; height: 100%; object-fit: cover; width: 100%; }
 .logo-light { color: #fff; }
+.logo-light .logo-mark { box-shadow: 0 0 0 1px rgba(255, 255, 255, .28); }
 .public-page { background: #f0f0f0; min-height: 100vh; overflow-x: clip; }
 .public-header { align-items: center; display: flex; height: 82px; justify-content: space-between; margin: auto; max-width: 1220px; padding: 0 26px; position: relative; z-index: 10; }
 .public-nav { align-items: center; display: flex; font-size: 14px; font-weight: 650; gap: 30px; }

@@ -6,11 +6,31 @@ import {
 } from "@robinexis/database";
 import { messageAllowancePeriod } from "./messageAllowance.js";
 import { enqueueWhatsAppNotification } from "./notificationQueue.js";
+import { planDefinition } from "./plans.js";
 import { validateTwilioWebhook } from "./twilioOutbound.js";
+import { ENABLE_MANAGED_WHATSAPP } from "./whatsappProvisioning.js";
 
 const STOP_WORDS = new Set(["STOP", "UNSUBSCRIBE", "CANCEL", "END", "QUIT"]);
 const START_WORDS = new Set(["START", "UNSTOP"]);
 const HELP_WORDS = new Set(["HELP", "INFO"]);
+
+export function formatWhatsAppAppointmentTime(startsAt: string): string {
+  const ms = Date.parse(startsAt);
+  if (!Number.isFinite(ms)) return startsAt;
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London",
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).formatToParts(new Date(ms));
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value || "";
+  const dayPeriod = value("dayPeriod").replace(/\./g, "").toUpperCase();
+  return `${value("hour")}:${value("minute")} ${dayPeriod}, ${value("weekday")} ${value("day")} ${value("month")}`;
+}
 
 export function normalizeWhatsAppAddress(value: string): string | undefined {
   const raw = value.trim().toLowerCase().startsWith("whatsapp:")
@@ -282,6 +302,132 @@ export async function resolveUniqueManagedWhatsAppSender(
   return unique.length === 1 ? unique[0] : undefined;
 }
 
+export async function configureManagedWhatsAppSender(input: {
+  store: PlatformStore;
+  clientId: string;
+  sender: string;
+  actorId: string;
+  confirmation?: string;
+  now?: string;
+}): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const sender = normalizeWhatsAppAddress(input.sender);
+  if (!sender) return { ok: false, status: 400, error: "valid_whatsapp_sender_required" };
+  if (input.confirmation !== ENABLE_MANAGED_WHATSAPP) {
+    return { ok: false, status: 409, error: "managed_whatsapp_confirmation_required" };
+  }
+  const client = await input.store.getClient(input.clientId);
+  if (!client) return { ok: false, status: 404, error: "client_not_found" };
+  const subscription = await input.store.getCurrentSubscription(input.clientId);
+  if (!subscription ||
+      (subscription.status !== "active" && subscription.status !== "trialing") ||
+      planDefinition(subscription.planTier).includedMessages <= 0) {
+    return { ok: false, status: 409, error: "whatsapp_pro_subscription_required" };
+  }
+  for (const otherClient of await input.store.listClients()) {
+    if (otherClient.id === input.clientId) continue;
+    const collision = (await input.store.listProviderResources(otherClient.id)).some((item) =>
+      item.provider === "twilio" &&
+      item.resourceType === "whatsapp_sender" &&
+      item.lifecycleStatus !== "deleted" &&
+      normalizeWhatsAppAddress(String(item.metadata.address || item.providerResourceId || "")) === sender);
+    if (collision) return { ok: false, status: 409, error: "whatsapp_sender_already_assigned" };
+  }
+  const now = input.now || new Date().toISOString();
+  const existingResource = (await input.store.listProviderResources(input.clientId)).find((item) =>
+    item.provider === "twilio" && item.resourceType === "whatsapp_sender");
+  await input.store.upsertProviderResource({
+    id: existingResource?.id || `provider_twilio_whatsapp_${input.clientId}`,
+    clientId: input.clientId,
+    provider: "twilio",
+    resourceType: "whatsapp_sender",
+    providerResourceId: sender,
+    lifecycleStatus: "active",
+    metadata: { ...existingResource?.metadata, address: sender },
+    createdAt: existingResource?.createdAt || now,
+    updatedAt: now,
+  });
+  await input.store.upsertClient({ ...client, phoneAcquisitionMode: "robinexis_account" });
+  const existingFeatures = await input.store.getTenantFeatureEntitlements(input.clientId);
+  await input.store.upsertTenantFeatureEntitlements({
+    clientId: input.clientId,
+    whatsappEnabled: true,
+    autoMinuteBlocksEnabled: existingFeatures?.autoMinuteBlocksEnabled ?? false,
+    createdAt: existingFeatures?.createdAt || now,
+    updatedAt: now,
+  });
+  await input.store.appendOperatorAudit({
+    id: newId("audit_"),
+    clientId: input.clientId,
+    actorId: input.actorId,
+    action: "whatsapp.managed_sender_configured",
+    detail: { senderConfigured: true },
+    createdAt: now,
+  });
+  return { ok: true };
+}
+
+export async function managedWhatsAppReadiness(input: {
+  store: PlatformStore;
+  clientId: string;
+}) {
+  const [features, resources, endpoints] = await Promise.all([
+    input.store.getTenantFeatureEntitlements(input.clientId),
+    input.store.listProviderResources(input.clientId),
+    input.store.listPhoneEndpoints(input.clientId),
+  ]);
+  const resource = resources.find((item) =>
+    item.provider === "twilio" && item.resourceType === "whatsapp_sender");
+  const endpoint = endpoints.find((item) =>
+    item.provider === "twilio" &&
+    (item.metadata.whatsappEnabled === true || item.metadata.channel === "whatsapp"));
+  const configured = Boolean(resource || endpoint);
+  const senderStatus = resource
+    ? resource.lifecycleStatus === "active" ? "active"
+      : resource.lifecycleStatus === "failed" ? "failed" : "pending"
+    : endpoint
+      ? endpoint.status === "active" ? "active"
+        : endpoint.status === "failed" ? "failed" : "pending"
+      : "not_configured";
+  const bookingConfirmationConfigured =
+    Boolean(process.env.WHATSAPP_BOOKING_CONFIRMATION_CONTENT_SID?.trim());
+  const bookingReminderConfigured =
+    Boolean(process.env.WHATSAPP_BOOKING_REMINDER_CONTENT_SID?.trim());
+  const cancellationFollowupConfigured =
+    Boolean(process.env.WHATSAPP_CANCELLATION_FOLLOWUP_CONTENT_SID?.trim());
+  const outsideWindowConfigured =
+    Boolean(process.env.WHATSAPP_OUTSIDE_WINDOW_CONTENT_SID?.trim());
+  const configuredTemplateCount = [
+    bookingConfirmationConfigured,
+    bookingReminderConfigured,
+    cancellationFollowupConfigured,
+    outsideWindowConfigured,
+  ].filter(Boolean).length;
+  const globallyEnabled = process.env.WHATSAPP_ENABLED === "true";
+  const tenantEnabled = features?.whatsappEnabled ?? false;
+  return {
+    clientId: input.clientId,
+    sender: {
+      status: senderStatus,
+      configured,
+      updatedAt: resource?.updatedAt || endpoint?.updatedAt,
+    },
+    templates: {
+      status: configuredTemplateCount === 4
+        ? "configured"
+        : configuredTemplateCount > 0 ? "partial" : "not_configured",
+      bookingConfirmationConfigured,
+      bookingReminderConfigured,
+      cancellationFollowupConfigured,
+      outsideWindowConfigured,
+    },
+    runtime: {
+      status: globallyEnabled && tenantEnabled && senderStatus === "active" ? "active" : "disabled",
+      globallyEnabled,
+      tenantEnabled,
+    },
+  };
+}
+
 export async function enqueueWhatsAppBookingConfirmation(input: {
   store: PlatformStore;
   clientId: string;
@@ -369,7 +515,7 @@ export async function enqueueWhatsAppBookingReminder(input: {
   const now = input.now || new Date().toISOString();
   const startsAtMs = Date.parse(input.startsAt);
   const reminderAtMs = startsAtMs -
-    configuredDelayHours("WHATSAPP_BOOKING_REMINDER_LEAD_HOURS", 24) * 60 * 60 * 1000;
+    configuredDelayHours("WHATSAPP_BOOKING_REMINDER_LEAD_HOURS", 1) * 60 * 60 * 1000;
   if (!Number.isFinite(startsAtMs) || reminderAtMs <= Date.parse(now)) {
     return { queued: false, skipped: "reminder_time_elapsed" };
   }
@@ -387,7 +533,7 @@ export async function enqueueWhatsAppBookingReminder(input: {
     idempotencyKey: `whatsapp:reminder:${input.bookingUid}`,
     payload: {
       contentSid,
-      contentVariables: { "1": input.startsAt, "2": input.bookingUid },
+      contentVariables: { "1": formatWhatsAppAppointmentTime(input.startsAt), "2": input.bookingUid },
       bookingUid: input.bookingUid,
       kind: "booking_reminder",
     },

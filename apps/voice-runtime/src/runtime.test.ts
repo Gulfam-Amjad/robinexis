@@ -12,6 +12,7 @@ import {
 } from "./telemetry.js";
 import {
   createToolBridge,
+  prepareToolInput,
   rememberBookingState,
   VOICE_TOOL_NAMES,
 } from "./toolBridge.js";
@@ -169,6 +170,38 @@ describe("voice runtime safety contracts", () => {
       bookingUid: "bk_123",
     });
     expect({}).not.toHaveProperty("attendeeName");
+  });
+
+  it("uses the exact offered slot and derives correction-safe booking idempotency", () => {
+    const ledger = {
+      eventTypeSlug: "gentlemans-cut",
+      offeredSlots: ["2026-09-21T14:00:00.000Z"],
+      attendeeName: "Jason",
+    };
+    const first = prepareToolInput("create_booking", {
+      start: "2026-09-21T15:00:00+01:00",
+      attendeePhone: "07443 245443",
+      callerConfirmed: true,
+    }, ledger, "call-jason");
+    const replay = prepareToolInput("create_booking", {
+      start: "2026-09-21T14:00:00.000Z",
+      attendeePhone: "07443 245443",
+      callerConfirmed: true,
+    }, ledger, "call-jason");
+    const corrected = prepareToolInput("create_booking", {
+      start: "2026-09-21T14:00:00.000Z",
+      attendeePhone: "07911 123456",
+      callerConfirmed: true,
+    }, ledger, "call-jason");
+
+    expect(first).toMatchObject({
+      conversationId: "call-jason",
+      eventTypeSlug: "gentlemans-cut",
+      attendeeName: "Jason",
+      start: "2026-09-21T14:00:00.000Z",
+    });
+    expect(first.idempotencyKey).toBe(replay.idempotencyKey);
+    expect(corrected.idempotencyKey).not.toBe(first.idempotencyKey);
   });
 
   it("builds tenant speech keyterms without duplicate or empty values", () => {

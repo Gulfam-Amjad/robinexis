@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CircleDollarSign, Clock3, RefreshCw, Search, WalletCards } from "lucide-react";
 import { Link } from "react-router-dom";
 import { api } from "../../lib/api";
-import { filterClients } from "../../lib/admin";
+import { filterClients, whatsappAllowancePercent } from "../../lib/admin";
 import { useClient } from "../../state";
 import { Badge, Button, Card, EmptyState, ErrorState, LoadingState, MetricCard, PageHeader, SectionHeading } from "../../components/ui";
 
@@ -29,6 +29,10 @@ export function AdminUsageCostPage() {
   const hasCharacterCapacity = Number.isFinite(characterUsage) && Number.isFinite(characterLimit) && characterLimit > 0;
   const charactersRemaining = hasCharacterCapacity ? Math.max(0, characterLimit - characterUsage) : undefined;
   const characterPercent = hasCharacterCapacity ? Math.min(100, Math.round((characterUsage / characterLimit) * 100)) : undefined;
+  const includedMessages = data.totalIncludedMessages ?? 0;
+  const usedMessages = data.totalUsedMessages ?? 0;
+  const messagePercent = whatsappAllowancePercent(usedMessages, includedMessages);
+  const remainingMessages = Math.max(0, includedMessages - usedMessages);
 
   return <>
     <PageHeader eyebrow="Platform · Finance" title="Usage and cost" description="Customer minute allowance is reported separately from shared provider spend." />
@@ -43,6 +47,15 @@ export function AdminUsageCostPage() {
         tone="peach"
       />
       <MetricCard label="Shared voice capacity" value={charactersRemaining !== undefined ? charactersRemaining.toLocaleString("en-GB") : "Unavailable"} detail="ElevenLabs characters remaining across Robinexis" icon={RefreshCw} tone={charactersRemaining !== undefined && characterLimit && charactersRemaining / characterLimit < 0.1 ? "peach" : "sage"} />
+      <MetricCard
+        label="WhatsApp allowance"
+        value={includedMessages > 0 ? remainingMessages.toLocaleString("en-GB") : "None"}
+        detail={includedMessages > 0
+          ? `${usedMessages.toLocaleString("en-GB")} of ${includedMessages.toLocaleString("en-GB")} Pro messages used`
+          : "Starter and Enterprise include 0 messages; Pro includes 3,000"}
+        icon={WalletCards}
+        tone={messagePercent !== undefined && messagePercent >= 90 ? "peach" : "lilac"}
+      />
     </div>
     <div className="overview-grid">
       <Card className="panel">
@@ -54,8 +67,8 @@ export function AdminUsageCostPage() {
         {!filtered.length ? <EmptyState icon={Search} title="No matching usage records" description="Try a different customer search." /> : (
           <div className="table-scroll">
             <table className="mobile-card-table">
-              <thead><tr><th>Customer</th><th>Plan</th><th>Used</th><th>Remaining allowance</th><th>Provider cost</th><th>Failed calls this month</th></tr></thead>
-              <tbody>{filtered.map((client) => {
+                <thead><tr><th>Customer</th><th>Plan</th><th>Used</th><th>Remaining allowance</th><th>WhatsApp messages</th><th>Provider cost</th><th>Failed calls this month</th></tr></thead>
+                <tbody>{filtered.map((client) => {
                 const usage = data.clients.find((item) => item.clientId === client.id);
                 const provider = providerData?.clientTotals?.find((item) => item.clientId === client.id);
                 return <tr key={client.id}>
@@ -63,6 +76,9 @@ export function AdminUsageCostPage() {
                   <td data-label="Plan" className="capitalize">{usage?.plan || "Unavailable"}</td>
                   <td data-label="Used">{usage ? `${Math.round(usage.usedMinutes)} min` : "Unavailable"}</td>
                   <td data-label="Remaining allowance">{usage ? `${Math.round(usage.remainingMinutes)} min` : "Unavailable"}</td>
+                  <td data-label="WhatsApp messages">{usage?.includedMessages
+                    ? `${usage.usedMessages ?? 0} / ${usage.includedMessages}`
+                    : "0 included"}</td>
                   <td data-label="Provider cost">{provider ? `£${(provider.estimatedCostMinor / 100).toFixed(2)} estimated · ${provider.providers.join(" + ")}` : "Unavailable"}</td>
                   <td data-label="Failed calls this month">{usage?.failedCalls ?? "Unavailable"}</td>
                 </tr>;
@@ -95,6 +111,12 @@ export function AdminUsageCostPage() {
             <div className="capacity-values"><span>{characterUsage.toLocaleString("en-GB")} used</span><span>{charactersRemaining?.toLocaleString("en-GB")} remaining</span><span>{characterLimit.toLocaleString("en-GB")} limit</span></div>
             {typeof elevenLabsAccount?.usage.nextResetAt === "string" && <p className="muted">Resets {new Date(elevenLabsAccount.usage.nextResetAt).toLocaleString("en-GB")}.</p>}
             {charactersRemaining !== undefined && characterLimit && charactersRemaining / characterLimit < 0.1 && <p className="inline-notice" role="alert">Shared voice capacity is below 10%. Review the ElevenLabs subscription before customer calls are affected.</p>}
+          </div>}
+          {messagePercent !== undefined && <div className="provider-capacity">
+            <div className="usage-count"><strong>{messagePercent}%</strong><span>of Pro WhatsApp message allowance used</span></div>
+            <div className="progress" aria-label={`${messagePercent}% of included WhatsApp messages used`}><i style={{ width: `${messagePercent}%` }} /></div>
+            <div className="capacity-values"><span>{usedMessages.toLocaleString("en-GB")} used</span><span>{remainingMessages.toLocaleString("en-GB")} remaining</span><span>{includedMessages.toLocaleString("en-GB")} included</span></div>
+            <p className="muted">This is the Robinexis plan meter, not a Twilio included quota. Twilio and Meta still bill separately.</p>
           </div>}
         </>}
         <dl className="detail-list">

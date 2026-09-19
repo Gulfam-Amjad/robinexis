@@ -55,6 +55,23 @@ async function enableWhatsApp(store: MemoryStore) {
   });
 }
 
+async function offerSlot(
+  store: MemoryStore,
+  calendar: FakeCalendar,
+  conversationId: string,
+  start: string,
+  eventTypeSlug = "30min",
+) {
+  const instant = Date.parse(start);
+  const result = await runVoiceTool(store, "check-availability", {
+    eventTypeSlug,
+    start: new Date(instant - 60 * 60_000).toISOString(),
+    end: new Date(instant + 60 * 60_000).toISOString(),
+    conversationId,
+  }, { store, calendar });
+  expect(result.status).toBe(200);
+}
+
 describe("ElevenLabs voice tool routes", () => {
   it("requires a non-empty shared secret", () => {
     expect(voiceToolAuthorized("correct", "correct")).toBe(true);
@@ -254,6 +271,7 @@ describe("ElevenLabs voice tool routes", () => {
       conversationId: "conv_test",
       idempotencyKey: "conv_test:booking",
     };
+    await offerSlot(store, calendar, input.conversationId, input.start);
     const first = await runVoiceTool(store, "create-booking", input, { store, calendar });
     const second = await runVoiceTool(store, "create-booking", input, { store, calendar });
     expect(first.status).toBe(200);
@@ -319,7 +337,7 @@ describe("ElevenLabs voice tool routes", () => {
   it("does not book an unavailable or unconfirmed slot", async () => {
     const store = new MemoryStore();
     await seedStore(store);
-    const calendar = new FakeCalendar([]);
+    const calendar = new FakeCalendar(["2026-09-02T10:00:00.000Z"]);
     const base = {
       clientId: BLADES_HAIR_ID,
       eventTypeSlug: "30min",
@@ -328,9 +346,11 @@ describe("ElevenLabs voice tool routes", () => {
       attendeePhone: "+923424432411",
       conversationId: "conv_test",
     };
+    await offerSlot(store, calendar, base.conversationId, base.start);
     expect(
       (await runVoiceTool(store, "create-booking", { ...base, callerConfirmed: false }, { store, calendar })).body.error,
     ).toBe("caller_confirmation_required");
+    calendar.slots = [];
     expect(
       (await runVoiceTool(store, "create-booking", { ...base, callerConfirmed: true }, { store, calendar })).body.error,
     ).toBe("slot_no_longer_free");
@@ -387,8 +407,9 @@ describe("ElevenLabs voice tool routes", () => {
     await seedStore(store);
     const calendar = new FakeCalendar(["2026-09-02T10:00:00.000Z"]);
     calendar.create = () => {
-      throw new Error("Cal.com timeout");
+      throw new Error("Cal.com HTTP 400: attendeeEmail=jason@example.com");
     };
+    await offerSlot(store, calendar, "conv_uk_mobile", "2026-09-02T10:00:00.000Z");
     const result = await runVoiceTool(
       store,
       "create-booking",
@@ -404,10 +425,74 @@ describe("ElevenLabs voice tool routes", () => {
       },
       { store, calendar },
     );
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       status: 503,
       body: { ok: false, error: "booking_temporarily_unavailable" },
     });
+    expect(result.body.recoveryAction).toBe("retry_once_then_offer_callback");
+    const savedCall = await store.getCall("conv_uk_mobile");
+    expect(savedCall?.toolHistory.at(-1)?.result)
+      .toEqual({ error: "booking_temporarily_unavailable" });
+    expect(JSON.stringify(savedCall)).not.toContain("jason@example.com");
+  });
+
+  it("carries an accepted counter-offer, rejects guessed phone digits, and books once", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    const offeredStart = "2026-09-21T14:00:00.000Z"; // 3pm Europe/London (BST)
+    const calendar = new FakeCalendar([offeredStart]);
+    const conversationId = "conv_jason_counter_offer";
+    await offerSlot(store, calendar, conversationId, offeredStart);
+
+    const base = {
+      eventTypeSlug: "30min",
+      attendeeName: "Jason",
+      callerConfirmed: true,
+      conversationId,
+    };
+    const wrongOriginalTime = await runVoiceTool(store, "create-booking", {
+      ...base,
+      start: "2026-09-21T15:00:00.000Z",
+      attendeePhone: "07443 245443",
+    }, { store, calendar });
+    expect(wrongOriginalTime).toMatchObject({
+      status: 409,
+      body: { error: "slot_not_offered", recoveryAction: "check_availability_and_offer_returned_slot" },
+    });
+
+    const guessedPhone = await runVoiceTool(store, "create-booking", {
+      ...base,
+      start: "2026-09-21T15:00:00+01:00",
+      attendeePhone: "4443245443",
+    }, { store, calendar });
+    expect(guessedPhone).toMatchObject({
+      status: 400,
+      body: {
+        error: "attendee_phone_invalid_ask_for_complete_number_from_beginning",
+        recoveryAction: "ask_for_complete_phone_from_beginning",
+      },
+    });
+
+    const corrected = {
+      ...base,
+      start: "2026-09-21T15:00:00+01:00",
+      attendeePhone: "07443 245443",
+    };
+    const first = await runVoiceTool(store, "create-booking", corrected, { store, calendar });
+    const replay = await runVoiceTool(store, "create-booking", corrected, { store, calendar });
+    expect(first).toMatchObject({ status: 200, body: { bookingUid: "bk_1" } });
+    expect(replay).toMatchObject({ status: 200, body: { bookingUid: "bk_1" } });
+    expect(calendar.bookings.size).toBe(1);
+    expect(calendar.bookings.get("bk_1")?.start).toBe(offeredStart);
+    expect((await store.getCall(conversationId))?.toolHistory).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ result: { error: "slot_not_offered" } }),
+        expect.objectContaining({
+          result: { error: "attendee_phone_invalid_ask_for_complete_number_from_beginning" },
+        }),
+        expect.objectContaining({ result: expect.objectContaining({ bookingUid: "bk_1" }) }),
+      ]),
+    );
   });
 
   it("keeps a successful booking when WhatsApp confirmation enqueue fails", async () => {
@@ -423,6 +508,7 @@ describe("ElevenLabs voice tool routes", () => {
     await seedStore(store);
     await enableWhatsApp(store);
     const calendar = new FakeCalendar(["2026-09-02T10:00:00.000Z"]);
+    await offerSlot(store, calendar, "conv_wa_fail", "2026-09-02T10:00:00.000Z");
     const result = await runVoiceTool(
       store,
       "create-booking",
@@ -457,6 +543,7 @@ describe("ElevenLabs voice tool routes", () => {
       conversationId: "conv_wa_dup",
       idempotencyKey: "conv_wa_dup:booking",
     };
+    await offerSlot(store, calendar, input.conversationId, input.start);
     const first = await runVoiceTool(store, "create-booking", input, { store, calendar });
     const second = await runVoiceTool(store, "create-booking", input, { store, calendar });
     expect(first.body.bookingUid).toBe("bk_1");
@@ -474,6 +561,7 @@ describe("ElevenLabs voice tool routes", () => {
     await enableWhatsApp(store);
     const start = "2026-09-20T10:00:00.000Z";
     const calendar = new FakeCalendar([start]);
+    await offerSlot(store, calendar, "conv_wa_reminder", start);
     const result = await runVoiceTool(
       store,
       "create-booking",

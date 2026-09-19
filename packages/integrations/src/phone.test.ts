@@ -31,6 +31,9 @@ describe("isPlausibleCustomerPhone", () => {
   it("requires complete UK and Pakistan numbers", () => {
     expect(isPlausibleCustomerPhone("+44 34435609")).toBe(false);
     expect(isPlausibleCustomerPhone("443443532")).toBe(false);
+    expect(isPlausibleCustomerPhone("4443245443")).toBe(false);
+    expect(isPlausibleCustomerPhone("074443245443")).toBe(false);
+    expect(isPlausibleCustomerPhone("07443 245443")).toBe(true);
     expect(isPlausibleCustomerPhone("07443 443532")).toBe(true);
     expect(isPlausibleCustomerPhone("0342 4432411")).toBe(true);
   });

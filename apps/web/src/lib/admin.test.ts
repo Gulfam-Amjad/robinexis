@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ClientSummary } from "@robinexis/api-contracts";
-import { filterClients, validateCreditAdjustment, validateServiceAction } from "./admin";
+import { filterClients, validateCreditAdjustment, validateServiceAction, whatsappAllowancePercent } from "./admin";
 
 const clients: ClientSummary[] = [
   { id: "client_1", slug: "blades-hair", businessName: "Blades Hair", published: true, serviceStatus: "active", onboardingStatus: "active" },
@@ -12,6 +12,12 @@ describe("admin helpers", () => {
     expect(filterClients(clients, "BLADES")).toEqual([clients[0]]);
     expect(filterClients(clients, "needs_attention")).toEqual([clients[1]]);
     expect(filterClients(clients, "  ")).toEqual(clients);
+  });
+
+  it("computes WhatsApp plan-allowance percent without inventing a limit", () => {
+    expect(whatsappAllowancePercent(125, 3000)).toBe(4);
+    expect(whatsappAllowancePercent(0, 0)).toBeUndefined();
+    expect(whatsappAllowancePercent(undefined, 3000)).toBeUndefined();
   });
 
   it("validates audited whole-minute credit adjustments", () => {

@@ -175,7 +175,7 @@ describe("text brain + fake calendar", () => {
         eventTypeSlug: "haircut-style",
         start: "2026-09-01T10:00:00.000Z",
         attendeeName: "Michael",
-        attendeePhone: "+44 34435609",
+        attendeePhone: "4443245443",
         idempotencyKey: "invalid-phone",
         callerConfirmed: true,
       },

@@ -215,7 +215,7 @@ function OverviewContent({ clientId }: { clientId: string }) {
         </Card>
         <Card className="panel">
           <SectionHeading title="Today’s bookings" description={`${todayBookings.length} appointment${todayBookings.length === 1 ? "" : "s"} returned`} action={<Link to={workspacePath(clientId, "bookings")} className="subtle-link">Open bookings <ChevronRight size={14} /></Link>} />
-          {bookings.isLoading ? <SkeletonRows count={3} /> : bookings.error ? <p className="muted">Bookings are temporarily unavailable.</p> : todayBookings.length ? <div className="team-list">{todayBookings.slice(0, 4).map((booking) => <div className="team-row" key={booking.uid}><CalendarCheck2 /><div><strong>{booking.attendeeName || "Customer"}</strong><small>{formatDate(booking.start, { hour: "2-digit", minute: "2-digit" })} · {booking.title || "Appointment"}</small></div><Badge tone="success">{booking.status || "confirmed"}</Badge></div>)}</div> : <EmptyState icon={CalendarDays} title="No bookings today" description="New appointments made by your receptionist will appear here." />}
+          {bookings.isLoading ? <SkeletonRows count={3} /> : bookings.error ? <p className="muted">Bookings are temporarily unavailable.</p> : todayBookings.length ? <div className="team-list">{todayBookings.slice(0, 4).map((booking) => <div className="team-row" key={booking.uid}><CalendarCheck2 /><div><strong>{booking.attendeeName || "Customer"}</strong><small>{formatDate(booking.start, { hour: "2-digit", minute: "2-digit" })} · {booking.title || "Appointment"}</small></div><Badge tone="success">{booking.status || "confirmed"}</Badge></div>)}</div> : <EmptyState icon={CalendarDays} title="No bookings today" description="Appointments this receptionist books for this business will appear here." />}
         </Card>
       </div>
       <div className="overview-grid">
@@ -999,7 +999,7 @@ function CalendarContent({ clientId }: { clientId: string }) {
   const nextBooking = [...(bookings.data || [])].sort((left, right) => new Date(left.start).getTime() - new Date(right.start).getTime())[0];
   return (
     <>
-      <PageHeader eyebrow="Bookings" title="Bookings and availability in one view" description="Find customers, review confirmed appointments, and make intentional changes." actions={<Link className="button button-secondary button-md" to={workspacePath(clientId, "bookings/settings")}><Link2 size={15} /> Booking rules</Link>} />
+      <PageHeader eyebrow="Bookings" title="This workspace’s bookings and availability" description="Appointments for this business only. Cal.com stays in the background as the booking engine — staff do not need that admin login." actions={<Link className="button button-secondary button-md" to={workspacePath(clientId, "bookings/settings")}><Link2 size={15} /> Booking rules</Link>} />
       <div className="calendar-summary">
         <Card><CalendarCheck2 /><div><strong>{bookings.data?.length || 0}</strong><span>Appointments returned</span></div></Card>
         <Card><Clock3 /><div><strong>{nextBooking ? formatDate(nextBooking.start, { day: "2-digit", month: "short" }) : "—"}</strong><span>Next appointment</span></div></Card>
@@ -1129,7 +1129,7 @@ function KnowledgeContent({ clientId }: { clientId: string }) {
 
 function calendarModeLabel(mode: NonNullable<PublicCalendarConnection["mode"]>): string {
   if (mode === "managed") return "Managed Cal.com";
-  if (mode === "shared") return "Robinexis calendar";
+  if (mode === "shared") return "Robinexis Cal.com backend";
   return "Existing Cal.com";
 }
 
@@ -1260,8 +1260,8 @@ function IntegrationsContent({ clientId }: { clientId: string }) {
         : <a className="button button-secondary button-sm" href="mailto:hello@robinexis.com?subject=Robinexis%20integration%20setup">Configure server-side</a>)}</Card>; })}</div>
       {canEditWorkspace && <Card className="form-card">
         <SectionHeading title="Booking calendar" description={calendarModes.oauth || calendarModes.managed
-          ? "Connect an existing Cal.com account or create a tenant-isolated managed user. Tokens stay encrypted on the server."
-          : "Bookings run on the Robinexis Cal.com account with booking types created for this workspace only. Credentials stay server-side."} />
+          ? "Connect this customer’s Cal.com account, or create a tenant-isolated managed user. Tokens stay encrypted on the server."
+          : "Cal.com is the operator backend. This workspace only books its own event types. For a live customer, connect their calendar instead of sharing the Robinexis account."} />
         {calcomConnection.isLoading ? <LoadingState label="Checking calendar connection…" /> : <>
           <div className="form-actions">
             <Badge tone={calcomConnection.data?.status === "active" ? "success" : "neutral"}>

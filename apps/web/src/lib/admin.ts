@@ -9,6 +9,13 @@ export function filterClients(clients: ClientSummary[], search: string): ClientS
   );
 }
 
+export function whatsappAllowancePercent(usedMessages?: number, includedMessages?: number): number | undefined {
+  if (!Number.isFinite(usedMessages) || !Number.isFinite(includedMessages) || !includedMessages || includedMessages <= 0) {
+    return undefined;
+  }
+  return Math.min(100, Math.round((usedMessages as number / includedMessages) * 100));
+}
+
 export function validateCreditAdjustment(minutesInput: string, reasonInput: string) {
   const minutes = Number(minutesInput);
   const reason = reasonInput.trim();

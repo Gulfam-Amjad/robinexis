@@ -32,6 +32,7 @@ describe("provider comparison routes", () => {
   });
 
   it("reports the exact missing runtime settings without inventing readiness", async () => {
+    clearRuntime();
     const store = new MemoryStore();
     await seedStore(store);
     const result = await providerComparisonReadiness(store);
@@ -97,4 +98,18 @@ function configureRuntime() {
   vi.stubEnv("DEEPGRAM_API_KEY", "deepgram-key");
   vi.stubEnv("GROQ_API_KEY", "groq-key");
   vi.stubEnv("ELEVENLABS_API_KEY", "eleven-key");
+}
+
+function clearRuntime() {
+  for (const name of [
+    "VOICE_RUNTIME_ENABLED",
+    "LIVEKIT_URL",
+    "LIVEKIT_API_KEY",
+    "LIVEKIT_API_SECRET",
+    "DEEPGRAM_API_KEY",
+    "GROQ_API_KEY",
+    "ELEVENLABS_API_KEY",
+  ]) {
+    vi.stubEnv(name, "");
+  }
 }

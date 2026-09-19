@@ -1,7 +1,11 @@
 export { createToolExecutor } from "./tools.js";
 export { FakeCalendar } from "./fakeCalendar.js";
 export * as calcom from "./calcom.js";
-export { checkAvailability, maskCalcomUsername } from "./calcom.js";
+export {
+  bookingBelongsToTenant,
+  checkAvailability,
+  maskCalcomUsername,
+} from "./calcom.js";
 export {
   CALCOM_SCOPES,
   calcomOAuthAuthorizeUrl,
@@ -113,17 +117,34 @@ export {
 } from "./notificationQueue.js";
 export {
   applyManagedWhatsAppStatus,
+  configureManagedWhatsAppSender,
   enqueueWhatsAppBookingConfirmation,
   enqueueWhatsAppBookingReminder,
+  formatWhatsAppAppointmentTime,
   enqueueWhatsAppCancellationFollowup,
   ingestManagedWhatsApp,
+  managedWhatsAppReadiness,
   normalizeWhatsAppAddress,
   resolveManagedWhatsAppTenant,
   resolveUniqueManagedWhatsAppSender,
   validateManagedWhatsAppWebhook,
   type WhatsAppInboundProcessor,
 } from "./whatsapp.js";
-export { hasRemainingMessageAllowance, messageAllowancePeriod } from "./messageAllowance.js";
+export {
+  ENABLE_MANAGED_WHATSAPP,
+  ROBINEXIS_WHATSAPP_TEMPLATES,
+  contentTemplateCreateBody,
+  findExistingContentSid,
+  managedWhatsAppWebhookUrls,
+  upsertEnvAssignments,
+  whatsappEnvUpdates,
+} from "./whatsappProvisioning.js";
+export type { WhatsAppContentTemplateSpec } from "./whatsappProvisioning.js";
+export {
+  hasRemainingMessageAllowance,
+  messageAllowancePeriod,
+  whatsappAllowanceSnapshot,
+} from "./messageAllowance.js";
 export {
   processInboundWhatsAppMessages,
   processScheduledWhatsAppFollowups,

@@ -26,6 +26,7 @@ export default defineRailway(() => {
     STRIPE_SECRET_KEY: preserve(),
     TWILIO_ACCOUNT_SID: preserve(),
     TWILIO_AUTH_TOKEN: preserve(),
+    WHATSAPP_WABA_ID: preserve(),
     WHATSAPP_MANAGED_SENDERS_JSON: preserve(),
     WHATSAPP_OUTSIDE_WINDOW_CONTENT_SID: preserve(),
     WHATSAPP_BOOKING_CONFIRMATION_CONTENT_SID: preserve(),

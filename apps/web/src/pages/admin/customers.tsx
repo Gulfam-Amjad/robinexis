@@ -183,6 +183,9 @@ export function AdminCustomerDetailPage() {
           <div><dt>Subscription</dt><dd className="capitalize">{usage?.subscriptionStatus?.replaceAll("_", " ") || "Unavailable"}</dd></div>
           <div><dt>Used this month</dt><dd>{usage ? `${Math.round(usage.usedMinutes)} minutes` : "Unavailable"}</dd></div>
           <div><dt>Customer allowance remaining</dt><dd>{usage ? `${Math.round(usage.remainingMinutes)} minutes` : "Unavailable"}</dd></div>
+          <div><dt>WhatsApp messages remaining</dt><dd>{usage?.includedMessages
+            ? `${usage.remainingMessages ?? Math.max(0, usage.includedMessages - (usage.usedMessages ?? 0))} of ${usage.includedMessages}`
+            : "0 included on this plan"}</dd></div>
         </dl>
         <div className="row-actions"><Button variant="secondary" disabled={serviceAction.isPending} onClick={() => setServiceDialog(client.serviceStatus === "paused" ? "reactivate" : "suspend")}>{client.serviceStatus === "paused" ? "Reactivate service" : "Suspend service"}</Button><LinkButton to={`/admin/setup/${client.id}`} variant="secondary">Setup console</LinkButton></div>
       </Card>

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { llm, type FunctionTool } from "@livekit/agents";
 import { TOOL_DEFINITIONS, type ToolName } from "@robinexis/tool-contracts";
 import type { ToolHistoryItem } from "./contracts.js";
@@ -27,6 +28,7 @@ export interface ToolBridgeOptions {
 export interface BookingLedger {
   eventTypeSlug?: string;
   start?: string;
+  offeredSlots?: string[];
   attendeeName?: string;
   attendeePhone?: string;
   callerConfirmed?: boolean;
@@ -46,7 +48,7 @@ export function createToolBridge(options: ToolBridgeOptions): FunctionTool<any>[
     parameters: JSON.parse(JSON.stringify(definition.input_schema)),
     execute: async (args: Record<string, unknown>) => {
       const startedAt = Date.now();
-      const input = { ...args, conversationId: options.callId };
+      const input = prepareToolInput(definition.name, args, ledger, options.callId);
       delete (input as Record<string, unknown>).clientId;
       delete (input as Record<string, unknown>).tenantId;
       const item: ToolHistoryItem = {
@@ -108,7 +110,14 @@ export function rememberBookingState(
   result: unknown,
 ): BookingLedger {
   if (input.eventTypeSlug) ledger.eventTypeSlug = String(input.eventTypeSlug);
-  if (input.start) ledger.start = String(input.start);
+  const slots = result && typeof result === "object"
+    ? (result as Record<string, unknown>).slots
+    : undefined;
+  if (Array.isArray(slots)) {
+    ledger.offeredSlots = slots.filter((slot): slot is string => typeof slot === "string");
+  } else if (input.start) {
+    ledger.start = String(input.start);
+  }
   if (input.attendeeName) ledger.attendeeName = String(input.attendeeName);
   if (input.attendeePhone) ledger.attendeePhone = String(input.attendeePhone);
   if (input.callerConfirmed === true) ledger.callerConfirmed = true;
@@ -118,6 +127,41 @@ export function rememberBookingState(
     if (bookingUid) ledger.bookingUid = String(bookingUid);
   }
   return ledger;
+}
+
+export function prepareToolInput(
+  name: ToolName,
+  args: Record<string, unknown>,
+  ledger: BookingLedger,
+  callId: string,
+): Record<string, unknown> {
+  const input = { ...args, conversationId: callId };
+  if (name !== "create_booking") return input;
+
+  if (!input.eventTypeSlug && ledger.eventTypeSlug) input.eventTypeSlug = ledger.eventTypeSlug;
+  if (!input.attendeeName && ledger.attendeeName) input.attendeeName = ledger.attendeeName;
+  if (!input.attendeePhone && ledger.attendeePhone) input.attendeePhone = ledger.attendeePhone;
+
+  const requestedStart = String(input.start || "");
+  const canonicalStart = ledger.offeredSlots?.find(
+    (slot) => Number.isFinite(Date.parse(requestedStart)) &&
+      Date.parse(slot) === Date.parse(requestedStart),
+  );
+  if (canonicalStart) input.start = canonicalStart;
+
+  if (!input.idempotencyKey) {
+    const fingerprint = JSON.stringify({
+      callId,
+      eventTypeSlug: input.eventTypeSlug || "",
+      start: input.start || "",
+      attendeeName: String(input.attendeeName || "").trim().toLowerCase(),
+      attendeePhone: String(input.attendeePhone || "").replace(/\D/g, ""),
+    });
+    input.idempotencyKey = `runtime-booking:${
+      createHash("sha256").update(fingerprint).digest("hex")
+    }`;
+  }
+  return input;
 }
 
 function withConversationState(result: unknown, ledger: BookingLedger): unknown {

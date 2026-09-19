@@ -66,7 +66,9 @@ const workspaceIcons: Record<WorkspaceNavigationIcon, LucideIcon> = {
 export function Logo({ light = false }: { light?: boolean }) {
   return (
     <Link className={`logo ${light ? "logo-light" : ""}`} to="/">
-      <span className="logo-mark"><Sparkles size={18} /></span>
+      <span className="logo-mark">
+        <img src="/logo.png" alt="" width={34} height={34} />
+      </span>
       <span>Robinexis</span>
     </Link>
   );

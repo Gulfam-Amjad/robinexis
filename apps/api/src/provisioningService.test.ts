@@ -131,7 +131,7 @@ function fakeManagement() {
       secret_id: `secret_${++secret}`,
       name: "tenant-secret",
     })),
-    createTool: vi.fn(async () => ({ tool_id: `tool_${++tool}` })),
+    createTool: vi.fn(async (_config: unknown) => ({ tool_id: `tool_${++tool}` })),
     createAgent: vi.fn(async () => ({ agent_id: `agent_${++agent}` })),
     updateAgent: vi.fn(async (agentId: string) => ({ agent_id: agentId })),
     importTwilioNumber: vi.fn(async () => ({ phone_number_id: "phone_1" })),
@@ -202,6 +202,21 @@ describe("tenant agent provisioning", () => {
     expect(first.providerSecretId).not.toBe(second.providerSecretId);
     expect(elevenLabs.createAgent).toHaveBeenCalledTimes(2);
     expect(elevenLabs.createWorkspaceSecret).toHaveBeenCalledTimes(2);
+    const bookingConfig = elevenLabs.createTool.mock.calls
+      .map(([config]) => config as {
+        name: string;
+        api_schema: {
+          request_body_schema: {
+            required: string[];
+            properties: { attendeePhone: { description: string } };
+          };
+        };
+      })
+      .find((config) => config.name === "create_booking")!;
+    expect(bookingConfig.api_schema.request_body_schema.required)
+      .not.toContain("idempotencyKey");
+    expect(bookingConfig.api_schema.request_body_schema.properties.attendeePhone.description)
+      .toContain("never add or infer digits");
     const firstAgent = await store.getAgentInstance(
       SMITH_ENGLAND_ID,
       first.agentInstanceId,

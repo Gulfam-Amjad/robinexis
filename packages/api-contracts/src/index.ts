@@ -375,6 +375,8 @@ export interface AdminSummary {
   month: string;
   mrrPence: number;
   totalUsedMinutes: number;
+  totalUsedMessages?: number;
+  totalIncludedMessages?: number;
   totalFailedCalls: number;
   setupQueueCount: number;
   failedBillingEvents: Array<{
@@ -391,6 +393,10 @@ export interface AdminSummary {
     usedMinutes: number;
     remainingMinutes: number;
     failedCalls: number;
+    includedMessages?: number;
+    usedMessages?: number;
+    remainingMessages?: number;
+    whatsappEnabled?: boolean;
   }>;
 }
 

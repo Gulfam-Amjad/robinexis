@@ -7,11 +7,14 @@ import {
 } from "./notificationQueue.js";
 import {
   applyManagedWhatsAppStatus,
+  configureManagedWhatsAppSender,
   enqueueWhatsAppBookingConfirmation,
   enqueueWhatsAppCancellationFollowup,
+  formatWhatsAppAppointmentTime,
   ingestManagedWhatsApp,
   validateManagedWhatsAppWebhook,
 } from "./whatsapp.js";
+import { ENABLE_MANAGED_WHATSAPP } from "./whatsappProvisioning.js";
 
 const now = "2026-09-17T12:00:00.000Z";
 
@@ -93,6 +96,10 @@ function inbound(to: string, sid: string, body: string, from = "whatsapp:+447700
 }
 
 describe("managed Twilio WhatsApp transport", () => {
+  it("formats reminder times in Europe/London wall clock", () => {
+    expect(formatWhatsAppAppointmentTime("2026-09-20T12:00:00.000Z")).toMatch(/1:00 PM, Sun 20 Sep/);
+    expect(formatWhatsAppAppointmentTime("not-a-date")).toBe("not-a-date");
+  });
   beforeEach(() => {
     process.env.WHATSAPP_ENABLED = "true";
     process.env.PLAN_PRO_INCLUDED_MESSAGES = "3000";
@@ -425,7 +432,7 @@ describe("managed Twilio WhatsApp transport", () => {
   it("schedules one approved booking reminder and replaces it with a cancellation follow-up", async () => {
     process.env.WHATSAPP_BOOKING_CONFIRMATION_CONTENT_SID = "HXconfirmation";
     process.env.WHATSAPP_BOOKING_REMINDER_CONTENT_SID = "HXreminder";
-    process.env.WHATSAPP_BOOKING_REMINDER_LEAD_HOURS = "24";
+    process.env.WHATSAPP_BOOKING_REMINDER_LEAD_HOURS = "1";
     process.env.WHATSAPP_CANCELLATION_FOLLOWUP_CONTENT_SID = "HXcancel";
     process.env.WHATSAPP_CANCELLATION_FOLLOWUP_DELAY_HOURS = "2";
     const store = await configuredStore();
@@ -442,8 +449,15 @@ describe("managed Twilio WhatsApp transport", () => {
     expect(await store.listScheduledFollowups("tenant_a")).toMatchObject([{
       idempotencyKey: "whatsapp:reminder:booking_123",
       status: "pending",
-      scheduledAt: "2026-09-19T12:00:00.000Z",
-      payload: { contentSid: "HXreminder", kind: "booking_reminder" },
+      scheduledAt: "2026-09-20T11:00:00.000Z",
+      payload: {
+        contentSid: "HXreminder",
+        kind: "booking_reminder",
+        contentVariables: {
+          "1": formatWhatsAppAppointmentTime("2026-09-20T12:00:00.000Z"),
+          "2": "booking_123",
+        },
+      },
     }]);
 
     const cancellation = await enqueueWhatsAppCancellationFollowup({
@@ -463,5 +477,39 @@ describe("managed Twilio WhatsApp transport", () => {
         payload: expect.objectContaining({ contentSid: "HXcancel", kind: "cancellation_followup" }),
       }),
     ]));
+  });
+
+  it("assigns a unique sender only to an active Pro tenant", async () => {
+    const store = new MemoryStore();
+    await store.upsertClient({ ...client("tenant_c"), phoneAcquisitionMode: "customer_oauth" });
+    expect(await configureManagedWhatsAppSender({
+      store,
+      clientId: "tenant_c",
+      sender: "+14155238888",
+      actorId: "operator",
+      confirmation: ENABLE_MANAGED_WHATSAPP,
+    })).toMatchObject({ ok: false, error: "whatsapp_pro_subscription_required" });
+    await store.upsertSubscription({
+      id: "subscription_tenant_c",
+      clientId: "tenant_c",
+      provider: "internal",
+      planTier: "pro",
+      status: "active",
+      currentPeriodStart: "2026-09-01T00:00:00.000Z",
+      currentPeriodEnd: "2026-10-01T00:00:00.000Z",
+      cancelAtPeriodEnd: false,
+      metadata: {},
+      createdAt: now,
+      updatedAt: now,
+    });
+    expect(await configureManagedWhatsAppSender({
+      store,
+      clientId: "tenant_c",
+      sender: "+14155238888",
+      actorId: "operator",
+      confirmation: ENABLE_MANAGED_WHATSAPP,
+    })).toEqual({ ok: true });
+    expect((await store.getClient("tenant_c"))?.phoneAcquisitionMode).toBe("robinexis_account");
+    expect((await store.getTenantFeatureEntitlements("tenant_c"))?.whatsappEnabled).toBe(true);
   });
 });

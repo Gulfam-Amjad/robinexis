@@ -55,6 +55,9 @@ import {
   replayStripeEvent,
   enqueueLifecycleEmail,
   enqueueWhatsAppCancellationFollowup,
+  configureManagedWhatsAppSender,
+  managedWhatsAppReadiness,
+  whatsappAllowanceSnapshot,
   twilioOAuthAuthorizeUrl,
   verifyTwilioOAuthState,
   calcomConnectionModes,
@@ -1041,124 +1044,19 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
     }
     if (req.method === "PUT") {
       const body = await readJson<{ sender?: unknown; confirmation?: unknown }>(ctx);
-      const sender = typeof body.sender === "string"
-        ? normalizeWhatsAppAddress(body.sender)
-        : undefined;
-      if (!sender) {
-        send(res, 400, { error: "valid_whatsapp_sender_required" });
-        return true;
-      }
-      if (body.confirmation !== "ENABLE_MANAGED_WHATSAPP") {
-        send(res, 409, { error: "managed_whatsapp_confirmation_required" });
-        return true;
-      }
-      const subscription = await store.getCurrentSubscription(id);
-      if (!subscription ||
-          (subscription.status !== "active" && subscription.status !== "trialing") ||
-          planDefinition(subscription.planTier).includedMessages <= 0) {
-        send(res, 409, { error: "whatsapp_pro_subscription_required" });
-        return true;
-      }
-      for (const otherClient of await store.listClients()) {
-        if (otherClient.id === id) continue;
-        const collision = (await store.listProviderResources(otherClient.id)).some((item) =>
-          item.provider === "twilio" &&
-          item.resourceType === "whatsapp_sender" &&
-          item.lifecycleStatus !== "deleted" &&
-          normalizeWhatsAppAddress(String(item.metadata.address || item.providerResourceId || "")) === sender);
-        if (collision) {
-          send(res, 409, { error: "whatsapp_sender_already_assigned" });
-          return true;
-        }
-      }
-      const now = new Date().toISOString();
-      const existingResource = (await store.listProviderResources(id)).find((item) =>
-        item.provider === "twilio" && item.resourceType === "whatsapp_sender");
-      await store.upsertProviderResource({
-        id: existingResource?.id || `provider_twilio_whatsapp_${id}`,
+      const configured = await configureManagedWhatsAppSender({
+        store,
         clientId: id,
-        provider: "twilio",
-        resourceType: "whatsapp_sender",
-        providerResourceId: sender,
-        lifecycleStatus: "active",
-        metadata: { ...existingResource?.metadata, address: sender },
-        createdAt: existingResource?.createdAt || now,
-        updatedAt: now,
-      });
-      await store.upsertClient({ ...managedClient, phoneAcquisitionMode: "robinexis_account" });
-      const existingFeatures = await store.getTenantFeatureEntitlements(id);
-      await store.upsertTenantFeatureEntitlements({
-        clientId: id,
-        whatsappEnabled: true,
-        autoMinuteBlocksEnabled: existingFeatures?.autoMinuteBlocksEnabled ?? false,
-        createdAt: existingFeatures?.createdAt || now,
-        updatedAt: now,
-      });
-      await store.appendOperatorAudit({
-        id: newId("audit_"),
-        clientId: id,
+        sender: typeof body.sender === "string" ? body.sender : "",
         actorId: actor.subject,
-        action: "whatsapp.managed_sender_configured",
-        detail: { senderConfigured: true },
-        createdAt: now,
+        confirmation: typeof body.confirmation === "string" ? body.confirmation : undefined,
       });
+      if (!configured.ok) {
+        send(res, configured.status, { error: configured.error });
+        return true;
+      }
     }
-    const [features, resources, endpoints] = await Promise.all([
-      store.getTenantFeatureEntitlements(id),
-      store.listProviderResources(id),
-      store.listPhoneEndpoints(id),
-    ]);
-    const resource = resources.find((item) =>
-      item.provider === "twilio" && item.resourceType === "whatsapp_sender");
-    const endpoint = endpoints.find((item) =>
-      item.provider === "twilio" &&
-      (item.metadata.whatsappEnabled === true || item.metadata.channel === "whatsapp"));
-    const configured = Boolean(resource || endpoint);
-    const senderStatus = resource
-      ? resource.lifecycleStatus === "active" ? "active"
-        : resource.lifecycleStatus === "failed" ? "failed" : "pending"
-      : endpoint
-        ? endpoint.status === "active" ? "active"
-          : endpoint.status === "failed" ? "failed" : "pending"
-        : "not_configured";
-    const bookingConfirmationConfigured =
-      Boolean(process.env.WHATSAPP_BOOKING_CONFIRMATION_CONTENT_SID?.trim());
-    const bookingReminderConfigured =
-      Boolean(process.env.WHATSAPP_BOOKING_REMINDER_CONTENT_SID?.trim());
-    const cancellationFollowupConfigured =
-      Boolean(process.env.WHATSAPP_CANCELLATION_FOLLOWUP_CONTENT_SID?.trim());
-    const outsideWindowConfigured =
-      Boolean(process.env.WHATSAPP_OUTSIDE_WINDOW_CONTENT_SID?.trim());
-    const configuredTemplateCount = [
-      bookingConfirmationConfigured,
-      bookingReminderConfigured,
-      cancellationFollowupConfigured,
-      outsideWindowConfigured,
-    ].filter(Boolean).length;
-    const globallyEnabled = process.env.WHATSAPP_ENABLED === "true";
-    const tenantEnabled = features?.whatsappEnabled ?? false;
-    send(res, 200, {
-      clientId: id,
-      sender: {
-        status: senderStatus,
-        configured,
-        updatedAt: resource?.updatedAt || endpoint?.updatedAt,
-      },
-      templates: {
-        status: configuredTemplateCount === 4
-          ? "configured"
-          : configuredTemplateCount > 0 ? "partial" : "not_configured",
-        bookingConfirmationConfigured,
-        bookingReminderConfigured,
-        cancellationFollowupConfigured,
-        outsideWindowConfigured,
-      },
-      runtime: {
-        status: globallyEnabled && tenantEnabled && senderStatus === "active" ? "active" : "disabled",
-        globallyEnabled,
-        tenantEnabled,
-      },
-    });
+    send(res, 200, await managedWhatsAppReadiness({ store, clientId: id }));
     return true;
   }
 
@@ -1177,6 +1075,8 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       const ledger = await store.listCreditLedger(client.id);
       const plan = subscription?.planTier ||
         (isPlanTier(client.subscribedProduct) ? client.subscribedProduct : "starter");
+      const messaging = await whatsappAllowanceSnapshot(store, client.id, plan);
+      const features = await store.getTenantFeatureEntitlements(client.id);
       return {
         clientId: client.id,
         plan,
@@ -1187,6 +1087,10 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
         failedCalls: calls.filter((call) =>
           call.status === "failed" && call.createdAt.startsWith(month)
         ).length,
+        includedMessages: messaging.includedMessages,
+        usedMessages: messaging.usedMessages,
+        remainingMessages: messaging.remainingMessages,
+        whatsappEnabled: features?.whatsappEnabled ?? false,
       };
     }));
     const mrrPence = items.reduce((sum, item) => {
@@ -1197,6 +1101,8 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       month,
       mrrPence,
       totalUsedMinutes: items.reduce((sum, item) => sum + item.usedMinutes, 0),
+      totalUsedMessages: items.reduce((sum, item) => sum + item.usedMessages, 0),
+      totalIncludedMessages: items.reduce((sum, item) => sum + item.includedMessages, 0),
       totalFailedCalls: items.reduce((sum, item) => sum + item.failedCalls, 0),
       failedBillingEvents: failedBillingEvents.map((event) => ({
         id: event.id,
@@ -3700,6 +3606,7 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
   if (route === "/calendar/bookings" && req.method === "GET") {
     const client = await requireClient(ctx, clientId(url));
     if (!client) return true;
+    const mappings = await store.listCalendarEventTypes(client.id);
     const projected = (await store.listBookingRecords(client.id)).map((booking) => ({
       uid: booking.providerBookingId || booking.id,
       title: booking.serviceSlug,
@@ -3710,6 +3617,7 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       attendeeEmail: booking.attendeeEmail,
       sourceCallId: booking.callId,
     }));
+    const knownBookingUids = projected.map((booking) => booking.uid).filter(Boolean);
     let tenant;
     try {
       tenant = (await resolveCalcomTenantConnection(store, client)).tenant;
@@ -3720,7 +3628,12 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
     {
       try {
         const result = await calcom.listBookings(tenant, { status: "upcoming" });
-        const remote = result.bookings.map((booking) => ({
+        const remote = result.bookings
+          .filter((booking) => calcom.bookingBelongsToTenant(booking, {
+            eventTypes: mappings,
+            knownBookingUids,
+          }))
+          .map((booking) => ({
             uid: booking.uid,
             title: booking.title,
             start: booking.start,
@@ -3764,31 +3677,45 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       return true;
     }
     const tenant = (await resolveCalcomTenantConnection(store, client)).tenant;
+    const bookingUid = calendarAction[1];
+    const mappings = await store.listCalendarEventTypes(client.id);
+    const projectedMatch = (await store.listBookingRecords(client.id))
+      .find((booking) => booking.providerBookingId === bookingUid);
+    if (!projectedMatch) {
+      try {
+        const remoteBooking = await calcom.getBooking(tenant, bookingUid);
+        if (!calcom.bookingBelongsToTenant(remoteBooking, { eventTypes: mappings })) {
+          send(res, 404, { error: "booking_not_found" });
+          return true;
+        }
+      } catch {
+        send(res, 404, { error: "booking_not_found" });
+        return true;
+      }
+    }
     const result = calendarAction[2] === "cancel"
-      ? await calcom.cancelBooking(tenant, calendarAction[1])
+      ? await calcom.cancelBooking(tenant, bookingUid)
       : await calcom.rescheduleBooking(tenant, {
-          bookingUid: calendarAction[1],
+          bookingUid,
           start: String(body.newStart || body.start || ""),
         });
-    const projected = (await store.listBookingRecords(client.id))
-      .find((booking) => booking.providerBookingId === calendarAction[1]);
-    if (projected) {
-      if (calendarAction[2] === "cancel") projected.status = "cancelled";
+    if (projectedMatch) {
+      if (calendarAction[2] === "cancel") projectedMatch.status = "cancelled";
       else {
         const nextStart = String(body.newStart || body.start || "");
-        const duration = Date.parse(projected.endsAt) - Date.parse(projected.startsAt);
-        projected.startsAt = new Date(nextStart).toISOString();
-        projected.endsAt = new Date(Date.parse(nextStart) + Math.max(0, duration)).toISOString();
+        const duration = Date.parse(projectedMatch.endsAt) - Date.parse(projectedMatch.startsAt);
+        projectedMatch.startsAt = new Date(nextStart).toISOString();
+        projectedMatch.endsAt = new Date(Date.parse(nextStart) + Math.max(0, duration)).toISOString();
       }
-      projected.updatedAt = new Date().toISOString();
-      await store.saveBookingRecord(projected);
-      if (calendarAction[2] === "cancel" && projected.attendeePhone) {
+      projectedMatch.updatedAt = new Date().toISOString();
+      await store.saveBookingRecord(projectedMatch);
+      if (calendarAction[2] === "cancel" && projectedMatch.attendeePhone) {
         try {
           await enqueueWhatsAppCancellationFollowup({
             store,
             clientId: client.id,
-            attendeePhone: projected.attendeePhone,
-            bookingUid: calendarAction[1],
+            attendeePhone: projectedMatch.attendeePhone,
+            bookingUid,
           });
         } catch {
           // Calendar state is authoritative; a follow-up outbox failure must not undo it.

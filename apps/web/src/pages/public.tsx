@@ -17,7 +17,7 @@ import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { z } from "zod";
-import { PublicHeader } from "../components/layout";
+import { Logo, PublicHeader } from "../components/layout";
 import { Button, Card, Field } from "../components/ui";
 import { AUTH_REQUIRED } from "../lib/auth";
 import { api } from "../lib/api";
@@ -122,7 +122,7 @@ export function LandingPage() {
 }
 
 function LogoFooter() {
-  return <Link className="logo logo-light" to="/"><span className="logo-mark"><Sparkles size={18} /></span><span>Robinexis</span></Link>;
+  return <Logo light />;
 }
 
 const loginSchema = z.object({ email: z.string().email("Enter the allowlisted work email") });
@@ -431,7 +431,7 @@ export function SelfServeBillingPage() {
 function AuthShell({ title, copy, children }: { title: string; copy: string; children: React.ReactNode }) {
   return (
     <div className="auth-page">
-      <Link className="logo" to="/"><span className="logo-mark"><Sparkles size={18} /></span><span>Robinexis</span></Link>
+      <Logo />
       <div className="auth-layout">
         <section className="auth-card"><span className="eyebrow">Robinexis workspace</span><h1>{title}</h1><p>{copy}</p>{children}</section>
         <aside className="auth-aside"><div className="auth-quote"><Sparkles /><blockquote>“The calls that used to become voicemails now become conversations.”</blockquote><p>Built for teams who care about every caller.</p></div></aside>

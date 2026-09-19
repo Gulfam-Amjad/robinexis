@@ -322,7 +322,7 @@ test("all operator areas render against their backend contracts", async ({ page 
     ["/app/playground", "Hear your receptionist before customers do"],
     ["/app/calls", "Every conversation, accounted for"],
     ["/app/analytics", "Know what’s happening on the phone"],
-    ["/app/calendar", "Bookings and availability in one view"],
+    ["/app/calendar", "This workspace’s bookings and availability"],
     ["/app/calendar/settings", "Control when and how bookings happen"],
     ["/app/phone", "Ownership, routing and health"],
     ["/app/usage", "Know exactly what is included"],
