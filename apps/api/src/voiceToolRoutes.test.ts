@@ -559,7 +559,9 @@ describe("ElevenLabs voice tool routes", () => {
     const store = new MemoryStore();
     await seedStore(store);
     await enableWhatsApp(store);
-    const start = "2026-09-20T10:00:00.000Z";
+    const startDate = new Date(Date.now() + 48 * 60 * 60 * 1_000);
+    const start = startDate.toISOString();
+    const reminderAt = new Date(startDate.getTime() - 60 * 60 * 1_000).toISOString();
     const calendar = new FakeCalendar([start]);
     await offerSlot(store, calendar, "conv_wa_reminder", start);
     const result = await runVoiceTool(
@@ -580,7 +582,7 @@ describe("ElevenLabs voice tool routes", () => {
     expect(await store.listScheduledFollowups(BLADES_HAIR_ID)).toMatchObject([{
       idempotencyKey: "whatsapp:reminder:bk_1",
       status: "pending",
-      scheduledAt: "2026-09-20T09:00:00.000Z",
+      scheduledAt: reminderAt,
       payload: expect.objectContaining({
         contentSid: "HXreminder",
         kind: "booking_reminder",
