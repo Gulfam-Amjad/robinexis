@@ -126,7 +126,8 @@ status: pilot-conditional
 
 ## Pilot closeout — 2026-09-20
 
-- `client/main` was fast-forwarded to verified revision `9a3e6c0`.
+- `client/main` was fast-forwarded and the final clean gate passed at revision
+  `cc21223`.
 - Railway API and worker are healthy with one configured/running replica each.
   API health reports `sharedRateLimit: not_configured`,
   `singleReplicaRequired: true`, and `redisRequired: false`.
@@ -154,6 +155,13 @@ status: pilot-conditional
   before dialing. Twilio has no separate valid verified caller ID, so the final
   controlled Blades call requires an external human phone or a dedicated
   sandbox number.
+- The final Node 24 CI gate passed from a clean checkout: secret scan (720
+  files), 327 backend tests, 50 web unit tests, 11 voice-runtime tests, 73
+  Playwright tests, production environment/CSP guards, typechecks and builds,
+  live production CSP, and zero production dependency vulnerabilities.
+- A disposable live Stripe Checkout Session resolved Pro to `19900` GBP and
+  was expired immediately. API health, all five legal routes, worker startup
+  and Stripe reconciliation also passed.
 
 ## Owner actions before unsupervised pilot use
 
@@ -165,7 +173,7 @@ status: pilot-conditional
 > [!warning] Deployment source authorization
 > Grant the Railway and Vercel GitHub Apps access to
 > `robinexisbackend-sys/robinexis_code`, then connect both projects to `main`.
-> Until then, deploys are manual and must record revision `9a3e6c0`.
+> Until then, deploys are manual and must record revision `cc21223`.
 
 > [!warning] Owner operations
 > Rotate the staging Stripe test secret shared in chat. Store the encrypted

@@ -47,7 +47,7 @@ npm run handover:gate
 
 Current rollback identifiers:
 
-- Source revision: `9a3e6c0`.
+- Source revision: `cc21223`.
 - Railway API: `64787ea4-fcdf-4415-8def-2bfa274dfda2`.
 - Railway worker: `3ef2a431-3e44-4891-b1a2-8f96821ff994`.
 - Vercel web: `dpl_5pnZXyPbEXH3eQ7RY3kJXrTX4Znj`.

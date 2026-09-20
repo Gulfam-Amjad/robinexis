@@ -65,3 +65,4 @@ Grep the recent history with: `grep "^## \[" log.md | tail -10`
 ## [2026-09-17] deploy | Added dark Cost Saver runtime: LiveKit + Deepgram STT + Groq brain + ElevenLabs Flash TTS; room/config/post-call tests passed, while Blades routing and cheap defaults remain off because no sandbox Twilio number exists
 ## [2026-09-17] save | Added the operator-only SaaS Voice Routing dashboard and guarded five-step provider switch; Blades remains locked and all 66 browser tests passed
 ## [2026-09-20] deploy | Aligned the SaaS with ROBINEXIS LTD legal/support details and moved Pro to £199 GBP/month across Stripe, API and web; no existing Pro subscriptions required proration
+## [2026-09-20] save | Closed the controlled-pilot handover at revision `cc21223`: clean automated gate and Cost Saver canaries passed, encrypted database snapshot verified; external Blades call, staging Stripe key rotation and deployment GitHub-App authorization remain owner actions

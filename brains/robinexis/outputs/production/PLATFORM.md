@@ -39,3 +39,17 @@ Price is archived; no existing Pro subscriptions required migration when the new
 The app publishes ROBINEXIS LTD company number 16468366 and its registered office at
 71-75 Shelton Street, Covent Garden, London, WC2H 9JQ. General and support enquiries use
 `info@robinexis.com`; privacy and data-rights requests use `privacy@robinexis.com`.
+
+## Controlled pilot state
+
+As of 20 September 2026, revision `cc21223` passed the clean handover gate and
+the production Cost Saver audio/conversation canaries. The pilot is frozen to
+one API replica: Blades remains on ElevenLabs, while Cost Saver is browser-only.
+Provisioning, provider-routing writes, outbound and WhatsApp remain off. Redis
+is required before adding API replicas.
+
+An encrypted logical snapshot was taken and verified. Supabase PITR remains a
+scale-up prerequisite. Railway and Vercel GitHub Apps still need repository
+authorization; until then deployments remain manual. A real external Blades
+call and staging Stripe key rotation remain owner actions before unsupervised
+pilot use. See `deploy/railway/CLIENT-HANDOVER.md`.
