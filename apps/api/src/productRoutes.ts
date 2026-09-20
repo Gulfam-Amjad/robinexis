@@ -95,6 +95,8 @@ export type ProductSend = (
   type?: string,
 ) => void;
 
+const SUBSCRIPTION_CURRENCY = "GBP" as const;
+
 export function publicPlansResponse() {
   return {
     items: Object.values(planCatalog()).map((plan) => ({
@@ -104,7 +106,7 @@ export function publicPlansResponse() {
         operational: featureOperationallyAvailable(feature),
       })),
     })),
-    currency: "GBP",
+    currency: SUBSCRIPTION_CURRENCY,
   };
 }
 

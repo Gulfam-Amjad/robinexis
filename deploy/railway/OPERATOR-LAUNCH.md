@@ -23,7 +23,7 @@ Then confirm the anon key can no longer read migrations (expect 401/403):
 
 ### 2. Stripe (test mode first)
 
-1. Dashboard → Product catalog: Starter **£99/mo** and Pro **£249/mo**.
+1. Dashboard → Product catalog: Starter **£99/mo** and Pro **£199/mo**.
 2. Copy the Price IDs (`price_…`) into Railway **API**:
 
 ```json

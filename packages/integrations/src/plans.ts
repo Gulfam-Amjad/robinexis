@@ -100,7 +100,7 @@ export function planCatalog(): Record<PlanTier, PlanDefinition> {
     pro: {
       tier: "pro",
       name: "Pro",
-      monthlyPricePence: 24_900,
+      monthlyPricePence: 19_900,
       trialDays: 3,
       calendarLimit: 5,
       locationLimit: 1,

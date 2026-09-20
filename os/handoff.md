@@ -1,50 +1,47 @@
 ---
-created: 2026-09-17
+created: 2026-09-20
 type: handoff
-status: in-progress
+status: complete
 ---
 
-# Handoff — Cost Saver voice runtime
+# Handoff — legal and £199 Pro release
 
 ## Done
 
-- Added the parallel Cost Saver pipeline: Deepgram Nova-3 STT, Groq brain and
-  ElevenLabs Flash TTS. Premium ElevenLabs ConvAI is unchanged.
-- Added staged-runtime config, tenant-derived tool credentials, signed post-call
-  ingestion, estimated component cost events, Twilio-signed SIP TwiML, and
-  idempotent LiveKit trunk/unique-room dispatch provisioning.
-- Deployed API, Vercel admin labels, migration 025, and the LiveKit runtime.
-  Railway's free two-resource limit is handled by supervising voice-runtime
-  inside `@robinexis/worker`.
-- Live checks passed: Groq completion, ElevenLabs synthesis, Deepgram
-  transcription, LiveKit registration, dark room agent join/greeting,
-  authenticated config/tool boundary, completed post-call and usage telemetry.
-- Full verify passed (252 unit/integration tests + 42 web tests), dedicated
-  runtime tests passed, and 63 Playwright E2E tests passed.
+- Published ROBINEXIS LTD company details and the Privacy, Terms, GDPR, Cookie
+  and DPA routes in the SaaS; support uses `info@robinexis.com` and privacy uses
+  `privacy@robinexis.com`.
+- Changed Pro from £249 to £199 GBP/month throughout code, UI, docs and Stripe.
+- Created the live £199 recurring Stripe Price, made it the Pro product default,
+  updated API/worker mappings and archived the old £249 Price.
+- The migration found no existing Pro subscriptions, so no customer proration
+  invoice was created.
+- Deployed Railway API `64787ea4-fcdf-4415-8def-2bfa274dfda2`, worker
+  `3ef2a431-3e44-4891-b1a2-8f96821ff994`, and Vercel
+  `dpl_5pnZXyPbEXH3eQ7RY3kJXrTX4Znj`.
+- Live checks confirmed API `19900` GBP, Checkout `19900` GBP, the marketing
+  site £199 headline, production legal content and correct footer links.
+- Passed 327 backend tests, 50 web tests, seven new browser tests, typecheck,
+  backend builds, secret scan, dependency audit and lint.
 
 ## In flight
 
-- Cost Saver is dark but connected. `PROVIDER_SWITCH_ROUTING_ENABLED=false` and
-  `CHEAP_VOICE_DEFAULT_ENABLED=false`.
-- Blades remains on `https://api.elevenlabs.io/twilio/inbound_call`.
+- None for this release.
 
 ## Next actions
 
-1. Add a non-Blades Twilio sandbox number and active phone endpoint.
-2. Connect that tenant's Cal.com credential; Flourish currently returns
-   `tenant_calendar_credential_required`.
-3. Prepare Cost Saver in Admin, run a supervised booking call, store a passing
-   launch gate, then enable routing only for that non-protected tenant.
-4. Upgrade Railway before splitting voice-runtime into a dedicated service.
+1. Ask a solicitor to review the published service terms and privacy wording.
+2. Keep Stripe price mappings on API and worker aligned if another plan price changes.
+3. Continue the separate Cost Saver launch gate using a non-Blades sandbox number.
 
 ## Open threads / blockers
 
-- Twilio owns only the protected Blades number; no safe telephony canary exists.
-- Flourish lacks a tenant calendar credential, so its production booking tool
-  correctly fails closed.
+- No blocker for legal pages or £199 checkout.
+- Existing Cost Saver telephony constraints remain separate from this release.
 
 ## Watch-outs
 
-- Never use Blades for an unsupervised canary or enable cheap defaults yet.
-- Rotate any LiveKit key previously pasted into chat; worker currently uses the
-  credential set that successfully registered.
+- The migration script is dry-run by default. Live changes require the exact
+  `IMMEDIATE_PRORATED_199_GBP` confirmation.
+- Do not reactivate the archived £249 Stripe Price or point
+  `STRIPE_PRICE_IDS_JSON.pro` back to it.

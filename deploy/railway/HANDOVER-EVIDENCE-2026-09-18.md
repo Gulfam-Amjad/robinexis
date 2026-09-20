@@ -40,9 +40,8 @@ status: blocked
 - A separate production Cal.com canary found availability, created an accepted `15min` booking, and
   immediately cancelled it.
 - The production API health endpoint returned HTTP 200 after deployment.
-- Web code hides interim transcription fragments, but Vercel deployment is blocked: the signed-in
-  `gulfam-amjad` account cannot access linked team `team_nmuAc2M4T93kxpePQ5to8Nst`. The live URL
-  correctly redirects unauthenticated verification to `/login`; the production room/runtime was
+- Web code hides interim transcription fragments. Vercel access was restored and the production
+  `robinexis` project is linked to `https://app.robinexis.com`; the production room/runtime was also
   verified directly by the canary above.
 
 ## Deployed release
@@ -97,6 +96,24 @@ status: blocked
 - Blades remains mapped to agent `agent_6101m1c3n4wnfsgskgzr13w2gt9s` and number `+447446868067`.
   Its internal Starter trial is `trialing`, onboarding is `active`, and live Cal.com availability is green.
   A post-release disposable booking was accepted and immediately cancelled.
+
+## Legal and Pro-price alignment — 2026-09-20
+
+- The app now publishes the ROBINEXIS LTD company number, registered office, Privacy Policy, Terms &
+  Conditions, GDPR page, Cookie Policy and DPA summary. Privacy requests use `privacy@robinexis.com`;
+  general, billing and support requests use `info@robinexis.com`.
+- Pro is now £199 GBP/month in the catalog API, public pricing, billing UI, operator UI and runbooks.
+- A live recurring £199 GBP Stripe Price was created and set as the Pro product default. Production API
+  and worker mappings point to it, and the unused £249 Price was archived.
+- The production migration found no existing Pro subscriptions, so no customer invoice or proration was
+  created. The migration remains guarded, dry-run by default and uses immediate proration if a future
+  old-price subscription is explicitly migrated.
+- A disposable live Checkout Session resolved the Pro line item to `19900` GBP and was immediately
+  expired. The production plans endpoint also returns `monthlyPricePence: 19900` and `currency: GBP`.
+- Production deployments: API `64787ea4-fcdf-4415-8def-2bfa274dfda2`, worker
+  `3ef2a431-3e44-4891-b1a2-8f96821ff994`, Vercel `dpl_5pnZXyPbEXH3eQ7RY3kJXrTX4Znj`.
+- Verification passed: 327 backend tests, 50 web unit tests, seven legal/pricing browser tests, monorepo
+  typecheck, backend builds, secret scan, whitespace check and IDE diagnostics.
 
 ## Feature flags
 

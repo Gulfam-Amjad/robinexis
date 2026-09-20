@@ -29,6 +29,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { api, initials } from "../lib/api";
 import { AUTH_REQUIRED } from "../lib/auth";
+import { ROBINEXIS_COMPANY, ROBINEXIS_LEGAL_ROUTES } from "../lib/companyLegal";
 import { workspaceNavigationSections, workspacePath, type WorkspaceNavigationIcon } from "../lib/navigation";
 import { usePermissions } from "../lib/permissions";
 import { useClient, useSession } from "../state";
@@ -238,7 +239,7 @@ export function AppShell() {
         <div className="sidebar-help">
           <span><Sparkles size={16} /> Need a hand?</span>
           <p>Our team can help tune your agent.</p>
-          <a href="mailto:hello@robinexis.com">Talk to Robinexis</a>
+          <a href={`mailto:${ROBINEXIS_COMPANY.generalEmail}`}>Talk to Robinexis</a>
         </div>
       </aside>
 
@@ -294,5 +295,23 @@ export function PublicHeader() {
         <Link className="button button-primary button-sm" to="/signup?plan=starter" onClick={() => setOpen(false)}>Start free trial</Link>
       </nav>
     </header>
+  );
+}
+
+export function PublicFooter() {
+  return (
+    <footer className="public-footer">
+      <Logo light />
+      <span>AI receptionists that answer, help, and book · © 2026 {ROBINEXIS_COMPANY.legalName}</span>
+      <div>
+        <Link to="/pricing">Pricing</Link>
+        <a href={`mailto:${ROBINEXIS_COMPANY.generalEmail}`}>Contact</a>
+        <Link to={ROBINEXIS_LEGAL_ROUTES.privacy}>Privacy</Link>
+        <Link to={ROBINEXIS_LEGAL_ROUTES.terms}>Terms</Link>
+        <Link to={ROBINEXIS_LEGAL_ROUTES.cookies}>Cookies</Link>
+        <Link to={ROBINEXIS_LEGAL_ROUTES.gdpr}>GDPR</Link>
+        <Link to={ROBINEXIS_LEGAL_ROUTES.dpa}>DPA</Link>
+      </div>
+    </footer>
   );
 }

@@ -27,7 +27,7 @@ describe("plan catalog", () => {
     });
     expect(plans.pro).toMatchObject({
       name: "Pro",
-      monthlyPricePence: 24_900,
+      monthlyPricePence: 19_900,
       trialDays: 3,
       calendarLimit: 5,
     });

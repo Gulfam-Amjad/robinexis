@@ -20,7 +20,7 @@ if (!secret.startsWith("sk_test_") && !secret.startsWith("rk_test_") && !secret.
 const stripe = new Stripe(secret);
 const catalog = [
   { tier: "starter", name: "Starter", amount: 9900, minutes: 300, features: ["inbound", "booking", "transfer"] },
-  { tier: "pro", name: "Pro", amount: 24900, minutes: 1500, features: ["inbound", "booking", "transfer", "knowledge"] },
+  { tier: "pro", name: "Pro", amount: 19900, minutes: 1500, features: ["inbound", "booking", "transfer", "knowledge"] },
 ];
 const overage = {
   key: "minute_block_100",

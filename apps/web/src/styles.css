@@ -219,11 +219,14 @@ svg { flex: 0 0 auto; }
 .legal-main h1 { font-family: var(--font-display); font-size: clamp(42px, 6vw, 68px); font-weight: 500; margin: 12px 0 14px; }
 .legal-updated { color: var(--faint); font-size: 12px; }
 .legal-intro { color: var(--muted); font-size: 18px; max-width: 720px; }
+.legal-company { background: var(--paper); border: 1px solid var(--line); border-radius: 14px; display: grid; gap: 4px; margin-top: 24px; padding: 18px 20px; }
+.legal-company span { color: var(--muted); font-size: 13px; }
 .legal-sections { background: var(--paper); border: 1px solid var(--line); border-radius: 20px; margin: 38px 0; padding: 10px 32px; }
 .legal-sections section { border-bottom: 1px solid var(--line); padding: 24px 0; }
 .legal-sections section:last-child { border-bottom: 0; }
 .legal-sections h2 { font-size: 18px; letter-spacing: -.02em; margin-bottom: 8px; }
 .legal-sections p, .legal-contact { color: var(--muted); margin: 0; }
+.legal-sections p + p { margin-top: 12px; }
 .legal-contact a { font-weight: 750; text-decoration: underline; text-underline-offset: 3px; }
 
 .auth-page { background: #f0f0f0; min-height: 100vh; padding: 30px; }
@@ -1076,16 +1079,18 @@ fieldset:disabled input, fieldset:disabled textarea, fieldset:disabled select { 
   border-radius: 30px;
   box-shadow: 0 30px 75px rgba(0, 0, 0, .19);
   color: #fff;
+  display: flex;
+  flex-direction: column;
   min-height: 635px;
   overflow: hidden;
   padding: 28px;
   position: relative;
 }
+.receptionist-stage > * { flex: 0 0 auto; }
 .receptionist-stage::before {
-  background: rgba(9, 254, 148, .16);
+  background: radial-gradient(circle, rgba(9, 254, 148, .16) 60%, transparent 70%);
   border-radius: 50%;
   content: "";
-  filter: blur(2px);
   height: 320px;
   position: absolute;
   right: -160px;

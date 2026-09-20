@@ -33,8 +33,8 @@ const configurations = await stripe.billingPortal.configurations.list({ active: 
 const configuration = configurations.data[0] || await stripe.billingPortal.configurations.create({
   business_profile: {
     headline: "Manage your Robinexis subscription",
-    privacy_policy_url: "https://robinexis.com/privacy",
-    terms_of_service_url: "https://robinexis.com/terms",
+    privacy_policy_url: "https://app.robinexis.com/privacy-policy",
+    terms_of_service_url: "https://app.robinexis.com/terms-and-conditions",
   },
   features: { invoice_history: { enabled: true } },
 });

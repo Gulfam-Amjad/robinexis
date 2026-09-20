@@ -16,6 +16,7 @@ import {
   processNotificationDeliveries,
   processInboundWhatsAppMessages,
   processScheduledWhatsAppFollowups,
+  planDefinition,
   reconcileStripe,
   resolveCalcomTenantConnection,
 } from "@robinexis/integrations";
@@ -368,6 +369,7 @@ async function main() {
     healthStaleMs: HEALTH_STALE_MS,
     retentionDays: RETENTION_DAYS,
     stripeConfigured: Boolean(process.env.STRIPE_SECRET_KEY),
+    proMonthlyPricePence: planDefinition("pro").monthlyPricePence,
     voiceRuntimeEnabled: process.env.VOICE_RUNTIME_ENABLED === "true",
     livekitAgentName: process.env.LIVEKIT_AGENT_NAME || "robinexis-alternate-runtime",
     voiceTurnPolicy: "stt-vad-stop-after-question-three-slots",

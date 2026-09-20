@@ -70,6 +70,7 @@ import type {
   TimeseriesPoint,
 } from "@robinexis/api-contracts";
 import { api, formatDate, formatMinorCurrency } from "../../lib/api";
+import { ROBINEXIS_COMPANY } from "../../lib/companyLegal";
 import { usePermissions } from "../../lib/permissions";
 import { workspacePath } from "../../lib/navigation";
 import { workspaceReceptionistDemo } from "../../lib/receptionistDemo";
@@ -581,7 +582,7 @@ export function OnboardingPage() {
               <Field label="Customer email" error={errors.email?.message}><input placeholder="hello@business.co.uk" {...register("email")} /></Field>
               <Field label="Calendar"><input readOnly value="Cal.com (Robinexis books on the platform calendar automatically)" /></Field>
               <Field label="Owner / front desk number" hint="Required for a warm conference transfer." error={errors.transferNumber?.message}><input placeholder="+447700900123" {...register("transferNumber")} /></Field>
-              <Field label="Plan"><select {...register("planTier")}><option value="starter">Starter — £99/month</option><option value="pro">Pro — £249/month</option><option value="enterprise">Enterprise — contact sales</option></select></Field>
+              <Field label="Plan"><select {...register("planTier")}><option value="starter">Starter — £99/month</option><option value="pro">Pro — £199/month</option><option value="enterprise">Enterprise — contact sales</option></select></Field>
             </div>
             <div className="form-actions"><Link className="button button-ghost button-md" to="/app">Cancel</Link><Button disabled={create.isPending}>{create.isPending ? "Creating…" : "Continue to agent"} <ChevronRight size={16} /></Button></div>
           </form>
@@ -1257,7 +1258,7 @@ function IntegrationsContent({ clientId }: { clientId: string }) {
       {status.error && <div className="notice notice-error"><div><XCircle /><span><strong>Connection status unavailable.</strong> {status.error.message}</span></div><button onClick={() => status.refetch()}>Retry</button></div>}
       <div className="integration-grid">{known.map(({ id, name, description, icon: Icon }) => { const item = byId.get(id); const connected = item?.connected || false; const needsSetup = !status.isLoading && !connected; return <Card className="integration-card" key={id}><div className={`integration-icon integration-${id}`}><Icon /></div><div><h3>{name}</h3><p>{item?.detail || description}</p></div><Badge tone={connected ? "success" : "neutral"}>{status.isLoading ? "Checking…" : connected ? "Connected" : "Needs setup"}</Badge>{needsSetup && (id === "calcom" && canEditWorkspace
         ? <Button type="button" variant="secondary" size="sm" disabled={repairCalendar.isPending} onClick={() => repairCalendar.mutate()}>{repairCalendar.isPending ? "Repairing…" : "Repair calendar"}</Button>
-        : <a className="button button-secondary button-sm" href="mailto:hello@robinexis.com?subject=Robinexis%20integration%20setup">Configure server-side</a>)}</Card>; })}</div>
+        : <a className="button button-secondary button-sm" href={`mailto:${ROBINEXIS_COMPANY.generalEmail}?subject=Robinexis%20integration%20setup`}>Configure server-side</a>)}</Card>; })}</div>
       {canEditWorkspace && <Card className="form-card">
         <SectionHeading title="Booking calendar" description={calendarModes.oauth || calendarModes.managed
           ? "Connect this customer’s Cal.com account, or create a tenant-isolated managed user. Tokens stay encrypted on the server."
@@ -1558,10 +1559,10 @@ function BillingContent({ clientId }: { clientId: string }) {
     <>
       <PageHeader eyebrow="Billing" title="A plan that grows with every call" description="Review your current allowance and the features available to this workspace." />
       <div className="billing-grid">
-        <Card className="current-plan"><span className="pill pill-light">{client.data?.serviceStatus || "Not reported"}</span><h2>{product}</h2><p>{allowance ? `${allowance} voice minutes allocated to this workspace.` : "No minute allowance is configured in the current client data."}</p><div className="plan-price"><strong>{tier === "starter" ? "£99" : tier === "pro" ? "£249" : "Contact sales"}</strong><span>{tier === "enterprise" ? "tailored plan" : "per month"}</span></div>{tier === "enterprise" ? <a className="button button-secondary button-md" href="mailto:hello@robinexis.com?subject=Enterprise%20Robinexis">Contact sales</a> : <Button onClick={() => checkout.mutate(tier)} disabled={checkout.isPending}>{checkout.isPending ? "Opening checkout…" : "Continue with Stripe"}</Button>}</Card>
+        <Card className="current-plan"><span className="pill pill-light">{client.data?.serviceStatus || "Not reported"}</span><h2>{product}</h2><p>{allowance ? `${allowance} voice minutes allocated to this workspace.` : "No minute allowance is configured in the current client data."}</p><div className="plan-price"><strong>{tier === "starter" ? "£99" : tier === "pro" ? "£199" : "Contact sales"}</strong><span>{tier === "enterprise" ? "tailored plan" : "per month"}</span></div>{tier === "enterprise" ? <a className="button button-secondary button-md" href={`mailto:${ROBINEXIS_COMPANY.generalEmail}?subject=Enterprise%20Robinexis`}>Contact sales</a> : <Button onClick={() => checkout.mutate(tier)} disabled={checkout.isPending}>{checkout.isPending ? "Opening checkout…" : "Continue with Stripe"}</Button>}</Card>
         <Card className="panel usage-card"><SectionHeading title="Monthly usage" description={`Billing period ${usage.data?.month || "current month"}`} /><div className="usage-count"><strong>{meteredUsed}</strong><span>{allowance ? `of ${allowance} minutes` : "minutes recorded"}</span></div>{usagePercent !== undefined && <div className="progress"><i style={{ width: `${usagePercent}%` }} /></div>}<p><ShieldCheck /> {`${usage.data?.inboundMinutes || 0} inbound · ${usage.data?.outboundMinutes || 0} outbound minutes`}</p></Card>
       </div>
-      <Card className="panel"><SectionHeading title="Billing details" description="Every plan begins with a three-day trial backed by a payment card secured by Stripe." /><div className="deferred-row"><CircleDollarSign /><div><strong>Stripe manages payment details</strong><p>Checkout receives only tenant billing metadata; voice, calendar and salon credentials stay in Robinexis.</p></div><a className="button button-secondary button-md" href="mailto:hello@robinexis.com">Contact billing</a></div></Card>
+      <Card className="panel"><SectionHeading title="Billing details" description="Every plan begins with a three-day trial backed by a payment card secured by Stripe." /><div className="deferred-row"><CircleDollarSign /><div><strong>Stripe manages payment details</strong><p>Checkout receives only tenant billing metadata; voice, calendar and salon credentials stay in Robinexis.</p></div><a className="button button-secondary button-md" href={`mailto:${ROBINEXIS_COMPANY.generalEmail}`}>Contact billing</a></div></Card>
       {usage.data?.overage && <Card className="panel"><SectionHeading title="Automatic minute blocks" description={`Each additional ${usage.data.overage.blockMinutes}-minute block costs ${formatMinorCurrency(usage.data.overage.blockPriceMinor, usage.data.overage.currency)}.`} /><p className="muted">{usage.data.overage.autoPurchaseEnabled ? "Enabled by a Robinexis operator with explicit auto-charge confirmation." : "Off. Calls stop when the available voice-minute balance is exhausted."}</p><LinkButton to="/usage" variant="secondary">View block receipts</LinkButton></Card>}
     </>
   );

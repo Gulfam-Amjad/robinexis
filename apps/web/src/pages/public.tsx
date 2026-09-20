@@ -17,10 +17,11 @@ import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { z } from "zod";
-import { Logo, PublicHeader } from "../components/layout";
+import { Logo, PublicFooter, PublicHeader } from "../components/layout";
 import { Button, Card, Field } from "../components/ui";
 import { AUTH_REQUIRED } from "../lib/auth";
 import { api } from "../lib/api";
+import { ROBINEXIS_COMPANY, ROBINEXIS_LEGAL_ROUTES } from "../lib/companyLegal";
 import {
   authErrorMessage,
   completeAuthCallback,
@@ -116,13 +117,9 @@ export function LandingPage() {
           <Link className="button button-light button-md" to="/signup?plan=starter">Start free trial <ArrowRight size={16} /></Link>
         </section>
       </main>
-      <footer className="public-footer"><LogoFooter /><span>AI receptionists that answer, help, and book · © 2026 Robinexis</span><div><Link to="/pricing">Pricing</Link><a href="mailto:hello@robinexis.com">Contact</a><Link to="/privacy">Privacy</Link><Link to="/terms">Terms</Link></div></footer>
+      <PublicFooter />
     </div>
   );
-}
-
-function LogoFooter() {
-  return <Logo light />;
 }
 
 const loginSchema = z.object({ email: z.string().email("Enter the allowlisted work email") });
@@ -253,7 +250,7 @@ export function SignupPage() {
         </Field>
         <label className="checkbox-row">
           <input type="checkbox" checked={legalAccepted} onChange={(event) => setLegalAccepted(event.target.checked)} />
-          <span>I agree to the <Link to="/terms">Terms</Link> and acknowledge the <Link to="/privacy">Privacy Policy</Link>.</span>
+          <span>I agree to the <Link to={ROBINEXIS_LEGAL_ROUTES.terms}>Terms</Link> and acknowledge the <Link to={ROBINEXIS_LEGAL_ROUTES.privacy}>Privacy Policy</Link>.</span>
         </label>
         {serverError && <div className="form-alert" role="alert">{serverError}</div>}
         {sent && <div className="form-success" role="status">Check your inbox to finish creating your account. Open the link in this same browser — it only works where you asked for it.</div>}
@@ -413,7 +410,7 @@ export function SelfServeBillingPage() {
               ? "Opening Stripe…"
               : plan === "starter"
                 ? "Starter · £99/month"
-                : "Pro · £249/month"}
+                : "Pro · £199/month"}
           </Button>
         ))}
         {canManagePortal && (
@@ -444,7 +441,7 @@ export function PricingPage() {
   const catalog = useQuery({ queryKey: ["public-plans"], queryFn: api.plans, staleTime: 300_000 });
   const fallbackPlans = [
     { name: "Starter", price: "£99", plan: "starter" as const, copy: "For independent businesses ready to stop missing calls.", features: ["One AI receptionist", "300 included minutes", "Booking & call summaries", "3-day trial"] },
-    { name: "Pro", price: "£249", plan: "pro" as const, copy: "For busy teams turning more calls into appointments.", features: ["Everything in Starter", "1,500 included minutes", "Revenue recovery dashboard", "3-day trial"], featured: true },
+    { name: "Pro", price: "£199", plan: "pro" as const, copy: "For busy teams turning more calls into appointments.", features: ["Everything in Starter", "1,500 included minutes", "Revenue recovery dashboard", "3-day trial"], featured: true },
     { name: "Enterprise", price: "Let’s talk", copy: "For multi-location teams with more complex workflows.", features: ["Multiple locations", "Custom integrations", "Priority onboarding", "Dedicated optimisation"] },
   ];
   const featureLabels: Record<string, string> = {
@@ -496,6 +493,7 @@ export function PricingPage() {
         </div>
         <p className="pricing-footnote">Secure checkout by Stripe. Prices exclude VAT where applicable. Cancel before the trial ends to avoid a charge.</p>
       </main>
+      <PublicFooter />
     </div>
   );
 }
@@ -515,7 +513,7 @@ export function EnterpriseContactPage() {
           <div className="hero-actions">
             <a
               className="button button-primary button-md"
-              href="mailto:hello@robinexis.com?subject=Enterprise%20Robinexis"
+              href={`mailto:${ROBINEXIS_COMPANY.generalEmail}?subject=Enterprise%20Robinexis`}
             >
               Contact sales <ArrowRight size={16} />
             </a>
@@ -535,7 +533,7 @@ export function EnterpriseContactPage() {
           </ul>
         </Card>
       </main>
-      <footer className="public-footer"><LogoFooter /><span>AI receptionists that answer, help, and book · © 2026 Robinexis</span><div><Link to="/pricing">Pricing</Link><a href="mailto:hello@robinexis.com">Contact</a><Link to="/privacy">Privacy</Link><Link to="/terms">Terms</Link></div></footer>
+      <PublicFooter />
     </div>
   );
 }

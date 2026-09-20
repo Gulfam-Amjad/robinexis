@@ -100,6 +100,7 @@ export default defineRailway(() => {
     SENTRY_ENVIRONMENT: "production",
     SENTRY_TRACES_SAMPLE_RATE: "0.1",
     GEMINI_EMBEDDING_MODEL: "gemini-embedding-001",
+    SUPPORT_EMAIL: "info@robinexis.com",
     ...commonSecrets,
   };
 

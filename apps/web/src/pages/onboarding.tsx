@@ -13,6 +13,7 @@ import { Link, Navigate } from "react-router-dom";
 import { Logo } from "../components/layout";
 import { Button, Field } from "../components/ui";
 import { ApiError, api } from "../lib/api";
+import { ROBINEXIS_COMPANY } from "../lib/companyLegal";
 import { useSession } from "../state";
 
 const steps: Array<{ id: OnboardingWizardStep; label: string; title: string; copy: string }> = [
@@ -167,7 +168,7 @@ function SetupProgress({
         </Button>}
         {approvalError && <div className="form-alert" role="alert">{approvalError}</div>}
         <Link className="button button-secondary button-md full-button" to="/billing">Manage billing</Link>
-        <a className="button button-ghost button-md full-button" href="mailto:hello@robinexis.com">Contact setup support</a>
+        <a className="button button-ghost button-md full-button" href={`mailto:${ROBINEXIS_COMPANY.generalEmail}`}>Contact setup support</a>
       </section>
     </main>
   );
@@ -182,7 +183,7 @@ function OnboardingUnavailable({ onRetry, retrying }: { onRetry: () => void; ret
         <h1>We couldn’t load your setup</h1>
         <p>Anything you saved already is safe in your workspace. Try again, or contact us and a specialist will pick up your setup with you.</p>
         <Button type="button" disabled={retrying} onClick={onRetry}>{retrying ? "Trying again…" : "Try again"}</Button>
-        <a className="button button-ghost button-md full-button" href="mailto:hello@robinexis.com">Contact setup support</a>
+        <a className="button button-ghost button-md full-button" href={`mailto:${ROBINEXIS_COMPANY.generalEmail}`}>Contact setup support</a>
       </section>
     </main>
   );

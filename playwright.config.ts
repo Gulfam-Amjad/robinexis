@@ -11,7 +11,7 @@ export default defineConfig({
   },
   projects: [
     { name: "accessibility", testMatch: "accessibility.spec.ts", use: { ...devices["Desktop Chrome"] } },
-    { name: "chromium", testMatch: "product-flow.spec.ts", use: { ...devices["Desktop Chrome"] } },
+    { name: "chromium", testMatch: ["product-flow.spec.ts", "legal-pricing.spec.ts"], use: { ...devices["Desktop Chrome"] } },
     { name: "mobile", testMatch: "product-flow.spec.ts", use: { ...devices["Pixel 7"] } },
     {
       name: "tablet",

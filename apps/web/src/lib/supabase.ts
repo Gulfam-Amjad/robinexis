@@ -1,4 +1,5 @@
 import { createClient, type Session } from "@supabase/supabase-js";
+import { ROBINEXIS_COMPANY } from "./companyLegal";
 
 const url = import.meta.env.VITE_SUPABASE_URL || "";
 const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
@@ -68,7 +69,7 @@ export function authErrorMessage(error: unknown, fallback: string): string {
   if (!raw) return fallback;
   const text = raw.toLowerCase();
   if (text.includes("not authorized")) {
-    return "This address cannot receive sign-in links yet. Use Continue with Google, or email hello@robinexis.com.";
+    return `This address cannot receive sign-in links yet. Use Continue with Google, or email ${ROBINEXIS_COMPANY.generalEmail}.`;
   }
   if (text.includes("rate limit") || text.includes("for security purposes") || text.includes("too many")) {
     return "Too many sign-in emails just now. Wait a few minutes or use Continue with Google.";

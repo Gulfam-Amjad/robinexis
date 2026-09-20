@@ -175,7 +175,12 @@ export default function App() {
         <Route path="/pricing" element={<PricingPage />} />
         <Route path="/enterprise-contact" element={<EnterpriseContactPage />} />
         <Route path="/privacy" element={<LegalPage kind="privacy" />} />
+        <Route path="/privacy-policy" element={<LegalPage kind="privacy" />} />
         <Route path="/terms" element={<LegalPage kind="terms" />} />
+        <Route path="/terms-and-conditions" element={<LegalPage kind="terms" />} />
+        <Route path="/gdpr-data-protection" element={<LegalPage kind="gdpr" />} />
+        <Route path="/cookie-policy" element={<LegalPage kind="cookies" />} />
+        <Route path="/data-processing-agreement" element={<LegalPage kind="dpa" />} />
         <Route path="/demo/blades-hair" element={<BladesReceptionistDemoPage />} />
         <Route element={<RequireSession />}>
           <Route path="/dashboard" element={<DashboardRoute />} />

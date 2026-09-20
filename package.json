@@ -51,6 +51,8 @@
     "test:web-production-env": "node --test scripts/verify-web-production-env.test.mjs",
     "check:csp-api-origin": "node scripts/verify-csp-api-origin.mjs",
     "test:csp-api-origin": "node --test scripts/verify-csp-api-origin.test.mjs",
+    "test:stripe-pro-migration": "node --test scripts/stripe-pro-price-migration.test.mjs",
+    "stripe:migrate-pro-price": "node scripts/migrate-stripe-pro-price.mjs",
     "check:live-csp": "node scripts/verify-live-csp.mjs",
     "backup:postgres": "node scripts/backup-postgres.mjs",
     "whatsapp:ensure": "tsx scripts/ensure-managed-whatsapp.ts",

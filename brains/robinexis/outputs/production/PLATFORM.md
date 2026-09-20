@@ -29,3 +29,13 @@ Both require `x-voice-tool-secret`. Booking revalidates the slot and requires ex
 ## Operations
 
 See `deploy/railway/RUNBOOK.md`. Test the receptionist through the ElevenLabs widget/share link, not an outbound Railway call.
+
+## Commercial and legal state
+
+As of 20 September 2026, Starter is £99 GBP/month and Pro is £199 GBP/month. Stripe, the
+public plans API, checkout and both billing UIs use the same catalog. The former £249 Pro
+Price is archived; no existing Pro subscriptions required migration when the new price went live.
+
+The app publishes ROBINEXIS LTD company number 16468366 and its registered office at
+71-75 Shelton Street, Covent Garden, London, WC2H 9JQ. General and support enquiries use
+`info@robinexis.com`; privacy and data-rights requests use `privacy@robinexis.com`.

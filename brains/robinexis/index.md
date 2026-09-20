@@ -15,7 +15,7 @@ The catalogue of this brain. Every page below is a link + one-line summary. **Re
 
 ## Production
 
-- [[brains/robinexis/outputs/production/PLATFORM|PLATFORM]] — self-hosted Twilio + Groq + ElevenLabs TTS platform; live ElevenLabs salon agent is fallback only.
+- [[brains/robinexis/outputs/production/PLATFORM|PLATFORM]] — production voice architecture plus the live SaaS commercial and legal configuration.
 - [[brains/robinexis/wiki/source-2026-08-29-production-architecture|Production architecture confirmation]] — ElevenLabs Premium plus the dark LiveKit/Deepgram/Groq/ElevenLabs Cost Saver runtime and publishing constraints.
 
 ## Sources
@@ -24,4 +24,4 @@ The catalogue of this brain. Every page below is a link + one-line summary. **Re
 - [[concept-demo-workflow|Playbook]] — `raw/Playbook_Robinexis_Voice_Agent_System.md`, the Foundation technical playbook (summarised in the demo-workflow concept).
 
 ---
-*Last updated: 2026-08-30 · Pages: 4*
+*Last updated: 2026-09-20 · Pages: 4*

@@ -51,3 +51,4 @@ brains/**/*.zip
 supabase/.temp/
 .staging-local/
 .firecrawl/
+.env*

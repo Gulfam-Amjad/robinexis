@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Logo } from "../components/layout";
 import { ReceptionistCall } from "../components/ReceptionistCall";
+import { ROBINEXIS_COMPANY } from "../lib/companyLegal";
 import { BLADES_RECEPTIONIST_DEMO } from "../lib/receptionistDemo";
 import { canAccessProduct } from "../lib/routing";
 import { selectedPlan } from "../lib/supabase";
@@ -86,7 +87,7 @@ export default function BladesReceptionistDemoPage() {
         </div>
         <div>
           <Link to="/"><ArrowLeft /> Back to Robinexis</Link>
-          <a href="mailto:hello@robinexis.com">Build one for your business <ExternalLink /></a>
+          <a href={`mailto:${ROBINEXIS_COMPANY.generalEmail}`}>Build one for your business <ExternalLink /></a>
         </div>
       </footer>
     </div>
