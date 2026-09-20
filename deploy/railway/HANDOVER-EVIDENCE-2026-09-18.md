@@ -5,7 +5,7 @@ tags:
   - release
   - saas
   - production
-status: blocked
+status: pilot-conditional
 ---
 
 # SaaS handover evidence — 2026-09-18
@@ -124,25 +124,60 @@ status: blocked
 - Production LiveKit runtime enabled; Blades remains on `elevenlabs-convai`.
 - Outbound and WhatsApp automations remain off until their tenant-specific launch gates pass.
 
-## Open release blockers
+## Pilot closeout — 2026-09-20
+
+- `client/main` was fast-forwarded to verified revision `9a3e6c0`.
+- Railway API and worker are healthy with one configured/running replica each.
+  API health reports `sharedRateLimit: not_configured`,
+  `singleReplicaRequired: true`, and `redisRequired: false`.
+- The pilot-safe flags were written explicitly on both services:
+  provisioning, cheap-default routing, provider-routing writes, outbound and
+  WhatsApp are off. Blades remains published on `elevenlabs-convai`.
+- Production Cost Saver browser acceptance passed: session created, agent
+  connected, ten remote audio frames received, four LiveKit cost events written,
+  clean disconnect completed, and phone routing was unchanged.
+- Production spoken acceptance passed on call
+  `call_ba285518a8767d2aeefd8061e13a96e8`: full service/date/time transcript,
+  response after the caller, one concise question, three availability choices,
+  and interruption detected with a 489 ms audio gap.
+- Supabase backup inspection returned `pitr_enabled: false`, no available
+  physical backup, and `walg_enabled: true`.
+- A pre-handover encrypted logical snapshot was created outside the repository:
+  87 tables, 789 rows, 537,845 encrypted bytes. Decryption verification passed
+  with 877 JSONL records. SHA-256:
+  `db4ef578bb2f0d174255d136333407338ac96cd302a68d00071bc81f21c01633`.
+- Railway and Vercel rejected Git source connection because their installed
+  GitHub Apps do not have access to the private client repository. The services
+  remain on the verified healthy manual deployments; no environment variable
+  or phone route was changed by the failed linking attempts.
+- Automated inbound call acceptance now rejects the malformed legacy caller ID
+  before dialing. Twilio has no separate valid verified caller ID, so the final
+  controlled Blades call requires an external human phone or a dedicated
+  sandbox number.
+
+## Owner actions before unsupervised pilot use
 
 > [!warning] Controlled phone call not yet passed
 > Twilio has only the protected Blades number plus a malformed legacy verified caller ID. The self-call
 > returned busy and Twilio rejected the legacy caller ID. A manual inbound call must produce exactly one
 > Blades call record and one ElevenLabs usage event before status can change to `ready`.
 
-> [!note] Signed-in Cost Saver click-through
-> The CSP block is fixed and proven from the production origin, but the final signed-in conversation on
-> `/admin/provider-comparison` needs an operator session with microphone permission.
+> [!warning] Deployment source authorization
+> Grant the Railway and Vercel GitHub Apps access to
+> `robinexisbackend-sys/robinexis_code`, then connect both projects to `main`.
+> Until then, deploys are manual and must record revision `9a3e6c0`.
 
 > [!warning] Owner operations
-> Rotate the staging Stripe test secret shared in chat. Provision Redis before adding replicas. Enable
-> Supabase PITR/backups and complete a restore drill.
+> Rotate the staging Stripe test secret shared in chat. Store the encrypted
+> backup and its age identity separately. Provision Redis before adding replicas.
+> Enable Supabase PITR/backups and complete a restore drill.
 
 ## Rollback points
 
-- Railway API deployment before release: retain in Railway deployment history.
-- Railway worker deployment before release: retain in Railway deployment history.
-- Vercel production rollback: previous production deployment in project `robinexis`.
+- Current Railway API deployment: `64787ea4-fcdf-4415-8def-2bfa274dfda2`.
+- Current Railway worker deployment: `3ef2a431-3e44-4891-b1a2-8f96821ff994`.
+- Current Vercel deployment: `dpl_5pnZXyPbEXH3eQ7RY3kJXrTX4Znj`.
+- Previous Vercel production deployment:
+  `https://robinexis-a3f0aljzg-web-services2.vercel.app`.
 - Voice rollback: `PROVIDER_SWITCH_ROUTING_ENABLED=false`; Blades Twilio route and ElevenLabs assignment
   were not changed by the deployment.

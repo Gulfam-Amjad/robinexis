@@ -1,5 +1,6 @@
 import pg from "pg";
 import twilio from "twilio";
+import { isPlausibleCustomerPhone } from "../packages/integrations/src/phone.ts";
 
 const environment = process.env.RAILWAY_ENVIRONMENT_NAME || process.env.RAILWAY_ENVIRONMENT || "";
 if (environment !== "production" || process.env.CONFIRM_BLADES_CALL !== "true") {
@@ -27,7 +28,7 @@ if (owned[0]?.phoneNumber !== number || !owned[0]?.voiceUrl) {
 const verifiedCallerIds = await client.outgoingCallerIds.list({ limit: 20 });
 const callerId = process.env.BLADES_CANARY_CALLER_ID ||
   verifiedCallerIds.find((item) =>
-    item.phoneNumber?.match(/^\+[1-9]\d{7,14}$/) &&
+    isPlausibleCustomerPhone(item.phoneNumber) &&
     item.phoneNumber !== number)?.phoneNumber;
 if (!callerId) throw new Error("verified canary caller ID unavailable");
 const call = await client.calls.create({
