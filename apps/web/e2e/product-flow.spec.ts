@@ -245,7 +245,7 @@ test("enterprise contact is generic, public, and prospect-safe", async ({ page }
   await expect(page.getByRole("heading", { name: /A receptionist built around every location/i })).toBeVisible();
   await expect(page.getByRole("link", { name: /Contact sales/i })).toHaveAttribute(
     "href",
-    "mailto:hello@robinexis.com?subject=Enterprise%20Robinexis",
+    "mailto:info@robinexis.com?subject=Enterprise%20Robinexis",
   );
   await expect(page.locator("body")).not.toContainText(/Blades Hair/i);
   await expectNoPageOverflow(page);
