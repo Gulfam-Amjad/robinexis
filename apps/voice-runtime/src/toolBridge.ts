@@ -135,7 +135,7 @@ export function prepareToolInput(
   ledger: BookingLedger,
   callId: string,
 ): Record<string, unknown> {
-  const input = { ...args, conversationId: callId };
+  const input: Record<string, unknown> = { ...args, conversationId: callId };
   if (name !== "create_booking") return input;
 
   if (!input.eventTypeSlug && ledger.eventTypeSlug) input.eventTypeSlug = ledger.eventTypeSlug;
