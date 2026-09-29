@@ -122,6 +122,15 @@ async function openWorkspaceSession(
     if (path === "/api/v1/integrations/status") return route.fulfill({ json: { items: [{ id: "calcom", name: "Cal.com", connected: true }] } });
     if (path === `/api/v1/clients/${client.id}/onboarding`) return route.fulfill({ json: { client, provisioning: null } });
     if (path === `/api/v1/clients/${client.id}/notifications/status`) return route.fulfill({ json: { pending: 0, failed: 0 } });
+    if (path === `/api/v1/clients/${client.id}/cost-saver/readiness`) {
+      return route.fulfill({ json: {
+        clientId: client.id,
+        businessName: client.businessName,
+        configured: true,
+        ready: true,
+        missing: [],
+      } });
+    }
     if (path === `/api/v1/clients/${client.id}/twilio-connection`) return route.fulfill({ json: { mode: "robinexis_account", status: "active", selectedPhoneNumber: "+441130000000", canReconnect: true } });
     if (path === `/api/v1/clients/${client.id}/calendar-connection`) return route.fulfill({ json: { mode: "managed", status: "active", destinationCalendarId: "calendar_1", availableCalendars: [], canReconnect: true } });
     if (path === `/api/v1/admin/clients/${client.id}/feature-entitlements`) return route.fulfill({ json: { whatsappEnabled: false, autoMinuteBlocksEnabled: false } });
@@ -342,6 +351,22 @@ test("all operator areas render against their backend contracts", async ({ page 
   expect(renderWarnings).toEqual([]);
 });
 
+test("Cost Saver workspaces use the tenant browser test call", async ({ page }) => {
+  client.voicePipeline = "livekit-cascade";
+  client.published = true;
+  try {
+    await openWorkspaceSession(page, "salon", "active");
+    await page.goto("/app/playground");
+    await expect(page.getByRole("heading", { name: "Hear your receptionist before customers do" })).toBeVisible();
+    await expect(page.getByText("Cost Saver receptionist")).toBeVisible();
+    await expect(page.getByRole("button", { name: /Talk to Your receptionist/i })).toBeEnabled();
+    await expect(page.getByText(/Browser-only sandbox/)).toBeVisible();
+  } finally {
+    client.voicePipeline = "elevenlabs-convai";
+    client.published = false;
+  }
+});
+
 test("operator admin is isolated under the admin route", async ({ page }) => {
   await openWorkspaceSession(page);
   await page.goto("/admin");
@@ -363,6 +388,24 @@ test("operator admin is isolated under the admin route", async ({ page }) => {
   await page.goto("/admin/clients/new");
   await expect(page.getByRole("heading", { name: "Let’s learn the essentials" })).toBeVisible();
   await expectNoPageOverflow(page);
+});
+
+test("workspace edit and delete dialogs share the operator shell", async ({ page }) => {
+  await openWorkspaceSession(page);
+  await page.goto("/admin/customers");
+  await page.getByRole("button", { name: "Edit", exact: true }).first().click();
+  const editDialog = page.getByRole("dialog", { name: "Edit workspace" });
+  await expect(editDialog).toBeVisible();
+  await expect(editDialog.getByLabel("Business name")).toHaveValue("Demo Salon");
+  await page.keyboard.press("Escape");
+  await expect(editDialog).toBeHidden();
+
+  await page.getByRole("button", { name: "Delete", exact: true }).first().click();
+  const deleteDialog = page.getByRole("alertdialog", { name: "Delete workspace" });
+  await expect(deleteDialog).toBeVisible();
+  await expect(deleteDialog.getByRole("button", { name: "Delete workspace" })).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await expect(deleteDialog).toBeHidden();
 });
 
 test("operator triages requests, replays billing, and adjusts allowance with audit input", async ({ page }) => {

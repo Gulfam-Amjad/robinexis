@@ -1062,6 +1062,59 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
     return true;
   }
 
+  const workspaceIdentityMatch = route.match(/^\/admin\/clients\/([^/]+)$/);
+  if (workspaceIdentityMatch && req.method === "PATCH") {
+    if (!canAdministerPlatform(actor)) {
+      send(res, 403, { error: "platform_admin_required" });
+      return true;
+    }
+    const id = decodeURIComponent(workspaceIdentityMatch[1]);
+    const client = await store.getClient(id);
+    if (!client) {
+      send(res, 404, { error: "client_not_found" });
+      return true;
+    }
+    const body = await readJson<{ businessName?: unknown; slug?: unknown }>(ctx);
+    const businessName = typeof body.businessName === "string" ? body.businessName.trim() : "";
+    const slug = typeof body.slug === "string" ? body.slug.trim() : "";
+    if (businessName.length < 2 || !/^[a-z0-9-]{2,80}$/.test(slug)) {
+      send(res, 400, { error: "valid_business_name_and_slug_required" });
+      return true;
+    }
+    const taken = await store.getClientBySlug(slug);
+    if (taken && taken.id !== client.id) {
+      send(res, 409, { error: "slug_taken" });
+      return true;
+    }
+    const now = new Date().toISOString();
+    const previous = { businessName: client.businessName, slug: client.slug };
+    client.businessName = businessName;
+    client.slug = slug;
+    await store.upsertClient(client);
+    const draft = await store.getDraftClient(client.id);
+    if (draft) {
+      await store.saveDraftClient({
+        ...draft,
+        config: { ...draft.config, businessName, slug },
+        updatedAt: now,
+      });
+    }
+    const primary = (await store.listLocations(client.id)).find((location) => location.isPrimary);
+    if (primary) {
+      await store.upsertLocation({ ...primary, name: businessName, updatedAt: now });
+    }
+    await store.appendOperatorAudit({
+      id: newId("audit_"),
+      clientId: client.id,
+      actorId: actor.subject,
+      action: "workspace.updated",
+      detail: { businessName, slug, previous },
+      createdAt: now,
+    });
+    send(res, 200, safeEditableClient(client));
+    return true;
+  }
+
   if (route === "/admin/summary" && req.method === "GET") {
     if (!canAdministerPlatform(actor)) {
       send(res, 403, { error: "platform_admin_required" });
@@ -1814,6 +1867,54 @@ export async function handleProductRoute(ctx: ProductRouteContext): Promise<bool
       ...safeEditableClient(client),
       hasUnpublishedChanges: true,
     });
+    return true;
+  }
+
+  if (clientMatch && req.method === "DELETE") {
+    if (!canAdministerPlatform(actor)) {
+      send(res, 403, { error: "platform_admin_required" });
+      return true;
+    }
+    const client = await store.getClient(decodeURIComponent(clientMatch[1]));
+    if (!client) {
+      send(res, 404, { error: "client_not_found" });
+      return true;
+    }
+    const body = await readJson<{ confirmation?: unknown }>(ctx);
+    if (body.confirmation !== client.businessName) {
+      send(res, 400, { error: "confirmation_mismatch" });
+      return true;
+    }
+    if (protectedAutomationTarget(client)) {
+      send(res, 409, { error: "protected_workspace_delete_forbidden" });
+      return true;
+    }
+    const subscriptions = await store.listSubscriptions(client.id);
+    if (subscriptions.some((subscription) =>
+      ["active", "trialing", "past_due", "unpaid", "incomplete"].includes(subscription.status))) {
+      send(res, 409, { error: "active_subscription_must_be_cancelled" });
+      return true;
+    }
+    const provisioningRuns = await store.listProvisioningRuns(client.id);
+    if (provisioningRuns.some((run) =>
+      ["pending", "running", "activation_pending", "activating"].includes(run.status))) {
+      send(res, 409, { error: "provisioning_in_progress" });
+      return true;
+    }
+    const now = new Date().toISOString();
+    const removed = await store.deleteClient(client.id);
+    if (!removed) {
+      send(res, 404, { error: "client_not_found" });
+      return true;
+    }
+    await store.appendOperatorAudit({
+      id: newId("audit_"),
+      actorId: actor.subject,
+      action: "workspace.deleted",
+      detail: { clientId: client.id, businessName: client.businessName, slug: client.slug },
+      createdAt: now,
+    });
+    send(res, 200, { deleted: true, clientId: client.id });
     return true;
   }
 

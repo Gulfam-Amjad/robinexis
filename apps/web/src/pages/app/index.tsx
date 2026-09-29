@@ -76,6 +76,7 @@ import { workspacePath } from "../../lib/navigation";
 import { workspaceReceptionistDemo } from "../../lib/receptionistDemo";
 import { useClient, useSession, useToast } from "../../state";
 import { ReceptionistCall } from "../../components/ReceptionistCall";
+import { CostSaverCall } from "../../components/CostSaverCall";
 import {
   Badge,
   Button,
@@ -803,9 +804,19 @@ export function PlaygroundPage() {
     enabled: Boolean(activeClientId),
     retry: false,
   });
-  if (client.isLoading) return <LoadingState label="Loading this workspace’s receptionist…" />;
+  const costSaver = client.data?.voicePipeline === "livekit-cascade";
+  const costSaverReadiness = useQuery({
+    queryKey: ["cost-saver-readiness", activeClientId],
+    queryFn: () => api.costSaverReadiness(activeClientId!),
+    enabled: Boolean(activeClientId && costSaver),
+    retry: false,
+  });
+  if (client.isLoading || (costSaver && costSaverReadiness.isLoading)) {
+    return <LoadingState label="Loading this workspace’s receptionist…" />;
+  }
   if (client.error) return <ErrorState error={client.error} onRetry={() => client.refetch()} />;
-  if (!client.data?.elevenlabsAgentId) {
+  if (!client.data) return <ErrorState error={new Error("Workspace not found")} />;
+  if (!costSaver && !client.data?.elevenlabsAgentId) {
     return (
       <>
         <PageHeader
@@ -823,7 +834,7 @@ export function PlaygroundPage() {
     );
   }
   const demoConfig = workspaceReceptionistDemo({
-    agentId: client.data.elevenlabsAgentId,
+    agentId: client.data.elevenlabsAgentId || "",
     businessName: client.data.businessName,
     location: client.data.location,
     phone: client.data.phone,
@@ -834,11 +845,19 @@ export function PlaygroundPage() {
       <PageHeader
         eyebrow="Test call"
         title="Hear your receptionist before customers do"
-        description={`Test the same ${demoConfig.businessName} conversation your callers hear. Keep tests short — this uses the live voice connection.`}
-        actions={demoConfig.sharePath ? <Link className="button button-secondary button-md" to={demoConfig.sharePath} target="_blank">Open public demo <Link2 size={15} /></Link> : undefined}
+        description={`Test the published ${demoConfig.businessName} conversation in your browser. Keep tests short — this uses live voice services.`}
+        actions={!costSaver && demoConfig.sharePath ? <Link className="button button-secondary button-md" to={demoConfig.sharePath} target="_blank">Open public demo <Link2 size={15} /></Link> : undefined}
       />
       <div className="receptionist-test-layout">
-        <ReceptionistCall config={demoConfig} />
+        {costSaver ? <CostSaverCall
+          config={demoConfig}
+          available={costSaverReadiness.data?.ready === true}
+          unavailableReason={costSaverReadiness.error
+            ? "Cost Saver readiness could not be checked. Please try again."
+            : costSaverReadiness.data?.reason}
+          createSession={() => api.createCostSaverSession(activeClientId!)}
+          endSession={(session) => api.endCostSaverSession(activeClientId!, session.roomName)}
+        /> : <ReceptionistCall config={demoConfig} />}
         <Card className="panel receptionist-test-brief">
           <SectionHeading title="What to test" description="Try the questions your customers ask most often." />
           <div className="team-list">

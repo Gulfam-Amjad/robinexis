@@ -37,10 +37,22 @@ type TranscriptEntry = {
   final: boolean;
 };
 
+type CostSaverSession = {
+  url: string;
+  token: string;
+  roomName: string;
+  expiresInSeconds: number;
+  clientId: string;
+};
+
+const AGENT_JOIN_TIMEOUT_MS = 20_000;
+
 export function CostSaverCall({
   config,
   available,
   unavailableReason,
+  createSession = api.createProviderComparisonSession,
+  endSession = (session) => api.endProviderComparisonSession(session.roomName),
   disabled = false,
   requestStart,
   onActiveChange,
@@ -48,6 +60,8 @@ export function CostSaverCall({
   config: ReceptionistDemoConfig;
   available: boolean;
   unavailableReason?: string;
+  createSession?: () => Promise<CostSaverSession>;
+  endSession?: (session: CostSaverSession) => Promise<unknown>;
   disabled?: boolean;
   requestStart?: () => boolean;
   onActiveChange?: (active: boolean) => void;
@@ -60,19 +74,26 @@ export function CostSaverCall({
   const [error, setError] = useState("");
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const roomRef = useRef<Room | undefined>(undefined);
+  const sessionRef = useRef<CostSaverSession | undefined>(undefined);
   const connectedAt = useRef(0);
   const audioRef = useRef<HTMLAudioElement>(null);
   const transcriptEnd = useRef<HTMLDivElement>(null);
   const activeChangeRef = useRef(onActiveChange);
   const requestStartRef = useRef(requestStart);
   const startAttempt = useRef(0);
+  const createSessionRef = useRef(createSession);
+  const endSessionRef = useRef(endSession);
   activeChangeRef.current = onActiveChange;
   requestStartRef.current = requestStart;
+  createSessionRef.current = createSession;
+  endSessionRef.current = endSession;
 
   const stop = useCallback(async (ended = true) => {
     startAttempt.current += 1;
     const room = roomRef.current;
+    const session = sessionRef.current;
     roomRef.current = undefined;
+    sessionRef.current = undefined;
     if (room) {
       await room.localParticipant.setMicrophoneEnabled(false).catch(() => undefined);
       if (audioRef.current) {
@@ -92,16 +113,20 @@ export function CostSaverCall({
     setAgentSpeaking(false);
     if (ended) setPhase("ended");
     activeChangeRef.current?.(false);
+    if (session) await endSessionRef.current(session).catch(() => undefined);
   }, []);
 
   useEffect(() => () => {
     startAttempt.current += 1;
     const room = roomRef.current;
+    const session = sessionRef.current;
     roomRef.current = undefined;
+    sessionRef.current = undefined;
     if (room) {
       room.disconnect();
       room.removeAllListeners();
     }
+    if (session) void endSessionRef.current(session).catch(() => undefined);
     activeChangeRef.current?.(false);
   }, []);
 
@@ -143,7 +168,7 @@ export function CostSaverCall({
   }, []);
 
   const start = useCallback(async () => {
-    if (!available || disabled) return;
+    if (!available || disabled || phase === "permission" || phase === "starting" || connected) return;
     if (requestStartRef.current && !requestStartRef.current()) {
       setError("End the Premium call before starting Cost Saver.");
       return;
@@ -162,8 +187,12 @@ export function CostSaverCall({
       permission.getTracks().forEach((track) => track.stop());
       if (attempt !== startAttempt.current) return;
       setPhase("starting");
-      const session = await api.createProviderComparisonSession();
-      if (attempt !== startAttempt.current) return;
+      const session = await createSessionRef.current();
+      if (attempt !== startAttempt.current) {
+        await endSessionRef.current(session).catch(() => undefined);
+        return;
+      }
+      sessionRef.current = session;
       const room = new Room({ adaptiveStream: true, dynacast: true });
       roomRef.current = room;
       room.on(RoomEvent.TrackSubscribed, (track: RemoteTrack) => {
@@ -174,14 +203,23 @@ export function CostSaverCall({
         setAgentSpeaking(speakers.some((speaker) => !speaker.isLocal));
       });
       room.on(RoomEvent.Disconnected, () => {
+        if (attempt !== startAttempt.current || roomRef.current !== room) return;
+        roomRef.current = undefined;
+        const endedSession = sessionRef.current;
+        sessionRef.current = undefined;
         setConnected(false);
         setAgentSpeaking(false);
         setPhase("ended");
         activeChangeRef.current?.(false);
+        if (endedSession) void endSessionRef.current(endedSession).catch(() => undefined);
       });
       await room.connect(session.url, session.token, { autoSubscribe: true });
       if (attempt !== startAttempt.current) {
+        room.removeAllListeners();
         room.disconnect();
+        if (roomRef.current === room) roomRef.current = undefined;
+        if (sessionRef.current === session) sessionRef.current = undefined;
+        await endSessionRef.current(session).catch(() => undefined);
         return;
       }
       await room.localParticipant.setMicrophoneEnabled(true, {
@@ -189,6 +227,16 @@ export function CostSaverCall({
         noiseSuppression: true,
         autoGainControl: true,
       });
+      await waitForAgent(room, AGENT_JOIN_TIMEOUT_MS);
+      if (attempt !== startAttempt.current) {
+        await room.localParticipant.setMicrophoneEnabled(false).catch(() => undefined);
+        room.removeAllListeners();
+        room.disconnect();
+        if (roomRef.current === room) roomRef.current = undefined;
+        if (sessionRef.current === session) sessionRef.current = undefined;
+        await endSessionRef.current(session).catch(() => undefined);
+        return;
+      }
       connectedAt.current = Date.now();
       setConnected(true);
       setMuted(false);
@@ -199,7 +247,7 @@ export function CostSaverCall({
       setError(costSaverStartError(cause));
       setPhase("idle");
     }
-  }, [available, disabled, receiveTranscript, stop]);
+  }, [available, connected, disabled, phase, receiveTranscript, stop]);
 
   const toggleMute = useCallback(async () => {
     const room = roomRef.current;
@@ -217,7 +265,7 @@ export function CostSaverCall({
     hasError: Boolean(error),
   });
   const statusCopy = receptionistStatusCopy(status, config.agentName, config.businessName);
-  const visibleTranscript = transcript.filter((turn) => turn.final);
+  const visibleTranscript = transcript;
 
   return (
     <section className="comparison-call">
@@ -238,7 +286,7 @@ export function CostSaverCall({
         </div>
         <div className="voice-controls">
           {!connected ? (
-            <Button className="voice-start" disabled={!available || disabled} onClick={start}>
+            <Button className="voice-start" disabled={!available || disabled || phase === "permission" || phase === "starting"} onClick={start}>
               {status === "ended" || status === "error" ? <RotateCcw /> : <Phone />}
               {disabled ? "End the Premium call first" : status === "ended" ? "Start another call" : `Talk to ${config.agentName}`}
             </Button>
@@ -256,10 +304,10 @@ export function CostSaverCall({
         </div>
       </div>
       <Card className="comparison-transcript">
-        <SectionHeading title="Live conversation" description={connected ? "Shared Blades brief, cheaper component pipeline." : "Your transcript will appear here."} />
+        <SectionHeading title="Live conversation" description={connected ? `${config.businessName}’s published brief through the lower-cost voice pipeline.` : "Your transcript will appear here."} />
         <div className="transcript-feed" aria-live="polite">
-          {!visibleTranscript.length ? <div className="transcript-empty"><Headphones /><p>Start the call and compare the same salon questions.</p></div>
-            : visibleTranscript.map((turn) => <div className={`transcript-bubble transcript-bubble-${turn.role}`} key={turn.id}>
+          {!visibleTranscript.length ? <div className="transcript-empty"><Headphones /><p>Start the call and try questions from {config.businessName}’s published brief.</p></div>
+            : visibleTranscript.map((turn) => <div className={`transcript-bubble transcript-bubble-${turn.role}${turn.final ? "" : " transcript-bubble-interim"}`} key={turn.id}>
               <span>{turn.role === "agent" ? config.agentName : "You"}</span><p>{turn.message}</p>
             </div>)}
           <div ref={transcriptEnd} />
@@ -267,4 +315,30 @@ export function CostSaverCall({
       </Card>
     </section>
   );
+}
+
+export async function waitForAgent(room: Room, timeoutMs: number): Promise<void> {
+  if (room.remoteParticipants.size > 0) return;
+  await new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      globalThis.clearTimeout(timer);
+      room.off(RoomEvent.ParticipantConnected, onParticipant);
+      room.off(RoomEvent.Disconnected, onDisconnected);
+    };
+    const timer = globalThis.setTimeout(() => {
+      cleanup();
+      reject(new Error("cost_saver_agent_unavailable"));
+    }, timeoutMs);
+    const onParticipant = () => {
+      cleanup();
+      resolve();
+    };
+    const onDisconnected = () => {
+      cleanup();
+      reject(new Error("cost_saver_connection_ended"));
+    };
+    room.on(RoomEvent.ParticipantConnected, onParticipant);
+    room.on(RoomEvent.Disconnected, onDisconnected);
+    if (room.remoteParticipants.size > 0) onParticipant();
+  });
 }

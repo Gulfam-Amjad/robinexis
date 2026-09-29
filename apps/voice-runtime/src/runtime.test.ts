@@ -44,8 +44,9 @@ describe("voice runtime safety contracts", () => {
       elevenLabsTtsModel: "eleven_flash_v2_5",
       deepgramModel: "nova-3",
       deepgramEndpointingMs: 300,
-      endpointingMinDelayMs: 850,
-      endpointingMaxDelayMs: 3_500,
+      llmMaxCompletionTokens: 320,
+      endpointingMinDelayMs: 650,
+      endpointingMaxDelayMs: 2_800,
       interruptionMinDurationMs: 400,
       interruptionMinWords: 1,
     });

@@ -29,10 +29,12 @@ function selectDeployment(
 ): ProviderDeployment | undefined {
   if (liveKitActive) {
     return deployments.find((item) =>
-      item.provider === "livekit-cascade" && item.status === "active");
+      item.provider === "livekit-cascade" && item.status === "active" &&
+      item.config.browserOnly !== true);
   }
   return deployments.find((item) =>
-    item.provider === "livekit-cascade" && item.status === "staged");
+    item.provider === "livekit-cascade" && item.status === "staged" &&
+    item.config.browserOnly !== true);
 }
 
 function xmlError(status: number, code: string): TwimlResult {

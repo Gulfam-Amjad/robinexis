@@ -106,6 +106,50 @@ export class PostgresStore implements PlatformStore {
       [c.id, c.slug, c],
     );
   }
+  async deleteClient(clientId: string) {
+    const connection = await this.pool.connect();
+    try {
+      await connection.query("BEGIN");
+      await connection.query(
+        "UPDATE booking_records SET call_id = NULL WHERE client_id = $1 AND call_id IS NOT NULL",
+        [clientId],
+      );
+      // Break tenant-local cross-table references before deleting the client.
+      // These rows all reference clients with CASCADE, but their additional
+      // NO ACTION links form dependency chains (and a switch/snapshot cycle)
+      // that cannot safely rely on cascade trigger order.
+      await connection.query(
+        "UPDATE provider_switch_operations SET rollback_snapshot_id = NULL WHERE client_id = $1",
+        [clientId],
+      );
+      await connection.query("DELETE FROM provider_rollback_snapshots WHERE client_id = $1", [clientId]);
+      await connection.query("DELETE FROM provider_switch_operations WHERE client_id = $1", [clientId]);
+      await connection.query("DELETE FROM provider_deployments WHERE client_id = $1", [clientId]);
+      await connection.query("DELETE FROM phone_endpoints WHERE client_id = $1", [clientId]);
+      await connection.query("DELETE FROM agent_instances WHERE client_id = $1", [clientId]);
+      await connection.query("DELETE FROM prompt_versions WHERE client_id = $1", [clientId]);
+      await connection.query("DELETE FROM call_sessions WHERE client_id = $1", [clientId]);
+      await connection.query("DELETE FROM tool_actions WHERE client_id = $1", [clientId]);
+      await connection.query("DELETE FROM suppressions WHERE client_id = $1", [clientId]);
+      await connection.query("DELETE FROM usage_counters WHERE client_id = $1", [clientId]);
+      await connection.query(
+        "DELETE FROM outbound_jobs WHERE payload->>'clientId' = $1",
+        [clientId],
+      );
+      await connection.query(
+        "DELETE FROM call_notes WHERE payload->>'clientId' = $1",
+        [clientId],
+      );
+      const deleted = await connection.query("DELETE FROM clients WHERE id = $1", [clientId]);
+      await connection.query("COMMIT");
+      return (deleted.rowCount ?? 0) > 0;
+    } catch (error) {
+      await connection.query("ROLLBACK");
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
   async getDraftClient(clientId: string) {
     const r = await this.pool.query(
       `SELECT * FROM client_config_revisions
@@ -493,11 +537,14 @@ export class PostgresStore implements PlatformStore {
     );
   }
   async getCurrentSubscription(clientId: string) {
+    return (await this.listSubscriptions(clientId))[0];
+  }
+  async listSubscriptions(clientId: string) {
     const r = await this.pool.query(
-      "SELECT * FROM subscriptions WHERE client_id = $1 ORDER BY updated_at DESC, id DESC LIMIT 1",
+      "SELECT * FROM subscriptions WHERE client_id = $1 ORDER BY updated_at DESC, id DESC",
       [clientId],
     );
-    return r.rows[0] ? subscriptionFromRow(r.rows[0]) : undefined;
+    return r.rows.map(subscriptionFromRow);
   }
   async upsertSubscription(subscription: Subscription) {
     await this.pool.query(

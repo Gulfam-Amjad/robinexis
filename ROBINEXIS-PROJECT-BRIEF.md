@@ -52,7 +52,7 @@ Caller
 Public surfaces (from repo config, not secrets):
 
 - Dashboard: `https://app.robinexis.com` (`robinexis-pink.vercel.app` redirects here; sign-in works on the canonical host only)
-- API: `https://robinexisapi-production-3836.up.railway.app`
+- API: `https://api.robinexis.com`
 - Live salon number: `+447446868067` — **must stay on ElevenLabs, never pointed at a Railway `/twiml`**
 - Widget demo page: `/demo/blades-hair` (Sophie / Blades Hair, City of London)
 

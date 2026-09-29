@@ -126,6 +126,35 @@ describe("Robinexis API client", () => {
     );
     expect(fetchMock.mock.calls[0]?.[1]).not.toHaveProperty("body");
   });
+
+  it("scopes Cost Saver preview readiness and sessions to the workspace path", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        clientId: "client_1",
+        configured: true,
+        ready: true,
+        missing: [],
+      }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        url: "wss://project.livekit.cloud",
+        token: "tenant-token",
+        roomName: "preview-room",
+        expiresInSeconds: 300,
+        clientId: "client_1",
+      }), { status: 201, headers: { "Content-Type": "application/json" } }));
+
+    await api.costSaverReadiness("client_1");
+    const session = await api.createCostSaverSession("client_1");
+
+    expect(session.token).toBe("tenant-token");
+    expect(fetchMock.mock.calls[0]?.[0]).toEqual(expect.stringContaining(
+      "/api/v1/clients/client_1/cost-saver/readiness",
+    ));
+    expect(fetchMock.mock.calls[1]?.[0]).toEqual(expect.stringContaining(
+      "/api/v1/clients/client_1/cost-saver/session",
+    ));
+    expect(fetchMock.mock.calls[1]?.[1]).toEqual(expect.objectContaining({ method: "POST" }));
+  });
 });
 
 describe("format helpers", () => {

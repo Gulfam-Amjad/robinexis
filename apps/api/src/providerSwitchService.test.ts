@@ -13,6 +13,27 @@ import { ProviderSwitchService } from "./providerSwitchService.js";
 const NOW = "2026-09-16T10:00:00.000Z";
 
 describe("provider safe switch", () => {
+  it("ignores browser-only previews when selecting a phone switch target", async () => {
+    const { store, adapters, client } = await fixture();
+    await store.upsertProviderDeployment({
+      ...deployment(client.id, "browser_preview", "livekit-cascade", "staged", {
+        browserOnly: true,
+        purpose: "workspace-preview",
+      }),
+      providerDeploymentId: `preview:${client.id}`,
+      createdAt: "2026-09-17T10:00:00.000Z",
+      updatedAt: "2026-09-17T10:00:00.000Z",
+    });
+
+    const preview = await new ProviderSwitchService(
+      store,
+      adapters,
+      { enabled: true, routingEnabled: true, qualityEvaluationEnabled: true },
+    ).preview(client.id, "livekit-cascade");
+
+    expect(preview.targetDeploymentId).toBe("deployment_lk");
+  });
+
   it("lazily represents an existing ElevenLabs tenant without routing writes", async () => {
     const store = new MemoryStore();
     const client = {

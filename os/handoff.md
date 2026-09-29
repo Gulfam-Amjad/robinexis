@@ -41,11 +41,25 @@ status: complete
 
 ## Open threads / blockers
 
+- Railway project `pleasing-dedication` auto-deploys the active API and worker
+  from GitHub. Vercel hosts the web app. On 29 September the IaC gained a
+  dedicated, browser-only `@robinexis/voice-runtime` candidate; do not call it
+  active until its deployment and both Cost Saver canaries pass. The project is
+  on a personal Trial workspace, not a Pro workspace, and the 26 September
+  banner gave 27 days or $5.00 before shutdown. See
+  [[brains/robinexis/wiki/concept-railway-live-deployment]].
+- The 20 September blocker below applied to `robinexisbackend-sys/robinexis_code`
+  and Vercel. Vercel GitHub linking was not part of the 26 September update.
 - Railway and Vercel reject Git source linking until their GitHub Apps receive
   private-repository access.
 - Twilio has no valid separate verified caller ID for an automated inbound
   Blades call.
 - Stripe standard secret-key rotation requires the account-owner dashboard.
+- The 29 September dedicated Cost Saver runtime is code- and test-ready but not
+  applied. Railway CLI 5.63.1 can authenticate to `pleasing-dedication`, while
+  `railway config plan` is rejected by the local `railway/iac` compatibility
+  check. Resolve that toolchain issue before applying IaC or running live
+  Cost Saver canaries.
 
 ## Watch-outs
 

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { BLADES_HAIR_ID, DEMO_CLIENT_ID } from "./ids.js";
 import { MemoryStore } from "./memory.js";
+import { seedStore } from "./seed.js";
 import { canTransitionOnboarding } from "./lifecycle.js";
 import type {
   BookingRecord,
@@ -310,5 +312,84 @@ describe("MemoryStore SaaS foundation", () => {
     expect(await store.retryOnboardingJob("client-a", job.id, "worker-b", "again", now)).toBe(false);
     expect(await store.deadLetterOnboardingJob("client-a", job.id, "worker-b", "exhausted", now)).toBe(true);
     expect((await store.getOnboardingJob("client-a", job.id))?.status).toBe("dead_letter");
+  });
+
+  it("deletes a client and the rows that do not cascade", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    store.calls.set("call_blades", {
+      id: "call_blades",
+      clientId: BLADES_HAIR_ID,
+      direction: "inbound",
+      objective: "book",
+      promptVersionId: "pv_test",
+      transcript: [],
+      collected: {},
+      toolHistory: [],
+      state: "done",
+      status: "completed",
+      createdAt: now,
+      updatedAt: now,
+    });
+    store.calls.set("call_demo", {
+      id: "call_demo",
+      clientId: DEMO_CLIENT_ID,
+      direction: "inbound",
+      objective: "book",
+      promptVersionId: "pv_demo",
+      transcript: [],
+      collected: {},
+      toolHistory: [],
+      state: "done",
+      status: "completed",
+      createdAt: now,
+      updatedAt: now,
+    });
+    store.tools.push({
+      id: "tool_blades",
+      callId: "call_blades",
+      clientId: BLADES_HAIR_ID,
+      name: "create_booking",
+      input: {},
+      result: {},
+      at: now,
+    });
+    store.suppressions.push(
+      { clientId: BLADES_HAIR_ID, phone: "+447700900111", reason: "opt-out", createdAt: now },
+      { clientId: DEMO_CLIENT_ID, phone: "+447700900222", reason: "opt-out", createdAt: now },
+    );
+    store.usage.set(`${BLADES_HAIR_ID}:2026-09`, {
+      clientId: BLADES_HAIR_ID, month: "2026-09", inboundMinutes: 3, outboundMinutes: 1,
+    });
+    store.usage.set(`${DEMO_CLIENT_ID}:2026-09`, {
+      clientId: DEMO_CLIENT_ID, month: "2026-09", inboundMinutes: 2, outboundMinutes: 0,
+    });
+    await store.appendOperatorAudit({
+      id: "audit_delete",
+      clientId: BLADES_HAIR_ID,
+      actorId: "user_operator",
+      action: "workspace.deleted",
+      detail: { clientId: BLADES_HAIR_ID, businessName: "Blades Hair" },
+      createdAt: now,
+    });
+
+    expect(await store.deleteClient("missing_client")).toBe(false);
+    expect(await store.deleteClient(BLADES_HAIR_ID)).toBe(true);
+    expect(await store.getClient(BLADES_HAIR_ID)).toBeUndefined();
+    expect((await store.listClients()).some((client) => client.id === BLADES_HAIR_ID)).toBe(false);
+    expect(await store.getClient(DEMO_CLIENT_ID)).toBeTruthy();
+    expect(store.prompts.some((prompt) => prompt.clientId === BLADES_HAIR_ID)).toBe(false);
+    expect(store.prompts.some((prompt) => prompt.clientId === DEMO_CLIENT_ID)).toBe(true);
+    expect(store.calls.has("call_blades")).toBe(false);
+    expect(store.calls.has("call_demo")).toBe(true);
+    expect(store.tools.some((tool) => tool.clientId === BLADES_HAIR_ID)).toBe(false);
+    expect(store.suppressions.map((item) => item.clientId)).toEqual([DEMO_CLIENT_ID]);
+    expect(store.usage.has(`${BLADES_HAIR_ID}:2026-09`)).toBe(false);
+    expect(store.usage.has(`${DEMO_CLIENT_ID}:2026-09`)).toBe(true);
+    expect((await store.listOperatorAudit())[0]).toMatchObject({
+      action: "workspace.deleted",
+      clientId: undefined,
+      detail: { businessName: "Blades Hair" },
+    });
   });
 });

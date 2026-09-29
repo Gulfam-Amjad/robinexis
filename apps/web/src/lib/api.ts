@@ -226,6 +226,35 @@ export const api = {
       expiresInSeconds: number;
       clientId: string;
     }>("/api/v1/admin/provider-comparison/session", { method: "POST" }),
+  endProviderComparisonSession: (roomName: string) =>
+    request<{ ended: boolean }>(
+      `/api/v1/admin/provider-comparison/session/${encodeURIComponent(roomName)}`,
+      { method: "DELETE" },
+    ),
+  costSaverReadiness: (clientId: string) =>
+    request<{
+      clientId: string;
+      businessName?: string;
+      configured: boolean;
+      ready: boolean;
+      reason?: string;
+      missing: string[];
+    }>(`/api/v1/clients/${encodeURIComponent(clientId)}/cost-saver/readiness`),
+  createCostSaverSession: (clientId: string) =>
+    request<{
+      url: string;
+      token: string;
+      roomName: string;
+      expiresInSeconds: number;
+      clientId: string;
+    }>(`/api/v1/clients/${encodeURIComponent(clientId)}/cost-saver/session`, {
+      method: "POST",
+    }),
+  endCostSaverSession: (clientId: string, roomName: string) =>
+    request<{ ended: boolean }>(
+      `/api/v1/clients/${encodeURIComponent(clientId)}/cost-saver/session/${encodeURIComponent(roomName)}`,
+      { method: "DELETE" },
+    ),
   refreshElevenLabsAccount: () =>
     request<ProviderUsagePortfolio["accountSnapshots"][number]>(
       "/api/v1/admin/provider-usage/elevenlabs/refresh",
@@ -273,6 +302,16 @@ export const api = {
     request<{ client?: Client; republishRequired?: boolean } | Client>(`/api/v1/clients/${encodeURIComponent(id)}`, {
       method: "PATCH",
       body: JSON.stringify(input),
+    }),
+  updateWorkspace: (id: string, input: { businessName: string; slug: string }) =>
+    request<Client>(`/api/v1/admin/clients/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
+  deleteClient: (id: string, confirmation: string) =>
+    request<{ deleted: true; clientId: string }>(`/api/v1/clients/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      body: JSON.stringify({ confirmation }),
     }),
   publishClient: (id: string) =>
     request<{ client?: Client; promptVersion?: PublicPromptVersion }>(`/api/v1/clients/${encodeURIComponent(id)}/publish`, {

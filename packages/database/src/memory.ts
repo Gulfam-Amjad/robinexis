@@ -78,6 +78,7 @@ export interface PlatformStore {
   getClientByElevenLabsAgentId(agentId: string): Promise<ClientConfig | undefined>;
   listClients(): Promise<ClientConfig[]>;
   upsertClient(c: ClientConfig): Promise<void>;
+  deleteClient(clientId: string): Promise<boolean>;
   getDraftClient(clientId: string): Promise<ClientConfigRevision | undefined>;
   saveDraftClient(revision: ClientConfigRevision): Promise<void>;
   publishClientDraft(revision: ClientConfigRevision, prompt: PromptVersion): Promise<void>;
@@ -115,6 +116,7 @@ export interface PlatformStore {
   upsertCalendarEventType(eventType: CalendarEventType): Promise<void>;
 
   getCurrentSubscription(clientId: string): Promise<Subscription | undefined>;
+  listSubscriptions(clientId: string): Promise<Subscription[]>;
   upsertSubscription(subscription: Subscription): Promise<void>;
   claimStripeEvent(event: StripeEvent): Promise<boolean>;
   saveStripeEvent(event: StripeEvent): Promise<void>;
@@ -356,6 +358,60 @@ export class MemoryStore implements PlatformStore {
   async upsertClient(c: ClientConfig) {
     this.clients.set(c.id, c);
   }
+  async deleteClient(clientId: string) {
+    if (!this.clients.has(clientId)) return false;
+    this.prompts = this.prompts.filter((item) => item.clientId !== clientId);
+    this.tools = this.tools.filter((item) => item.clientId !== clientId);
+    this.suppressions = this.suppressions.filter((item) => item.clientId !== clientId);
+    this.notes = this.notes.filter((item) => item.clientId !== clientId);
+    this.forgetClient(this.calls, clientId);
+    this.forgetClient(this.usage, clientId);
+    this.forgetClient(this.clientRevisions, clientId);
+    this.forgetClient(this.jobs, clientId);
+    this.forgetClient(this.knowledgeDocuments, clientId);
+    this.forgetClient(this.knowledgeChunks, clientId);
+    this.forgetClient(this.memberships, clientId);
+    this.forgetClient(this.userProfiles, clientId);
+    this.forgetClient(this.tenantRequests, clientId);
+    this.forgetClient(this.locations, clientId);
+    this.forgetClient(this.agentInstances, clientId);
+    this.forgetClient(this.phoneEndpoints, clientId);
+    this.forgetClient(this.twilioConnections, clientId);
+    this.forgetClient(this.calendarConnections, clientId);
+    this.forgetClient(this.calendarEventTypes, clientId);
+    this.forgetClient(this.subscriptions, clientId);
+    this.forgetClient(this.bookingRecords, clientId);
+    this.forgetClient(this.creditLedger, clientId);
+    this.forgetClient(this.provisioningRuns, clientId);
+    this.forgetClient(this.onboardingJobs, clientId);
+    this.forgetClient(this.onboardingOutbox, clientId);
+    this.forgetClient(this.notifications, clientId);
+    this.forgetClient(this.tenantFeatureEntitlements, clientId);
+    this.forgetClient(this.messageUsagePeriods, clientId);
+    this.forgetClient(this.messageSessions, clientId);
+    this.forgetClient(this.messageEvents, clientId);
+    this.forgetClient(this.scheduledFollowups, clientId);
+    this.forgetClient(this.overagePurchases, clientId);
+    this.forgetClient(this.websiteSources, clientId);
+    this.forgetClient(this.websiteExtractionRuns, clientId);
+    this.forgetClient(this.extractedFacts, clientId);
+    this.forgetClient(this.onboardingGaps, clientId);
+    this.forgetClient(this.onboardingWizards, clientId);
+    this.forgetClient(this.providerResources, clientId);
+    this.forgetClient(this.providerDeployments, clientId);
+    this.forgetClient(this.providerSwitchOperations, clientId);
+    this.forgetClient(this.providerRollbackSnapshots, clientId);
+    this.forgetClient(this.providerUsageCostEvents, clientId);
+    this.forgetClient(this.providerAlertRules, clientId);
+    for (const [id, record] of this.operatorAudit) {
+      if (record.clientId === clientId) this.operatorAudit.set(id, { ...record, clientId: undefined });
+    }
+    for (const [id, event] of this.stripeEvents) {
+      if (event.clientId === clientId) this.stripeEvents.set(id, { ...event, clientId: undefined });
+    }
+    this.clients.delete(clientId);
+    return true;
+  }
   async getDraftClient(clientId: string) {
     return [...this.clientRevisions.values()]
       .filter((revision) => revision.clientId === clientId && revision.status === "draft")
@@ -503,9 +559,12 @@ export class MemoryStore implements PlatformStore {
     this.calendarEventTypes.set(`${eventType.clientId}:${eventType.id}`, { ...eventType });
   }
   async getCurrentSubscription(clientId: string) {
+    return (await this.listSubscriptions(clientId))[0];
+  }
+  async listSubscriptions(clientId: string) {
     return [...this.subscriptions.values()]
       .filter((subscription) => subscription.clientId === clientId)
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
   async upsertSubscription(subscription: Subscription) {
     this.subscriptions.set(`${subscription.clientId}:${subscription.id}`, { ...subscription });
@@ -1663,6 +1722,12 @@ export class MemoryStore implements PlatformStore {
       }
     }
     return counts;
+  }
+
+  private forgetClient<T extends { clientId?: string }>(map: Map<string, T>, clientId: string) {
+    for (const [key, value] of map) {
+      if (value.clientId === clientId) map.delete(key);
+    }
   }
 
   private analyticsCalls(clientId: string, range: AnalyticsRange) {

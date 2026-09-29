@@ -33,6 +33,7 @@ export default defineAgent({
     const toolHistory: PostCallPayload["toolHistory"] = [];
     const latency = createLatencyTracker();
     let lastRecoveryAt = 0;
+    let recoveryCount = 0;
 
     const session = new voice.AgentSession({
       stt: new deepgram.STT({
@@ -54,7 +55,7 @@ export default defineAgent({
           temperature: 0.2,
           toolChoice: "auto",
           parallelToolCalls: false,
-          maxCompletionTokens: 180,
+          maxCompletionTokens: env.llmMaxCompletionTokens,
           reasoningEffort: "low",
         })
         : new google.LLM({
@@ -107,9 +108,11 @@ export default defineAgent({
       runtimeLog("voice_runtime_provider_error", { errorType });
       if (
         (errorType === "rate_limit" || errorType === "llm") &&
-        Date.now() - lastRecoveryAt > 5_000
+        recoveryCount < 2 &&
+        Date.now() - lastRecoveryAt > 8_000
       ) {
         lastRecoveryAt = Date.now();
+        recoveryCount += 1;
         session.say("Sorry, I had trouble checking that. Please say that once more.");
       }
     });

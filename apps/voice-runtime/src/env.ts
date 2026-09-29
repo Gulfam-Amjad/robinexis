@@ -10,6 +10,7 @@ export interface VoiceRuntimeEnv {
   googleApiKey?: string;
   groqModel: string;
   geminiModel: string;
+  llmMaxCompletionTokens: number;
   elevenLabsApiKey: string;
   elevenLabsVoiceId: string;
   elevenLabsTtsModel: string;
@@ -70,11 +71,17 @@ export function loadVoiceRuntimeEnv(env: NodeJS.ProcessEnv = process.env): Voice
     googleApiKey: env.GOOGLE_API_KEY?.trim() || undefined,
     groqModel: env.GROQ_LLM_MODEL?.trim() || "openai/gpt-oss-120b",
     geminiModel: env.GEMINI_LLM_MODEL?.trim() || "gemini-3.6-flash",
+    llmMaxCompletionTokens: boundedInteger(
+      env.VOICE_LLM_MAX_COMPLETION_TOKENS,
+      320,
+      120,
+      1_000,
+    ),
     elevenLabsTtsModel: env.ELEVENLABS_TTS_MODEL?.trim() || "eleven_flash_v2_5",
     deepgramModel: env.DEEPGRAM_STT_MODEL?.trim() || "nova-3",
     deepgramEndpointingMs: boundedInteger(env.DEEPGRAM_ENDPOINTING_MS, 300, 100, 2_000),
-    endpointingMinDelayMs: boundedInteger(env.VOICE_ENDPOINTING_MIN_DELAY_MS, 850, 300, 3_000),
-    endpointingMaxDelayMs: boundedInteger(env.VOICE_ENDPOINTING_MAX_DELAY_MS, 3_500, 1_000, 8_000),
+    endpointingMinDelayMs: boundedInteger(env.VOICE_ENDPOINTING_MIN_DELAY_MS, 650, 300, 3_000),
+    endpointingMaxDelayMs: boundedInteger(env.VOICE_ENDPOINTING_MAX_DELAY_MS, 2_800, 1_000, 8_000),
     interruptionMinDurationMs: boundedInteger(env.VOICE_INTERRUPTION_MIN_DURATION_MS, 400, 150, 3_000),
     interruptionMinWords: boundedInteger(env.VOICE_INTERRUPTION_MIN_WORDS, 1, 0, 10),
   };

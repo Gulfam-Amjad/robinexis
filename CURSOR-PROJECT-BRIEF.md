@@ -66,7 +66,7 @@ Dashboard (Vercel)
 | Surface | Value |
 |---------|--------|
 | Web | `https://app.robinexis.com` (Vite `:5173`) — `robinexis-pink.vercel.app` redirects here; Supabase Auth only allows sign-in on the canonical host |
-| API | `https://robinexisapi-production-3836.up.railway.app` (`:8081`) |
+| API | `https://api.robinexis.com` (`:8081` locally) |
 | Local Postgres | `:5433` (`pgvector/pgvector:pg16`, user/db `robinexis`) |
 | Local Redis | `:6379` (optional; in-process Map if `REDIS_URL` missing) |
 | Retired gateway (do not attach live number) | `https://robinexisvoice-gateway-production.up.railway.app` — scaled to zero |

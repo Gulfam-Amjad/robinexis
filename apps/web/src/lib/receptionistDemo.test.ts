@@ -57,7 +57,9 @@ describe("branded receptionist state", () => {
     expect(costSaverStartError(new DOMException("denied", "NotAllowedError")))
       .toContain("Microphone access was blocked");
     expect(costSaverStartError(new Error("cost_saver_runtime_not_configured")))
-      .toBe("cost_saver_runtime_not_configured");
+      .toBe("Cost Saver is still being configured for this workspace.");
+    expect(costSaverStartError(new Error("cost_saver_agent_unavailable")))
+      .toMatch(/did not join in time/i);
     expect(costSaverStartError(undefined)).toBe("The Cost Saver call could not be started.");
   });
 });

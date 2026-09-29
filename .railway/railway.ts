@@ -136,6 +136,7 @@ export default defineRailway(() => {
       PROVIDER_SWITCH_ROUTING_ENABLED: "false",
       PROVIDER_QUALITY_EVALUATION_ENABLED: "true",
       CHEAP_VOICE_DEFAULT_ENABLED: "false",
+      VOICE_RUNTIME_ENABLED: "true",
       WEB_ORIGIN: "https://app.robinexis.com,https://robinexis-pink.vercel.app",
       SUPABASE_URL: "https://cdbcbzvhzdiwwcrmxjgi.supabase.co",
       SUPABASE_JWT_SECRET: preserve(),
@@ -190,7 +191,39 @@ export default defineRailway(() => {
     },
   });
 
+  const voiceRuntime = service("@robinexis/voice-runtime", {
+    source,
+    build: "node scripts/railway.mjs voice-runtime",
+    start: "node scripts/railway.mjs start",
+    env: {
+      NODE_ENV: "production",
+      NODE_VERSION: "24",
+      RAILWAY_BUILD_TARGET: "voice-runtime",
+      VOICE_RUNTIME_ENABLED: "true",
+      VOICE_RUNTIME_API_BASE_URL: "https://api.robinexis.com",
+      VOICE_RUNTIME_INTERNAL_SECRET: preserve(),
+      VOICE_RUNTIME_SIGNING_SECRET: preserve(),
+      LIVEKIT_URL: preserve(),
+      LIVEKIT_API_KEY: preserve(),
+      LIVEKIT_API_SECRET: preserve(),
+      LIVEKIT_AGENT_NAME: "robinexis-alternate-runtime",
+      DEEPGRAM_API_KEY: preserve(),
+      DEEPGRAM_STT_MODEL: "nova-3",
+      VOICE_LLM_PROVIDER: "groq",
+      GROQ_API_KEY: preserve(),
+      GROQ_LLM_MODEL: "openai/gpt-oss-120b",
+      GOOGLE_API_KEY: preserve(),
+      GEMINI_LLM_MODEL: "gemini-3.6-flash",
+      ELEVENLABS_API_KEY: preserve(),
+      ELEVENLABS_VOICE_ID: preserve(),
+      ELEVENLABS_TTS_MODEL: "eleven_flash_v2_5",
+      VOICE_LLM_MAX_COMPLETION_TOKENS: "320",
+      VOICE_ENDPOINTING_MIN_DELAY_MS: "650",
+      VOICE_ENDPOINTING_MAX_DELAY_MS: "2800",
+    },
+  });
+
   return project("robinexis", {
-    resources: [api, worker],
+    resources: [api, worker, voiceRuntime],
   });
 });

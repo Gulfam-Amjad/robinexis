@@ -576,3 +576,216 @@ describe("product route tenant authorization", () => {
     }
   });
 });
+
+describe("workspace edit and delete", () => {
+  it("lets an operator rename a workspace and rejects a taken or invalid slug", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    const live = await store.getClient(BLADES_HAIR_ID);
+    await store.saveDraftClient({
+      id: "rev_blades_draft",
+      clientId: BLADES_HAIR_ID,
+      status: "draft",
+      config: { ...live!, greeting: "Draft greeting" },
+      createdAt: "2026-09-04T09:00:00.000Z",
+      updatedAt: "2026-09-04T09:00:00.000Z",
+    });
+    await store.upsertLocation({
+      id: "loc_blades_primary",
+      clientId: BLADES_HAIR_ID,
+      slug: "primary",
+      name: "Old name",
+      timezone: "Europe/London",
+      isPrimary: true,
+      createdAt: "2026-09-04T09:00:00.000Z",
+      updatedAt: "2026-09-04T09:00:00.000Z",
+    });
+
+    const forbidden = await request(store, salonActor, `/api/v1/admin/clients/${BLADES_HAIR_ID}`, "PATCH", {
+      businessName: "Renamed Studio",
+      slug: "renamed-studio",
+    });
+    expect(forbidden).toMatchObject({ status: 403, body: { error: "platform_admin_required" } });
+    expect((await store.getClient(BLADES_HAIR_ID))?.slug).toBe("blades-hair");
+
+    const invalid = await request(store, operatorActor, `/api/v1/admin/clients/${BLADES_HAIR_ID}`, "PATCH", {
+      businessName: "A",
+      slug: "Bad Slug",
+    });
+    expect(invalid).toMatchObject({ status: 400, body: { error: "valid_business_name_and_slug_required" } });
+
+    const conflict = await request(store, operatorActor, `/api/v1/admin/clients/${BLADES_HAIR_ID}`, "PATCH", {
+      businessName: "Blades Hair",
+      slug: "smith-england-salon",
+    });
+    expect(conflict).toMatchObject({ status: 409, body: { error: "slug_taken" } });
+
+    const renamed = await request(store, operatorActor, `/api/v1/admin/clients/${BLADES_HAIR_ID}`, "PATCH", {
+      businessName: "Blades Studio",
+      slug: "blades-studio",
+    });
+    expect(renamed).toMatchObject({ status: 200, body: { businessName: "Blades Studio", slug: "blades-studio" } });
+    expect(await store.getClientBySlug("blades-studio")).toMatchObject({ id: BLADES_HAIR_ID, businessName: "Blades Studio" });
+    expect(await store.getClientBySlug("blades-hair")).toBeUndefined();
+    expect((await store.getDraftClient(BLADES_HAIR_ID))?.config).toMatchObject({
+      businessName: "Blades Studio",
+      slug: "blades-studio",
+      greeting: "Draft greeting",
+    });
+    expect((await store.listLocations(BLADES_HAIR_ID)).find((location) => location.isPrimary)?.name).toBe("Blades Studio");
+    expect((await store.listOperatorAudit(BLADES_HAIR_ID)).some((record) => record.action === "workspace.updated")).toBe(true);
+  });
+
+  it("requires the exact business name before an operator can delete a workspace", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    store.calls.set("call_demo_delete", {
+      id: "call_demo_delete",
+      clientId: DEMO_CLIENT_ID,
+      direction: "inbound",
+      objective: "book",
+      promptVersionId: "pv_test",
+      transcript: [],
+      collected: {},
+      toolHistory: [],
+      state: "done",
+      status: "completed",
+      createdAt: "2026-09-04T09:00:00.000Z",
+      updatedAt: "2026-09-04T09:00:00.000Z",
+    });
+    store.tools.push({
+      id: "tool_demo_delete",
+      callId: "call_demo_delete",
+      clientId: DEMO_CLIENT_ID,
+      name: "create_booking",
+      input: {},
+      result: {},
+      at: "2026-09-04T09:00:00.000Z",
+    });
+    store.suppressions.push({
+      clientId: DEMO_CLIENT_ID,
+      phone: "+447700900123",
+      reason: "opt-out",
+      createdAt: "2026-09-04T09:00:00.000Z",
+    });
+    store.usage.set(`${DEMO_CLIENT_ID}:2026-09`, {
+      clientId: DEMO_CLIENT_ID,
+      month: "2026-09",
+      inboundMinutes: 4,
+      outboundMinutes: 0,
+    });
+
+    const forbidden = await request(store, salonActor, `/api/v1/clients/${DEMO_CLIENT_ID}`, "DELETE", {
+      confirmation: "Robinexis Demo",
+    });
+    expect(forbidden).toMatchObject({ status: 403, body: { error: "platform_admin_required" } });
+    expect(await store.getClient(DEMO_CLIENT_ID)).toBeTruthy();
+
+    const mismatch = await request(store, operatorActor, `/api/v1/clients/${DEMO_CLIENT_ID}`, "DELETE", {
+      confirmation: "blades hair",
+    });
+    expect(mismatch).toMatchObject({ status: 400, body: { error: "confirmation_mismatch" } });
+    expect(await store.getClient(DEMO_CLIENT_ID)).toBeTruthy();
+
+    const deleted = await request(store, operatorActor, `/api/v1/clients/${DEMO_CLIENT_ID}`, "DELETE", {
+      confirmation: "Robinexis Demo",
+    });
+    expect(deleted).toMatchObject({ status: 200, body: { deleted: true, clientId: DEMO_CLIENT_ID } });
+    expect(await store.getClient(DEMO_CLIENT_ID)).toBeUndefined();
+    expect((await store.listClients()).some((client) => client.id === DEMO_CLIENT_ID)).toBe(false);
+    expect(await store.getClient(BLADES_HAIR_ID)).toBeTruthy();
+    expect(store.prompts.some((prompt) => prompt.clientId === DEMO_CLIENT_ID)).toBe(false);
+    expect(store.prompts.some((prompt) => prompt.clientId === BLADES_HAIR_ID)).toBe(true);
+    expect(store.calls.has("call_demo_delete")).toBe(false);
+    expect(store.tools.some((tool) => tool.clientId === DEMO_CLIENT_ID)).toBe(false);
+    expect(store.suppressions.some((item) => item.clientId === DEMO_CLIENT_ID)).toBe(false);
+    expect(store.usage.has(`${DEMO_CLIENT_ID}:2026-09`)).toBe(false);
+    const audit = await store.listOperatorAudit();
+    expect(audit.some((record) =>
+      record.action === "workspace.deleted" &&
+      record.clientId === undefined &&
+      record.detail.clientId === DEMO_CLIENT_ID &&
+      record.detail.businessName === "Robinexis Demo"
+    )).toBe(true);
+  });
+
+  it("blocks protected, subscribed, and provisioning workspaces from deletion", async () => {
+    const protectedStore = new MemoryStore();
+    await seedStore(protectedStore);
+    const protectedResult = await request(
+      protectedStore,
+      operatorActor,
+      `/api/v1/clients/${BLADES_HAIR_ID}`,
+      "DELETE",
+      { confirmation: "Blades Hair" },
+    );
+    expect(protectedResult).toMatchObject({
+      status: 409,
+      body: { error: "protected_workspace_delete_forbidden" },
+    });
+
+    const subscribedStore = new MemoryStore();
+    await seedStore(subscribedStore);
+    const now = new Date().toISOString();
+    await subscribedStore.upsertSubscription({
+      id: "subscription_delete_guard",
+      clientId: DEMO_CLIENT_ID,
+      provider: "stripe",
+      planTier: "starter",
+      status: "active",
+      currentPeriodStart: now,
+      currentPeriodEnd: now,
+      cancelAtPeriodEnd: false,
+      metadata: {},
+      createdAt: now,
+      updatedAt: now,
+    });
+    await subscribedStore.upsertSubscription({
+      id: "newer_cancelled_subscription",
+      clientId: DEMO_CLIENT_ID,
+      provider: "stripe",
+      planTier: "starter",
+      status: "canceled",
+      currentPeriodStart: now,
+      currentPeriodEnd: now,
+      cancelAtPeriodEnd: false,
+      metadata: {},
+      createdAt: now,
+      updatedAt: new Date(Date.parse(now) + 1_000).toISOString(),
+    });
+    const subscribedResult = await request(
+      subscribedStore,
+      operatorActor,
+      `/api/v1/clients/${DEMO_CLIENT_ID}`,
+      "DELETE",
+      { confirmation: "Robinexis Demo" },
+    );
+    expect(subscribedResult).toMatchObject({
+      status: 409,
+      body: { error: "active_subscription_must_be_cancelled" },
+    });
+
+    const provisioningStore = new MemoryStore();
+    await seedStore(provisioningStore);
+    await provisioningStore.claimProvisioningRun({
+      id: "run_delete_guard",
+      clientId: DEMO_CLIENT_ID,
+      idempotencyKey: "delete-guard",
+      status: "running",
+      input: {},
+      createdAt: now,
+      updatedAt: now,
+    });
+    const provisioningResult = await request(
+      provisioningStore,
+      operatorActor,
+      `/api/v1/clients/${DEMO_CLIENT_ID}`,
+      "DELETE",
+      { confirmation: "Robinexis Demo" },
+    );
+    expect(provisioningResult).toMatchObject({
+      status: 409,
+      body: { error: "provisioning_in_progress" },
+    });
+  });
+});

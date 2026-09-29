@@ -15,7 +15,7 @@ Use this after the code/test gates in this repo are green. Do **not** paste secr
 
 Railway API start already runs migrate. After this commit is deployed:
 
-`GET https://robinexisapi-production-3836.up.railway.app/health` should stay `checks.database: ok`.
+`GET https://api.robinexis.com/health` should stay `checks.database: ok`.
 
 Then confirm the anon key can no longer read migrations (expect 401/403):
 
@@ -32,7 +32,7 @@ Then confirm the anon key can no longer read migrations (expect 401/403):
 
 Variable name: `STRIPE_PRICE_IDS_JSON`
 
-3. Register webhook: `POST https://robinexisapi-production-3836.up.railway.app/webhooks/stripe`  
+3. Register webhook: `POST https://api.robinexis.com/webhooks/stripe`
    Events: `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_succeeded`, `invoice.payment_failed`.
 4. Paste signing secret into Railway API `STRIPE_WEBHOOK_SECRET`.
 5. Paste the **same** `STRIPE_SECRET_KEY` onto Railway **worker** (IaC already lists the name; the live worker was empty).
@@ -69,7 +69,7 @@ Customers purchase their own Twilio number. For customer-owned Twilio accounts, 
 
 - `TWILIO_OAUTH_CLIENT_ID`
 - `TWILIO_OAUTH_CLIENT_SECRET`
-- `TWILIO_OAUTH_REDIRECT_URI=https://robinexisapi-production-3836.up.railway.app/oauth/twilio/callback`
+- `TWILIO_OAUTH_REDIRECT_URI=https://api.robinexis.com/oauth/twilio/callback`
 - `TWILIO_OAUTH_STATE_SECRET`
 - `TWILIO_OAUTH_ENCRYPTION_KEY`
 - `API_PUBLIC_BASE_URL`

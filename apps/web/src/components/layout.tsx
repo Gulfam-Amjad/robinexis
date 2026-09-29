@@ -14,8 +14,10 @@ import {
   Network,
   PhoneCall,
   PlugZap,
+  Pencil,
   Search,
   Settings,
+  Trash2,
   Scale,
   Sparkles,
   Store,
@@ -33,6 +35,7 @@ import { ROBINEXIS_COMPANY, ROBINEXIS_LEGAL_ROUTES } from "../lib/companyLegal";
 import { workspaceNavigationSections, workspacePath, type WorkspaceNavigationIcon } from "../lib/navigation";
 import { usePermissions } from "../lib/permissions";
 import { useClient, useSession } from "../state";
+import { WorkspaceAdminProvider, useWorkspaceAdmin, type WorkspaceTarget } from "./admin/workspace-admin";
 import { Badge } from "./ui";
 
 const adminNavigation = [
@@ -124,13 +127,19 @@ function WorkspaceSwitcher({
   activeClientId,
   activeName,
   label,
+  canManage,
   onSelect,
+  onEdit,
+  onDelete,
 }: {
-  clients: Array<{ id: string; businessName: string; slug: string }>;
+  clients: Array<WorkspaceTarget>;
   activeClientId?: string;
   activeName: string;
   label: string;
+  canManage: boolean;
   onSelect: (id: string) => void;
+  onEdit: (workspace: WorkspaceTarget) => void;
+  onDelete: (workspace: WorkspaceTarget) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -146,18 +155,39 @@ function WorkspaceSwitcher({
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
   }, [open]);
+  const activeWorkspace = clients.find((client) => client.id === activeClientId);
   return <div className="client-switcher-wrap" ref={switcherRef}>
-    <button className="client-switcher" type="button" aria-haspopup="listbox" aria-expanded={open} onClick={() => { setSearch(""); setOpen((value) => !value); }}>
-      <span className="client-avatar">{initials(activeName)}</span>
-      <span className="client-switcher-copy"><small>{label}</small><strong>{activeName}</strong></span>
-      <ChevronsUpDown size={15} />
-    </button>
+    <div className="client-switcher-row">
+      <button className="client-switcher" type="button" aria-haspopup="listbox" aria-expanded={open} onClick={() => { setSearch(""); setOpen((value) => !value); }}>
+        <span className="client-avatar">{initials(activeName)}</span>
+        <span className="client-switcher-copy"><small>{label}</small><strong>{activeName}</strong></span>
+        <ChevronsUpDown size={15} />
+      </button>
+      {canManage && activeWorkspace && <span className="client-switcher-actions">
+        <button className="workspace-picker-action" type="button" aria-label={`Edit ${activeWorkspace.businessName}`} title="Edit workspace" onClick={() => { setOpen(false); onEdit(activeWorkspace); }}>
+          <Pencil size={14} />
+        </button>
+        <button className="workspace-picker-action workspace-picker-action-danger" type="button" aria-label={`Delete ${activeWorkspace.businessName}`} title="Delete workspace" onClick={() => { setOpen(false); onDelete(activeWorkspace); }}>
+          <Trash2 size={14} />
+        </button>
+      </span>}
+    </div>
     {open && <div className="workspace-picker">
       <label><span className="sr-only">Search workspaces</span><Search size={15} /><input autoFocus type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search workspaces" /></label>
       <div role="listbox" aria-label="Select workspace">
-        {filtered.map((client) => <button role="option" aria-selected={client.id === activeClientId} type="button" key={client.id} onClick={() => { onSelect(client.id); setOpen(false); }}>
-          <span>{client.businessName}</span><small>{client.slug}</small>
-        </button>)}
+        {filtered.map((client) => <div className="workspace-picker-row" key={client.id}>
+          <button className="workspace-picker-select" role="option" aria-selected={client.id === activeClientId} type="button" onClick={() => { onSelect(client.id); setOpen(false); }}>
+            <span>{client.businessName}</span><small>{client.slug}</small>
+          </button>
+          {canManage && <span className="workspace-picker-actions">
+            <button className="workspace-picker-action" type="button" aria-label={`Edit ${client.businessName}`} onClick={() => { setOpen(false); onEdit(client); }}>
+              <Pencil size={14} />
+            </button>
+            <button className="workspace-picker-action workspace-picker-action-danger" type="button" aria-label={`Delete ${client.businessName}`} onClick={() => { setOpen(false); onDelete(client); }}>
+              <Trash2 size={14} />
+            </button>
+          </span>}
+        </div>)}
         {!filtered.length && <p>No matching workspaces</p>}
       </div>
     </div>}
@@ -165,6 +195,10 @@ function WorkspaceSwitcher({
 }
 
 export function AppShell() {
+  return <WorkspaceAdminProvider><AppShellContent /></WorkspaceAdminProvider>;
+}
+
+function AppShellContent() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
@@ -222,6 +256,7 @@ export function AppShell() {
     };
   }, [mobileOpen]);
 
+  const workspaceAdmin = useWorkspaceAdmin();
   const handleLogout = () => {
     logout();
     navigate(AUTH_REQUIRED ? "/login" : "/");
@@ -233,7 +268,7 @@ export function AppShell() {
       {mobileOpen && <button aria-label="Close menu" className="sidebar-scrim" onClick={() => setMobileOpen(false)} />}
       <aside className={`sidebar ${mobileOpen ? "sidebar-open" : ""}`}>
         <div className="sidebar-head"><Logo light /><button aria-label="Close navigation" className="icon-button mobile-only" onClick={() => setMobileOpen(false)}><X /></button></div>
-        {actorRole === "operator" || clients.length > 1 ? <WorkspaceSwitcher clients={clients} activeClientId={activeClientId} activeName={activeClient?.businessName || "No workspace selected"} label={adminArea ? "Workspace context" : "Current workspace"} onSelect={selectWorkspace} /> : <div className="client-switcher client-switcher-fixed"><span className="client-avatar">{initials(activeClient?.businessName || "No workspace")}</span><span className="client-switcher-copy"><small>Your workspace</small><strong>{activeClient?.businessName || "No workspace"}</strong></span></div>}
+        {actorRole === "operator" || clients.length > 1 ? <WorkspaceSwitcher clients={clients} activeClientId={activeClientId} activeName={activeClient?.businessName || "No workspace selected"} label={adminArea ? "Workspace context" : "Current workspace"} canManage={actorRole === "operator"} onSelect={selectWorkspace} onEdit={workspaceAdmin.openEdit} onDelete={workspaceAdmin.openDelete} /> : <div className="client-switcher client-switcher-fixed"><span className="client-avatar">{initials(activeClient?.businessName || "No workspace")}</span><span className="client-switcher-copy"><small>Your workspace</small><strong>{activeClient?.businessName || "No workspace"}</strong></span></div>}
         <NavItems isOperator={isOperator} adminArea={adminArea} activeClientId={activeClientId} onNavigate={() => setMobileOpen(false)} />
         {!adminArea && activeClientId && <div className="sidebar-health"><span className={connected === total && total ? "health-dot ready" : "health-dot"} /><div><strong>System connections</strong><small>{integrations.isLoading ? "Checking…" : `${connected} of ${total} ready`}</small></div><Link to="/app/integrations">View</Link></div>}
         <div className="sidebar-help">

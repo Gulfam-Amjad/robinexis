@@ -129,14 +129,20 @@ export function ClientProvider({ children }: { children: ReactNode }) {
   const clients = useMemo(() => clientsQuery.data || [], [clientsQuery.data]);
 
   useEffect(() => {
-    if (!clients.length) return;
+    if (!clientsQuery.isSuccess) return;
     const saved = activeClientId ? clients.find((client) => client.id === activeClientId) : undefined;
     if (saved) return;
+    if (!clients.length) {
+      if (!activeClientId) return;
+      setId(undefined);
+      sessionStorage.removeItem(CLIENT_STORAGE);
+      return;
+    }
     const nextId = defaultClientId(clients);
     if (nextId === activeClientId) return;
     setId(nextId);
     sessionStorage.setItem(CLIENT_STORAGE, nextId);
-  }, [activeClientId, clients]);
+  }, [activeClientId, clients, clientsQuery.isSuccess]);
 
   const setActiveClientId = useCallback((id: string) => {
     setId(id);

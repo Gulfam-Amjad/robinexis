@@ -12,6 +12,7 @@ The catalogue of this brain. Every page below is a link + one-line summary. **Re
 
 - [[concept-demo-workflow]] — how the demo-creation system works: URL in, voice-agent demo out, and what happens when a prospect signs.
 - [[concept-outbound-rebooking-calls]] — planned outbound-calling feature (rebooking reminders by voice, not SMS); PECR consent requirements and the compliant rollout design. Not built, not to be demoed yet.
+- [[concept-railway-live-deployment]] — live Railway project `pleasing-dedication` (production): api, worker, voice-runtime and web auto-deploy from GitHub. Trial workspace on a personal account; services shut down around 23 October 2026 unless paid or moved to Pro.
 
 ## Production
 
@@ -24,4 +25,4 @@ The catalogue of this brain. Every page below is a link + one-line summary. **Re
 - [[concept-demo-workflow|Playbook]] — `raw/Playbook_Robinexis_Voice_Agent_System.md`, the Foundation technical playbook (summarised in the demo-workflow concept).
 
 ---
-*Last updated: 2026-09-20 · Pages: 4*
+*Last updated: 2026-09-26 · Pages: 5*

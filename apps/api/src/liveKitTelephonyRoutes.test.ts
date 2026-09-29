@@ -3,6 +3,27 @@ import { BLADES_HAIR_ID, MemoryStore, seedStore } from "@robinexis/database";
 import { liveKitInboundTwiml } from "./liveKitTelephonyRoutes.js";
 
 describe("LiveKit Twilio ingress", () => {
+  it("never treats a browser-only preview as a phone deployment", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    await store.upsertProviderDeployment({
+      id: "deployment_browser_preview",
+      clientId: BLADES_HAIR_ID,
+      provider: "livekit-cascade",
+      providerDeploymentId: "preview_dispatch",
+      status: "staged",
+      config: {
+        browserOnly: true,
+        ingress: { sipUri: "sip:+447700900123@project.sip.livekit.cloud;transport=tcp" },
+      },
+      createdAt: "2026-09-17T09:00:00.000Z",
+      updatedAt: "2026-09-17T09:00:00.000Z",
+    });
+    await expect(liveKitInboundTwiml(store, BLADES_HAIR_ID)).resolves.toMatchObject({
+      status: 409,
+    });
+  });
+
   it("returns SIP TwiML only for a matching staged deployment", async () => {
     const store = new MemoryStore();
     await seedStore(store);

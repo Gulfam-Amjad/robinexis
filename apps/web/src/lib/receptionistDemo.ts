@@ -114,6 +114,15 @@ export function costSaverStartError(cause: unknown): string {
     return "Microphone access was blocked. Allow it in your browser settings, then try again.";
   }
   const message = cause instanceof Error ? cause.message : "";
+  if (message === "cost_saver_agent_unavailable") {
+    return "The Cost Saver receptionist did not join in time. The voice worker may be restarting; wait a moment, then try again.";
+  }
+  if (message === "cost_saver_connection_ended") {
+    return "The Cost Saver connection ended before the receptionist joined. Wait a moment, then try again.";
+  }
+  if (message === "cost_saver_runtime_not_configured") {
+    return "Cost Saver is still being configured for this workspace.";
+  }
   if (/client initiated disconnect|could not establish|signal connection|websocket/i.test(message)) {
     return "We couldn't reach the Cost Saver voice runtime from this browser. Check the network, then try again.";
   }

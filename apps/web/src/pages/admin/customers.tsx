@@ -9,9 +9,11 @@ import { Badge, Button, Card, ConfirmDialog, EmptyState, ErrorState, LinkButton,
 import { CreditAdjustmentDialog } from "./credit-adjustment-dialog";
 import { ServiceActionDialog } from "./service-action-dialog";
 import { ProviderSwitchPanel } from "../../components/admin/provider-switch-panel";
+import { useWorkspaceAdmin } from "../../components/admin/workspace-admin";
 
 export function AdminCustomersPage() {
   const { clients, isLoading, error, setActiveClientId } = useClient();
+  const workspaceAdmin = useWorkspaceAdmin();
   const [search, setSearch] = useState("");
   const filtered = useMemo(() => filterClients(clients, search), [clients, search]);
   const summary = useQuery({ queryKey: ["admin-summary"], queryFn: api.adminSummary, retry: false });
@@ -59,7 +61,9 @@ export function AdminCustomersPage() {
               </dl>
               <div className="row-actions">
                 <Link className="button button-secondary button-sm" to={`/admin/customers/${client.id}`}>Customer detail <ChevronRight size={15} /></Link>
-                <Button variant="ghost" onClick={() => openWorkspace(client.id)}>Open workspace</Button>
+                <Button variant="ghost" size="sm" onClick={() => openWorkspace(client.id)}>Open workspace</Button>
+                <Button variant="ghost" size="sm" onClick={() => workspaceAdmin.openEdit(client)}>Edit</Button>
+                <Button variant="danger" size="sm" onClick={() => workspaceAdmin.openDelete(client)}>Delete</Button>
               </div>
             </article>;
           })}
@@ -73,6 +77,7 @@ export function AdminCustomerDetailPage() {
   const { id } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const { setActiveClientId } = useClient();
+  const workspaceAdmin = useWorkspaceAdmin();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { push } = useToast();
@@ -172,7 +177,7 @@ export function AdminCustomerDetailPage() {
 
   return <>
     <Link className="back-link" to="/admin/customers"><ArrowLeft size={15} /> Customer portfolio</Link>
-    <PageHeader eyebrow="Platform · Customer detail" title={client.businessName} description={`${client.slug} · ${client.id}`} actions={<><Button variant="secondary" onClick={openWorkspace}>Open workspace</Button><Button onClick={() => setSearchParams({ adjust: "credits" })}>Adjust allowance</Button></>} />
+    <PageHeader eyebrow="Platform · Customer detail" title={client.businessName} description={`${client.slug} · ${client.id}`} actions={<><Button variant="secondary" onClick={openWorkspace}>Open workspace</Button><Button variant="secondary" onClick={() => workspaceAdmin.openEdit(client)}>Edit</Button><Button variant="danger" onClick={() => workspaceAdmin.openDelete(client)}>Delete</Button><Button onClick={() => setSearchParams({ adjust: "credits" })}>Adjust allowance</Button></>} />
     <div className="overview-grid">
       <Card className="panel">
         <SectionHeading title="Customer account" description="Tenant status and commercial allowance." />
@@ -271,7 +276,7 @@ export function AdminCustomerDetailPage() {
       confirmLabel="Enable auto-charge"
       busy={updateFeatures.isPending}
       onClose={() => setAutoChargeConfirmationOpen(false)}
-      onConfirm={() => updateFeatures.mutate({
+        onConfirm={() => updateFeatures.mutate({
         autoMinuteBlocksEnabled: true,
         confirmation: "ENABLE_AUTO_MINUTE_BLOCKS",
       })}

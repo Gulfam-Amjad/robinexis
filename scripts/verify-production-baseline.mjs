@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 const apiBase = (process.env.API_PUBLIC_BASE_URL ||
-  "https://robinexisapi-production-3836.up.railway.app").replace(/\/$/, "");
+  "https://api.robinexis.com").replace(/\/$/, "");
 
 async function request(path, init) {
   const response = await fetch(`${apiBase}${path}`, {

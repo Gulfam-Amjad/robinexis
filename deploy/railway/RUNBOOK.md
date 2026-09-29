@@ -12,8 +12,10 @@ Caller → Twilio → ElevenLabs → authenticated Railway REST → Cal.com
 |---|---|---|---|
 | `@robinexis/api` | `/health`, tenant-bound booking tools, product APIs, signed provider webhooks | `node scripts/railway.mjs api` | `node scripts/railway.mjs migrate && node scripts/railway.mjs start` |
 | `@robinexis/worker` | Stripe reconciliation, retention, and gated provisioning retries | `node scripts/railway.mjs worker` | `npm run start -w @robinexis/worker` |
+| `@robinexis/voice-runtime` | Browser-only Cost Saver agent worker; no phone routing | `node scripts/railway.mjs voice-runtime` | `node scripts/railway.mjs start` |
 
-The public API is `https://robinexisapi-production-3836.up.railway.app`.
+The canonical public API is `https://api.robinexis.com`. Railway's generated
+service hostname is an origin fallback, not a URL to copy into provider tools.
 
 - `GET /health`
 - `POST /api/v1/voice-tools/check-availability`
@@ -23,7 +25,7 @@ The public API is `https://robinexisapi-production-3836.up.railway.app`.
 
 Register the Stripe **test-mode** webhook at:
 
-`https://robinexisapi-production-3836.up.railway.app/webhooks/stripe`
+`https://api.robinexis.com/webhooks/stripe`
 
 That URL is not pre-registered in Stripe. After deploy, a POST without a valid `Stripe-Signature` should return 400. Then add the endpoint in the Stripe Dashboard (test) for `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`, and `invoice.payment_failed`. Paste the signing secret into Railway `STRIPE_WEBHOOK_SECRET`. Create Starter (£99/mo) and Pro (£199/mo) Prices in the test product catalog and set `STRIPE_PRICE_IDS_JSON`. Copy the same `STRIPE_SECRET_KEY` onto the worker. Operator launch steps live in [OPERATOR-LAUNCH.md](./OPERATOR-LAUNCH.md).
 
@@ -32,6 +34,12 @@ Both booking routes require `x-voice-tool-secret`. `VOICE_TOOL_SECRET` remains b
 Keep all webhook, calendar, Supabase and database credentials on Railway only. Product JWTs are resolved into either a Robinexis operator or tenant-scoped salon membership. Database tables are API-only: browser Supabase roles have no direct table grants. Migration `007` also locks `schema_migrations` (no anon/authenticated grants).
 
 ## Deploy
+
+Live project as of 27 September 2026: Railway project `pleasing-dedication`, environment `production` ([console](https://railway.com/project/45610819-8e06-480a-b147-d2f4dee28a70?environmentId=77a70722-c909-4f37-9cd3-929effc1af0b)). `@robinexis/api` and `@robinexis/worker` are active. The redundant `@robinexis/web` service is sleeping because Vercel hosts production. The dedicated `@robinexis/voice-runtime` is now declared in `.railway/railway.ts` for browser-only Cost Saver sessions and must pass the browser and conversation canaries before it is treated as active. Do not use `railway up` for ordinary changes.
+
+That project is on a personal **Trial** workspace, not a Pro workspace. The 26 September banner gave 27 days or $5.00 before automatic shutdown (about 23 October 2026). Do not treat it as durable production until it is moved to the Pro workspace or a payment method is added. Detail: `brains/robinexis/wiki/concept-railway-live-deployment.md`.
+
+The commands below remain the infrastructure setup path (variables, Redis, plan apply). They are not the day-to-day code deploy.
 
 ```bash
 node scripts/railway-vars.mjs

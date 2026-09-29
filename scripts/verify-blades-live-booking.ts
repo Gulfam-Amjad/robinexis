@@ -6,7 +6,7 @@ import { calcom } from "@robinexis/integrations";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 loadEnv({ path: path.join(root, ".env"), quiet: true });
 
-const api = "https://robinexisapi-production-3836.up.railway.app";
+const api = process.env.API_PUBLIC_BASE_URL || "https://api.robinexis.com";
 const secret = process.env.VOICE_TOOL_SECRET || "";
 const calApiKey = process.env.CALCOM_API_KEY || "";
 const calUsername = process.env.CALCOM_USERNAME || "";

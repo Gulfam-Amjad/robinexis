@@ -74,7 +74,8 @@ export class ProviderSwitchService {
     if (!this.flags.qualityEvaluationEnabled) throw new Error("provider_quality_evaluation_disabled");
     await this.requireClient(clientId);
     const deployment = (await this.store.listProviderDeployments(clientId))
-      .find((item) => item.id === input.deploymentId && item.status === "staged");
+      .find((item) =>
+        item.id === input.deploymentId && item.status === "staged" && isRoutable(item));
     if (!deployment) throw new Error("staged_provider_deployment_not_found");
     if (deployment.provider !== input.candidateProvider) throw new Error("candidate_provider_mismatch");
 
@@ -105,8 +106,9 @@ export class ProviderSwitchService {
     await this.requireClient(clientId);
     const deployments = await this.store.listProviderDeployments(clientId);
     const deployment = deploymentId
-      ? deployments.find((item) => item.id === deploymentId)
-      : deployments.find((item) => item.provider === "livekit-cascade" && item.status === "staged");
+      ? deployments.find((item) => item.id === deploymentId && isRoutable(item))
+      : deployments.find((item) =>
+        item.provider === "livekit-cascade" && item.status === "staged" && isRoutable(item));
     if (!deployment) throw new Error("provider_deployment_not_found");
     if (!deployment.launchGate) throw new Error("provider_launch_gate_not_found");
     return structuredClone(deployment.launchGate);
@@ -118,10 +120,11 @@ export class ProviderSwitchService {
     await this.assertNotProtected(client);
     await this.ensureCurrentDeployment(client, input.actorId);
     const deployments = await this.store.listProviderDeployments(client.id);
-    const active = deployments.find((item) => item.status === "active");
+    const active = deployments.find((item) => item.status === "active" && isRoutable(item));
     if (active?.provider === input.provider) throw new Error("target_provider_already_active");
     const existing = deployments.find((item) =>
-      item.provider === input.provider && ["staged", "retired", "failed"].includes(item.status));
+      item.provider === input.provider && ["staged", "retired", "failed"].includes(item.status) &&
+      isRoutable(item));
     const now = new Date().toISOString();
     const deployment: ProviderDeployment = {
       id: existing?.id || newId("provider_deployment_"),
@@ -180,8 +183,9 @@ export class ProviderSwitchService {
     const client = await this.requireClient(clientId);
     await this.ensureCurrentDeployment(client);
     const deployments = await this.store.listProviderDeployments(client.id);
-    const active = deployments.find((item) => item.status === "active");
-    const target = deployments.find((item) => item.provider === toProvider && item.status === "staged");
+    const active = deployments.find((item) => item.status === "active" && isRoutable(item));
+    const target = deployments.find((item) =>
+      item.provider === toProvider && item.status === "staged" && isRoutable(item));
     const checks: ProviderSwitchCheck[] = [
       check("feature_enabled", this.flags.enabled, "Provider switching feature is enabled.", "Provider switching is disabled."),
       check("routing_enabled", this.flags.routingEnabled, "External routing writes are enabled.", "External routing writes are disabled."),
@@ -247,7 +251,7 @@ export class ProviderSwitchService {
     if (preview.status !== "ready") throw new Error(`provider_switch_preflight_failed:${failedKeys(preview.checks)}`);
 
     const deployments = await this.store.listProviderDeployments(client.id);
-    const source = deployments.find((item) => item.status === "active")!;
+    const source = deployments.find((item) => item.status === "active" && isRoutable(item))!;
     const target = deployments.find((item) => item.id === preview.targetDeploymentId)!;
     const now = new Date().toISOString();
     const operation: ProviderSwitchOperation = {
@@ -695,6 +699,10 @@ function activeProvider(deployment?: ProviderDeployment): ActiveVoiceProvider | 
   return deployment?.provider === "elevenlabs-convai" || deployment?.provider === "livekit-cascade"
     ? deployment.provider
     : undefined;
+}
+
+function isRoutable(deployment: ProviderDeployment): boolean {
+  return deployment.config.browserOnly !== true;
 }
 
 function check(key: string, passed: boolean, success: string, failure: string): ProviderSwitchCheck {
