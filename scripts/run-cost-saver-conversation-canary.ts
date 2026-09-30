@@ -200,7 +200,7 @@ const completeSpokenReply = responseWords.length >= 3 &&
 const naturalResponse = !/how may i assist|please provide|kindly provide|the user|analysis|reasoning|system prompt/i
   .test(responseText);
 const naturalTimeSpeech = !/\ba\s+\d{1,2}:\d{2}\b/i.test(responseText);
-const clarifiedInvalidDate = /september.*(?:isn.t|is not|doesn.t|does not|not a real|has 30)/i
+const clarifiedInvalidDate = /september.*(?:isn.t|is not|doesn.t|does not|not a real|(?:has|only has) (?:30|thirty))/i
   .test(responseText);
 const noFalseCalendarOutage = !/diary.*(?:down|unavailable)|schedule.*unavailable|callback|connect.*team/i
   .test(responseText);
