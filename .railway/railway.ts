@@ -217,6 +217,8 @@ export default defineRailway(() => {
       ELEVENLABS_API_KEY: preserve(),
       ELEVENLABS_VOICE_ID: preserve(),
       ELEVENLABS_TTS_MODEL: "eleven_flash_v2_5",
+      VOICE_TTS_PROVIDER: "deepgram",
+      DEEPGRAM_TTS_MODEL: "aura-2-aurora-en",
       VOICE_LLM_MAX_COMPLETION_TOKENS: "320",
       VOICE_ENDPOINTING_MIN_DELAY_MS: "650",
       VOICE_ENDPOINTING_MAX_DELAY_MS: "2800",

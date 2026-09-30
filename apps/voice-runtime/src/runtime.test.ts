@@ -1,8 +1,9 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { RuntimeApiClient, signPostCall } from "./apiClient.js";
-import { classifySessionError, voiceKeyterms } from "./agent.js";
+import { classifySessionError, sanitizeProviderError, voiceKeyterms } from "./agent.js";
 import { loadVoiceRuntimeEnv } from "./env.js";
+import { resolveSpeechProvider } from "./speech.js";
 import { parseJobMetadata, stableCallId } from "./metadata.js";
 import {
   collectLatency,
@@ -42,6 +43,8 @@ describe("voice runtime safety contracts", () => {
       llmProvider: "groq",
       groqModel: "openai/gpt-oss-120b",
       elevenLabsTtsModel: "eleven_flash_v2_5",
+      ttsProvider: "deepgram",
+      deepgramTtsModel: "aura-2-aurora-en",
       deepgramModel: "nova-3",
       deepgramEndpointingMs: 300,
       llmMaxCompletionTokens: 320,
@@ -52,6 +55,10 @@ describe("voice runtime safety contracts", () => {
     });
     expect(() => loadVoiceRuntimeEnv({ ...completeEnv, VOICE_LLM_PROVIDER: "invalid" }))
       .toThrow("invalid_voice_llm_provider");
+    expect(() => loadVoiceRuntimeEnv({ ...completeEnv, VOICE_TTS_PROVIDER: "cartesia" }))
+      .toThrow("invalid_voice_tts_provider");
+    expect(loadVoiceRuntimeEnv({ ...completeEnv, VOICE_TTS_PROVIDER: "elevenlabs" }))
+      .toMatchObject({ ttsProvider: "elevenlabs" });
     const googleEnv = { ...completeEnv, VOICE_LLM_PROVIDER: "google", GOOGLE_API_KEY: "google" };
     delete (googleEnv as Partial<typeof googleEnv>).GROQ_API_KEY;
     expect(loadVoiceRuntimeEnv(googleEnv)).toMatchObject({ llmProvider: "google" });
@@ -148,6 +155,56 @@ describe("voice runtime safety contracts", () => {
     expect(history[0].result).toMatchObject({ ok: false });
     expect(classifySessionError(new Error("429 tokens per minute"))).toBe("rate_limit");
     expect(classifySessionError(new Error("LLM completion failed"))).toBe("llm");
+    expect(classifySessionError(new Error(
+      'ElevenLabs API error: {"detail":{"code":"payment_issue","message":"incomplete payment"}}',
+    ))).toBe("tts");
+    expect(classifySessionError(new Error("Could not synthesize"))).toBe("tts");
+    expect(sanitizeProviderError(new Error(
+      'ElevenLabs API error: {"detail":{"code":"payment_issue"}} sk_live_secret',
+    ))).toBe("payment_issue");
+  });
+
+  it("speaks with Deepgram and falls back when ElevenLabs cannot synthesize", async () => {
+    const blocked = await resolveSpeechProvider({
+      configured: "elevenlabs",
+      elevenLabsApiKey: "secret-key",
+      elevenLabsVoiceId: "voice",
+      elevenLabsTtsModel: "eleven_flash_v2_5",
+      fetchImpl: async () => new Response(
+        JSON.stringify({ detail: { code: "payment_issue", message: "incomplete payment" } }),
+        { status: 401 },
+      ),
+    });
+    expect(blocked).toEqual({ provider: "deepgram", fallbackReason: "payment_issue" });
+    const unpaid = await resolveSpeechProvider({
+      configured: "elevenlabs",
+      elevenLabsApiKey: "secret-key",
+      elevenLabsVoiceId: "voice",
+      elevenLabsTtsModel: "eleven_flash_v2_5",
+      fetchImpl: async () => new Response("payment required", { status: 402 }),
+    });
+    expect(unpaid).toEqual({ provider: "deepgram", fallbackReason: "payment_required" });
+    const available = await resolveSpeechProvider({
+      configured: "elevenlabs",
+      elevenLabsApiKey: "secret-key",
+      elevenLabsVoiceId: "voice",
+      elevenLabsTtsModel: "eleven_flash_v2_5",
+      fetchImpl: async (_input, init) => {
+        expect(String(init?.body)).toContain("Hello.");
+        expect((init?.headers as Record<string, string>)["xi-api-key"]).toBe("secret-key");
+        return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+      },
+    });
+    expect(available).toEqual({ provider: "elevenlabs" });
+    expect(await resolveSpeechProvider({
+      configured: "deepgram",
+      elevenLabsApiKey: "secret-key",
+      elevenLabsVoiceId: "voice",
+      elevenLabsTtsModel: "eleven_flash_v2_5",
+      fetchImpl: async () => {
+        throw new Error("elevenlabs should not be called");
+      },
+    })).toEqual({ provider: "deepgram" });
   });
 
   it("retains corrected booking details inside one call without cross-call leakage", () => {

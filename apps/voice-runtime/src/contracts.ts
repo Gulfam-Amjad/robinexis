@@ -25,7 +25,7 @@ export interface NormalizedUsage {
   livekit: { roomSeconds: number };
   stt: { provider: "deepgram"; audioSeconds: number };
   llm: { provider: "groq" | "google"; inputTokens: number; outputTokens: number };
-  tts: { provider: "elevenlabs"; characters: number; audioSeconds: number };
+  tts: { provider: "deepgram" | "elevenlabs"; characters: number; audioSeconds: number };
 }
 
 export interface LatencySummary {

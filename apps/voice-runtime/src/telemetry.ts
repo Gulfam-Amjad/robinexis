@@ -16,6 +16,7 @@ export function normalizedUsage(
   modelUsage: Array<Partial<ModelUsage>>,
   durationSeconds: number,
   llmProvider: "groq" | "google" = "groq",
+  ttsProvider: "deepgram" | "elevenlabs" = "elevenlabs",
 ): NormalizedUsage {
   const stt = modelUsage.filter((item) => item.type === "stt_usage");
   const llm = modelUsage.filter((item) => item.type === "llm_usage");
@@ -32,7 +33,7 @@ export function normalizedUsage(
       outputTokens: sum(llm, "outputTokens"),
     },
     tts: {
-      provider: "elevenlabs",
+      provider: ttsProvider,
       characters: sum(tts, "charactersCount"),
       audioSeconds: sum(tts, "audioDurationMs") / 1000,
     },

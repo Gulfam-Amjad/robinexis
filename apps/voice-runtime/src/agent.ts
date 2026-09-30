@@ -15,6 +15,7 @@ import {
   normalizedUsage,
   summarizeLatency,
 } from "./telemetry.js";
+import { resolveSpeechProvider, type SpeechProvider } from "./speech.js";
 import { createToolBridge } from "./toolBridge.js";
 
 export default defineAgent({
@@ -35,6 +36,15 @@ export default defineAgent({
     let lastRecoveryAt = 0;
     let recoveryCount = 0;
 
+    const speech = await resolveSpeechProvider({
+      configured: env.ttsProvider,
+      elevenLabsApiKey: env.elevenLabsApiKey,
+      elevenLabsVoiceId: env.elevenLabsVoiceId,
+      elevenLabsTtsModel: env.elevenLabsTtsModel,
+    });
+    if (speech.fallbackReason) {
+      runtimeLog("voice_tts_fallback", { provider: speech.provider, reason: speech.fallbackReason });
+    }
     const session = new voice.AgentSession({
       stt: new deepgram.STT({
         apiKey: env.deepgramApiKey,
@@ -63,13 +73,7 @@ export default defineAgent({
           model: env.geminiModel,
           toolChoice: "auto",
         }),
-      tts: new elevenlabs.TTS({
-        apiKey: env.elevenLabsApiKey,
-        model: env.elevenLabsTtsModel,
-        voiceId: env.elevenLabsVoiceId,
-        language: "en",
-        enableLogging: false,
-      }),
+      tts: createSpeechEngine(env, speech.provider),
       maxToolSteps: 8,
       turnHandling: {
         turnDetection: "stt",
@@ -105,7 +109,11 @@ export default defineAgent({
     });
     session.on(AgentSessionEventTypes.Error, (event) => {
       const errorType = classifySessionError(event.error);
-      runtimeLog("voice_runtime_provider_error", { errorType });
+      runtimeLog("voice_runtime_provider_error", {
+        errorType,
+        reason: sanitizeProviderError(event.error),
+      });
+      if (errorType === "tts") return;
       if (
         (errorType === "rate_limit" || errorType === "llm") &&
         recoveryCount < 2 &&
@@ -135,7 +143,7 @@ export default defineAgent({
         transcript: transcriptFromSession(session),
         toolHistory,
         latency: summarizeLatency(latency),
-        usage: normalizedUsage(session.usage.modelUsage, durationSeconds, env.llmProvider),
+        usage: normalizedUsage(session.usage.modelUsage, durationSeconds, env.llmProvider, speech.provider),
       };
       try {
         await api.sendPostCall(payload);
@@ -185,15 +193,50 @@ class BoundedVoiceAgent extends voice.Agent {
   }
 }
 
+function createSpeechEngine(
+  env: ReturnType<typeof loadVoiceRuntimeEnv>,
+  provider: SpeechProvider,
+) {
+  if (provider === "deepgram") {
+    return new deepgram.TTS({
+      apiKey: env.deepgramApiKey,
+      model: env.deepgramTtsModel,
+    });
+  }
+  return new elevenlabs.TTS({
+    apiKey: env.elevenLabsApiKey,
+    model: env.elevenLabsTtsModel,
+    voiceId: env.elevenLabsVoiceId,
+    language: "en",
+    enableLogging: false,
+  });
+}
+
 export function classifySessionError(error: unknown): "rate_limit" | "llm" | "stt" | "tts" | "provider" {
-  const value = error && typeof error === "object"
-    ? `${String((error as { name?: unknown }).name || "")} ${String((error as { message?: unknown }).message || "")}`
-    : String(error || "");
+  const value = providerErrorText(error);
   if (/429|rate.limit|tokens per minute/i.test(value)) return "rate_limit";
+  if (/payment_issue|payment_required|incomplete payment/i.test(value)) return "tts";
+  if (/text.to.speech|\btts\b|speech synthesis|could not synthesize/i.test(value)) return "tts";
   if (/llm|completion|model/i.test(value)) return "llm";
-  if (/speech.to.text|transcri|stt/i.test(value)) return "stt";
-  if (/text.to.speech|tts/i.test(value)) return "tts";
+  if (/speech.to.text|transcri|\bstt\b/i.test(value)) return "stt";
   return "provider";
+}
+
+export function sanitizeProviderError(error: unknown): string {
+  const value = providerErrorText(error);
+  if (/payment_issue|payment_required|incomplete payment/i.test(value)) return "payment_issue";
+  const cleaned = value
+    .replace(/sk_[A-Za-z0-9_-]+/g, "[redacted]")
+    .replace(/\{[\s\S]*\}/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned.slice(0, 120) || "provider_error";
+}
+
+function providerErrorText(error: unknown): string {
+  if (!error || typeof error !== "object") return String(error || "");
+  const record = error as { name?: unknown; message?: unknown };
+  return `${String(record.name || "")} ${String(record.message || "")}`;
 }
 
 export function voiceKeyterms(client: {

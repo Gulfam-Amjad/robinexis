@@ -11,6 +11,8 @@ export interface VoiceRuntimeEnv {
   groqModel: string;
   geminiModel: string;
   llmMaxCompletionTokens: number;
+  ttsProvider: "deepgram" | "elevenlabs";
+  deepgramTtsModel: string;
   elevenLabsApiKey: string;
   elevenLabsVoiceId: string;
   elevenLabsTtsModel: string;
@@ -42,6 +44,10 @@ export function loadVoiceRuntimeEnv(env: NodeJS.ProcessEnv = process.env): Voice
   const llmProvider = env.VOICE_LLM_PROVIDER?.trim().toLowerCase() || "groq";
   if (llmProvider !== "groq" && llmProvider !== "google") {
     throw new Error("invalid_voice_llm_provider");
+  }
+  const ttsProvider = env.VOICE_TTS_PROVIDER?.trim().toLowerCase() || "deepgram";
+  if (ttsProvider !== "deepgram" && ttsProvider !== "elevenlabs") {
+    throw new Error("invalid_voice_tts_provider");
   }
   const providerKey = llmProvider === "groq" ? "GROQ_API_KEY" : "GOOGLE_API_KEY";
   const missing = [
@@ -77,6 +83,8 @@ export function loadVoiceRuntimeEnv(env: NodeJS.ProcessEnv = process.env): Voice
       120,
       1_000,
     ),
+    ttsProvider,
+    deepgramTtsModel: env.DEEPGRAM_TTS_MODEL?.trim() || "aura-2-aurora-en",
     elevenLabsTtsModel: env.ELEVENLABS_TTS_MODEL?.trim() || "eleven_flash_v2_5",
     deepgramModel: env.DEEPGRAM_STT_MODEL?.trim() || "nova-3",
     deepgramEndpointingMs: boundedInteger(env.DEEPGRAM_ENDPOINTING_MS, 300, 100, 2_000),
