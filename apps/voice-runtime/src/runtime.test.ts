@@ -1,7 +1,13 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
+import { bladesHairSeed } from "@robinexis/database";
 import { RuntimeApiClient, signPostCall } from "./apiClient.js";
-import { classifySessionError, sanitizeProviderError, voiceKeyterms } from "./agent.js";
+import {
+  classifySessionError,
+  runtimeInstructions,
+  sanitizeProviderError,
+  voiceKeyterms,
+} from "./agent.js";
 import { loadVoiceRuntimeEnv } from "./env.js";
 import { resolveSpeechProvider } from "./speech.js";
 import { parseJobMetadata, stableCallId } from "./metadata.js";
@@ -44,14 +50,16 @@ describe("voice runtime safety contracts", () => {
       groqModel: "openai/gpt-oss-120b",
       elevenLabsTtsModel: "eleven_flash_v2_5",
       ttsProvider: "deepgram",
-      deepgramTtsModel: "aura-2-aurora-en",
+      deepgramTtsModel: "aura-2-pandora-en",
       deepgramModel: "nova-3",
-      deepgramEndpointingMs: 300,
-      llmMaxCompletionTokens: 320,
-      endpointingMinDelayMs: 650,
-      endpointingMaxDelayMs: 2_800,
-      interruptionMinDurationMs: 400,
+      deepgramEndpointingMs: 250,
+      llmMaxCompletionTokens: 480,
+      llmTemperature: 0.28,
+      endpointingMinDelayMs: 500,
+      endpointingMaxDelayMs: 2_200,
+      interruptionMinDurationMs: 300,
       interruptionMinWords: 1,
+      preemptiveGenerationEnabled: true,
     });
     expect(() => loadVoiceRuntimeEnv({ ...completeEnv, VOICE_LLM_PROVIDER: "invalid" }))
       .toThrow("invalid_voice_llm_provider");
@@ -59,6 +67,11 @@ describe("voice runtime safety contracts", () => {
       .toThrow("invalid_voice_tts_provider");
     expect(loadVoiceRuntimeEnv({ ...completeEnv, VOICE_TTS_PROVIDER: "elevenlabs" }))
       .toMatchObject({ ttsProvider: "elevenlabs" });
+    expect(loadVoiceRuntimeEnv({
+      ...completeEnv,
+      VOICE_LLM_TEMPERATURE: "0.41",
+      VOICE_PREEMPTIVE_GENERATION: "false",
+    })).toMatchObject({ llmTemperature: 0.41, preemptiveGenerationEnabled: false });
     const googleEnv = { ...completeEnv, VOICE_LLM_PROVIDER: "google", GOOGLE_API_KEY: "google" };
     delete (googleEnv as Partial<typeof googleEnv>).GROQ_API_KEY;
     expect(loadVoiceRuntimeEnv(googleEnv)).toMatchObject({ llmProvider: "google" });
@@ -108,6 +121,22 @@ describe("voice runtime safety contracts", () => {
     expect(headers["x-voice-runtime-signature"]).toMatch(/^[a-f0-9]{64}$/);
     expect(headers["x-voice-runtime-timestamp"]).toMatch(/^\d+$/);
     expect(request.body).toBe(JSON.stringify(payload));
+  });
+
+  it("uses the frozen published prompt and adds live turn discipline without greeting twice", () => {
+    const instructions = runtimeInstructions({
+      client: bladesHairSeed(),
+      deploymentId: "deployment-1",
+      promptVersionId: "prompt-7",
+      compiledPrompt: "FROZEN PREMIUM PERSONA\nApproved fact: weekdays ten till seven.",
+      toolSecret: "secret",
+    }, "inbound", "Browser provider comparison");
+    expect(instructions).toContain("FROZEN PREMIUM PERSONA");
+    expect(instructions).toContain("weekdays ten till seven");
+    expect(instructions).not.toContain("Objective: Browser provider comparison");
+    expect(instructions).toMatch(/opening greeting is delivered separately/i);
+    expect(instructions).toMatch(/exactly one missing detail per turn/i);
+    expect(instructions).toMatch(/under 35 spoken words/i);
   });
 
   it("bridges only voice tools without caller-selected tenant fields", async () => {

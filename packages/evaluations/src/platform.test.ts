@@ -68,6 +68,11 @@ describe("prompt compiler", () => {
     expect(inbound).toMatch(/INBOUND/);
     expect(inbound).toMatch(/Never ask for a US \+1 example/);
     expect(inbound).toMatch(/Do not transfer_to_human to finish a booking/);
+    expect(inbound).toMatch(/genuinely attentive British receptionist/i);
+    expect(inbound).toMatch(/Match their pace and mood/i);
+    expect(inbound).toMatch(/Do not repeat the same acknowledgement/i);
+    expect(inbound).toMatch(/If interrupted, stop the abandoned thought/i);
+    expect(inbound).toMatch(/at most one useful question/i);
     expect(inbound).not.toMatch(/Galyna/);
     const outbound = compilePrompt({ client, direction: "outbound", objective: "appointment-reminder" });
     expect(outbound).toMatch(/OUTBOUND/);

@@ -62,12 +62,19 @@ export async function runtimeConfigFor(
   }
   const toolSecret = toolSecretFor(client);
   if (!toolSecret) return { status: 409, body: { error: "tenant_voice_tool_secret_missing" } };
+  const prompt = client.promptVersionId
+    ? await store.getPromptVersion(client.promptVersionId)
+    : undefined;
+  const publishedPrompt = prompt?.clientId === client.id && prompt.compiled.trim()
+    ? prompt
+    : undefined;
   return {
     status: 200,
     body: {
       client,
       deploymentId: deployment.id,
-      promptVersionId: client.promptVersionId || "published-client-config",
+      promptVersionId: publishedPrompt?.id || client.promptVersionId || "published-client-config",
+      ...(publishedPrompt ? { compiledPrompt: publishedPrompt.compiled } : {}),
       toolSecret,
     },
   };

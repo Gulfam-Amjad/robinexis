@@ -12,6 +12,21 @@ export interface UkSalonQualityScenario {
   audio: { noisy: boolean; interruptionAtMs?: number };
 }
 
+export interface UkSalonQualityObservation {
+  service: string;
+  pricePence: number;
+  startsAt: string;
+  toolIdempotencyKey: string;
+  bookingCount: number;
+  interruptionObserved: boolean;
+  spokenReply: string;
+}
+
+export interface UkSalonQualityResult {
+  passed: boolean;
+  failed: string[];
+}
+
 /** Provider-neutral, synthetic fixtures. No live numbers, credentials, or provider IDs. */
 export const UK_SALON_QUALITY_SCENARIOS: readonly UkSalonQualityScenario[] = Object.freeze([
   {
@@ -54,3 +69,30 @@ export const UK_SALON_QUALITY_SCENARIOS: readonly UkSalonQualityScenario[] = Obj
     audio: { noisy: true, interruptionAtMs: 900 },
   },
 ]);
+
+export function evaluateUkSalonScenario(
+  scenario: UkSalonQualityScenario,
+  observed: UkSalonQualityObservation,
+): UkSalonQualityResult {
+  const checks: Array<[string, boolean]> = [
+    ["service", observed.service === scenario.expected.service],
+    ["price", observed.pricePence === scenario.expected.pricePence],
+    ["slot", observed.startsAt === scenario.expected.startsAt],
+    ["idempotency", observed.toolIdempotencyKey === scenario.expected.toolIdempotencyKey],
+    ["single_booking", observed.bookingCount === scenario.expected.bookingCount],
+    ["spoken_reply", spokenReplyIsComplete(observed.spokenReply)],
+  ];
+  if (scenario.audio.interruptionAtMs !== undefined) {
+    checks.push(["interruption", observed.interruptionObserved]);
+  }
+  const failed = checks.filter(([, passed]) => !passed).map(([name]) => name);
+  return { passed: failed.length === 0, failed };
+}
+
+function spokenReplyIsComplete(reply: string): boolean {
+  const words = reply.trim().split(/\s+/).filter(Boolean);
+  return words.length >= 3 &&
+    words.length <= 50 &&
+    !/(?:\bthe|\band|\bor|\bto|\ba)\s*[,.!?-]*$/i.test(reply.trim()) &&
+    !/analysis|reasoning|tool name|system prompt|how may i assist/i.test(reply);
+}

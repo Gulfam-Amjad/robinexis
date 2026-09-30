@@ -4,7 +4,7 @@ import * as elevenlabs from "@livekit/agents-plugin-elevenlabs";
 import * as google from "@livekit/agents-plugin-google";
 import * as openai from "@livekit/agents-plugin-openai";
 import { compilePrompt, redactSensitiveText } from "@robinexis/brain";
-import type { PostCallPayload, TranscriptItem } from "./contracts.js";
+import type { PostCallPayload, RuntimeConfig, TranscriptItem } from "./contracts.js";
 import { loadVoiceRuntimeEnv } from "./env.js";
 import { runtimeLog } from "./logger.js";
 import { parseJobMetadata, stableCallId } from "./metadata.js";
@@ -62,7 +62,7 @@ export default defineAgent({
           apiKey: env.groqApiKey,
           baseURL: "https://api.groq.com/openai/v1",
           model: env.groqModel,
-          temperature: 0.2,
+          temperature: env.llmTemperature,
           toolChoice: "auto",
           parallelToolCalls: false,
           maxCompletionTokens: env.llmMaxCompletionTokens,
@@ -90,9 +90,9 @@ export default defineAgent({
           resumeFalseInterruption: true,
         },
         preemptiveGeneration: {
-          enabled: false,
+          enabled: env.preemptiveGenerationEnabled,
           preemptiveTts: false,
-          maxRetries: 0,
+          maxRetries: 1,
         },
       },
     });
@@ -158,14 +158,7 @@ export default defineAgent({
       room: ctx.room,
       record: { audio: false, traces: false, logs: false, transcript: false, redaction: true },
       agent: new BoundedVoiceAgent({
-        instructions: `${compilePrompt({
-          client: config.client,
-          direction: metadata.direction,
-          objective: metadata.objective,
-          compactVoice: true,
-        })}
-
-The opening greeting is delivered separately. Do not greet again unless the caller asks you to repeat it.`,
+        instructions: runtimeInstructions(config, metadata.direction, metadata.objective),
         tools: createToolBridge({
           apiBaseUrl: env.apiBaseUrl,
           tenantId: metadata.tenantId,
@@ -183,13 +176,38 @@ The opening greeting is delivered separately. Do not greet again unless the call
   },
 });
 
+export function runtimeInstructions(
+  config: RuntimeConfig,
+  direction: "inbound" | "outbound",
+  objective: string,
+): string {
+  const published = config.compiledPrompt?.trim();
+  const prompt = published || compilePrompt({
+    client: config.client,
+    direction,
+    objective,
+  });
+  return `${prompt}
+
+Live conversation requirements:
+- The opening greeting is delivered separately. Do not greet again unless the caller asks you to repeat it.
+- Use the supplied tool schemas. Do not narrate tool names, internal work, analysis, or reasoning.
+- Treat conversation history and successful tool results as the current booking draft. Preserve confirmed details until the caller changes them.
+- Ask for exactly one missing detail per turn, then stop and listen. Never simulate the caller's reply.
+- Keep ordinary replies under 35 spoken words. A final booking summary may be longer.
+- Output only the exact customer-facing words to be spoken.`;
+}
+
 class BoundedVoiceAgent extends voice.Agent {
   override async onUserTurnCompleted(
     chatCtx: llm.ChatContext,
     _newMessage: llm.ChatMessage,
   ): Promise<void> {
-    if (chatCtx.items.length <= 32) return;
-    await this.updateChatCtx(chatCtx.copy().truncate(28));
+    // Keep enough dialogue and tool results for long booking/correction flows.
+    // Tool inputs are also retained by the tenant-bound bridge, so compaction
+    // cannot silently overwrite a corrected slot or phone number.
+    if (chatCtx.items.length <= 64) return;
+    await this.updateChatCtx(chatCtx.copy().truncate(56));
   }
 }
 

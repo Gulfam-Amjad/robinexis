@@ -3,8 +3,15 @@ import type {
   ProviderLaunchGateCheck,
   ProviderLaunchGateInput,
 } from "@robinexis/api-contracts";
-export { UK_SALON_QUALITY_SCENARIOS } from "./fixtures/ukSalonScenarios.js";
-export type { UkSalonQualityScenario } from "./fixtures/ukSalonScenarios.js";
+export {
+  evaluateUkSalonScenario,
+  UK_SALON_QUALITY_SCENARIOS,
+} from "./fixtures/ukSalonScenarios.js";
+export type {
+  UkSalonQualityObservation,
+  UkSalonQualityResult,
+  UkSalonQualityScenario,
+} from "./fixtures/ukSalonScenarios.js";
 
 export const PROVIDER_QUALITY_THRESHOLDS = Object.freeze({
   minimumCostReductionRatio: 0.25,

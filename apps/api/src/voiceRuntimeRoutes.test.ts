@@ -54,10 +54,14 @@ describe("alternate voice runtime API contracts", () => {
       updatedAt: new Date().toISOString(),
     });
     const result = await runtimeConfigFor(store, BLADES_HAIR_ID, "deployment_livekit_blades_test");
+    const client = await store.getPublishedClient(BLADES_HAIR_ID);
+    const prompt = await store.getPromptVersion(client!.promptVersionId!);
     expect(result.status).toBe(200);
     expect(result.body).toMatchObject({
       client: { id: BLADES_HAIR_ID, published: true },
       deploymentId: "deployment_livekit_blades_test",
+      promptVersionId: prompt!.id,
+      compiledPrompt: prompt!.compiled,
       toolSecret: "legacy-tenant-secret",
     });
   });

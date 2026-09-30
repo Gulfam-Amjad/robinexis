@@ -16,7 +16,7 @@ type ModelResult = {
   failed: string[];
 };
 
-const CASES = [
+export const CASES = [
   {
     id: "unfinished_request",
     input: "I want to set an appointment for...",
@@ -62,6 +62,36 @@ const CASES = [
     input: "Thank you so much.",
     expectedAction: "close",
   },
+  {
+    id: "faq_hours",
+    input: "What time are you open?",
+    context: "Independent new call.",
+    expectedAction: "answer_fact",
+  },
+  {
+    id: "vague_request",
+    input: "I need something doing with my hair.",
+    context: "Independent new call.",
+    expectedAction: "ask_completion",
+  },
+  {
+    id: "time_correction",
+    input: "Sorry, I meant half four, not half three.",
+    context: "The caller previously asked for Tuesday at half three.",
+    expectedAction: "accept_correction",
+  },
+  {
+    id: "frustrated_caller",
+    input: "I've already explained this twice and I'm getting frustrated.",
+    context: "The caller wants a haircut but no date has been established.",
+    expectedAction: "acknowledge_and_help",
+  },
+  {
+    id: "human_request",
+    input: "I'd rather speak to someone at the salon, please.",
+    context: "The agent has already offered to help with the booking.",
+    expectedAction: "transfer_to_human",
+  },
 ] as const;
 
 function evaluationPrompt() {
@@ -73,9 +103,10 @@ function evaluationPrompt() {
   })}
 
 Quality evaluation only: for every case return one decision. Do not execute tools.
-The cases are one continuous conversation in the listed order. Retain earlier answers and apply later corrections.
+The first nine cases through "goodbye" are one continuous conversation in listed order.
+Cases with a context field are independent new calls; use only that case's context and input.
 Return strict JSON: {"cases":[{"id":"...","nextAction":"...","spokenReply":"..."}]}.
-Allowed nextAction values: ask_completion, ask_service, ask_time, check_availability, ask_phone, ask_complete_phone, summarize_confirmation, create_booking, close.
+Allowed nextAction values: ask_completion, ask_service, ask_time, check_availability, ask_phone, ask_complete_phone, summarize_confirmation, create_booking, close, answer_fact, accept_correction, acknowledge_and_help, transfer_to_human.
 Never invent a calendar slot or phone digit. A spokenReply must contain only customer-facing speech.`;
 }
 
@@ -90,6 +121,7 @@ export function scoreDecisions(decisions: Decision[]): Pick<ModelResult, "score"
       ["action", decision?.nextAction === scenario.expectedAction],
       ["concise", reply.length > 0 && reply.length <= 280],
       ["no_meta", !/the user|i should|analysis|reasoning|system prompt/i.test(reply)],
+      ["not_robotic", !/how may i assist|please provide|kindly provide|your request has been|as an ai|language model/i.test(reply)],
     ];
     if (scenario.id === "time") {
       checks.push(["no_invented_slot", !/\b(10|11|12)(?::\d\d)?\s*(am|pm|o'clock)\b/i.test(reply)]);
@@ -106,6 +138,20 @@ export function scoreDecisions(decisions: Decision[]): Pick<ModelResult, "score"
     }
     if (scenario.id !== "complete_phone" && scenario.id !== "confirmed_booking") {
       checks.push(["one_question", (reply.match(/\?/g) || []).length <= 1]);
+    }
+    if (scenario.id === "faq_hours") {
+      checks.push(["correct_hours", /(?:weekdays|monday).*(?:ten|10).*(?:seven|7)/i.test(reply)]);
+      checks.push(["answers_first", !/^(?:would|could|may|can) you/i.test(reply)]);
+    }
+    if (scenario.id === "time_correction") {
+      checks.push(["uses_correction", /half (?:past )?four|4(?::30)?/i.test(reply)]);
+      checks.push(["no_blame", !/you said|your mistake|wrong/i.test(reply)]);
+    }
+    if (scenario.id === "frustrated_caller") {
+      checks.push(["acknowledges_feeling", /sorry|understand|frustrat|not to worry|sort this/i.test(reply)]);
+    }
+    if (scenario.id === "human_request") {
+      checks.push(["warm_handoff", /of course|certainly|team|connect|put you through|someone/i.test(reply)]);
     }
     const failures = checks.filter(([, ok]) => !ok).map(([name]) => name);
     const target = failures.length

@@ -4,6 +4,7 @@ export interface RuntimeConfig {
   client: ClientConfig;
   deploymentId: string;
   promptVersionId: string;
+  compiledPrompt?: string;
   toolSecret: string;
 }
 

@@ -163,7 +163,12 @@ const heardCompleteRequest = /gentleman/i.test(callerText) &&
   /(eleven|11).*(thirty|30)/i.test(callerText);
 const oneQuestion = (responseText.match(/\?/g) || []).length <= 1;
 const offeredTimes = responseText.match(/\b(?:1[0-2]|[1-9])(?::[0-5]\d)?\s*(?:am|pm)\b/gi) || [];
-const conciseResponse = responseText.split(/\s+/).filter(Boolean).length <= 50 && offeredTimes.length <= 3;
+const responseWords = responseText.split(/\s+/).filter(Boolean);
+const conciseResponse = responseWords.length <= 50 && offeredTimes.length <= 3;
+const completeSpokenReply = responseWords.length >= 3 &&
+  !/(?:\bthe|\band|\bor|\bto|\ba)\s*[,.!?-]*$/i.test(responseText.trim());
+const naturalResponse = !/how may i assist|please provide|kindly provide|the user|analysis|reasoning|system prompt/i
+  .test(responseText);
 const respondedAfterCaller = agentTurns.length >= 2;
 const interruptionObserved = Boolean(interruptionStop) || largestInterruptionGapMs >= 200;
 const interruptionStopMs = interruptionStop ? interruptionStop.at - interruptionStartedAt : undefined;
@@ -172,6 +177,8 @@ const ok = agentConnected &&
   respondedAfterCaller &&
   oneQuestion &&
   conciseResponse &&
+  completeSpokenReply &&
+  naturalResponse &&
   interruptionObserved;
 
 await pool.end();
@@ -186,6 +193,8 @@ console.log(JSON.stringify({
   respondedAfterCaller,
   oneQuestion,
   conciseResponse,
+  completeSpokenReply,
+  naturalResponse,
   offeredTimeCount: offeredTimes.length,
   interruptionObserved,
   interruptionStopMs,
