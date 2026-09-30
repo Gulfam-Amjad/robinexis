@@ -130,12 +130,16 @@ describe("voice runtime safety contracts", () => {
       promptVersionId: "prompt-7",
       compiledPrompt: "FROZEN PREMIUM PERSONA\nApproved fact: weekdays ten till seven.",
       toolSecret: "secret",
-    }, "inbound", "Browser provider comparison");
+    }, "inbound", "Browser provider comparison", new Date("2026-09-30T09:00:00.000Z"));
     expect(instructions).toContain("FROZEN PREMIUM PERSONA");
     expect(instructions).toContain("weekdays ten till seven");
     expect(instructions).not.toContain("Objective: Browser provider comparison");
+    expect(instructions).toContain("Wednesday, 30 September 2026");
+    expect(instructions).toContain("(Europe/London)");
     expect(instructions).toMatch(/opening greeting is delivered separately/i);
     expect(instructions).toMatch(/exactly one missing detail per turn/i);
+    expect(instructions).toMatch(/invalid_date_range with clarify_date/i);
+    expect(instructions).toMatch(/Do not say the diary is unavailable/i);
     expect(instructions).toMatch(/under 35 spoken words/i);
     expect(instructions).toMatch(/Say times naturally in words/i);
   });
@@ -192,6 +196,36 @@ describe("voice runtime safety contracts", () => {
     expect(sanitizeProviderError(new Error(
       'ElevenLabs API error: {"detail":{"code":"payment_issue"}} sk_live_secret',
     ))).toBe("payment_issue");
+  });
+
+  it("returns invalid-date clarification details to the model", async () => {
+    const history: Array<any> = [];
+    const tools = createToolBridge({
+      apiBaseUrl: "https://api.example",
+      tenantId: "tenant-a",
+      toolSecret: "secret",
+      callId: "call-invalid-date",
+      history,
+      fetchImpl: async () => new Response(JSON.stringify({
+        ok: false,
+        error: "invalid_date_range",
+        recoveryAction: "clarify_date",
+      }), { status: 400 }),
+    });
+    const availability = tools.find((tool) => tool.name === "check_availability")!;
+    await expect((availability as any).execute({
+      eventTypeSlug: "30min",
+      start: "2026-09-31T10:00:00+01:00",
+      end: "2026-09-31T19:00:00+01:00",
+    }, {})).resolves.toEqual({
+      ok: false,
+      error: "invalid_date_range",
+      recoveryAction: "clarify_date",
+    });
+    expect(history[0].result).toMatchObject({
+      error: "invalid_date_range",
+      recoveryAction: "clarify_date",
+    });
   });
 
   it("speaks with Deepgram and falls back when ElevenLabs cannot synthesize", async () => {

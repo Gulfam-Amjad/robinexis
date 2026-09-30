@@ -173,6 +173,54 @@ describe("ElevenLabs voice tool routes", () => {
     });
   });
 
+  it.each([
+    ["September 31", "2026-09-31T10:00:00+01:00", "2026-09-31T19:00:00+01:00"],
+    ["a non-leap February 29", "2025-02-29T10:00:00Z", "2025-02-29T11:00:00Z"],
+    ["a reversed range", "2026-10-02T11:00:00Z", "2026-10-02T10:00:00Z"],
+    ["a window over fourteen days", "2026-10-01T10:00:00Z", "2026-10-15T10:00:01Z"],
+  ])("clarifies %s without calling the calendar", async (_label, start, end) => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    const calendar = new FakeCalendar();
+    let checks = 0;
+    calendar.check = () => {
+      checks += 1;
+      return { slots: [] };
+    };
+
+    const result = await runVoiceTool(store, "check-availability", {
+      eventTypeSlug: "30min",
+      start,
+      end,
+      conversationId: `conv_invalid_${start}`,
+    }, { store, calendar });
+
+    expect(result).toEqual({
+      status: 400,
+      body: {
+        ok: false,
+        error: "invalid_date_range",
+        recoveryAction: "clarify_date",
+      },
+    });
+    expect(checks).toBe(0);
+  });
+
+  it("accepts a real leap day with a timezone offset", async () => {
+    const store = new MemoryStore();
+    await seedStore(store);
+    const calendar = new FakeCalendar(["2028-02-29T10:30:00.000Z"]);
+    const result = await runVoiceTool(store, "check-availability", {
+      eventTypeSlug: "30min",
+      start: "2028-02-29T09:00:00+01:00",
+      end: "2028-02-29T18:00:00+01:00",
+      conversationId: "conv_valid_leap_day",
+    }, { store, calendar });
+
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ ok: true });
+  });
+
   it("supports a second published tenant selected by its server-bound secret", async () => {
     const store = new MemoryStore();
     await seedStore(store);

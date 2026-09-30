@@ -32,6 +32,9 @@ const required = (name: string): string => {
 };
 const clientId = process.env.COST_SAVER_CANARY_CLIENT_ID?.trim() ||
   (environment === "production" ? "client_blades_hair" : "client_staging_launch_canary");
+const scenario = process.env.COST_SAVER_CANARY_SCENARIO === "invalid-date"
+  ? "invalid-date"
+  : "valid-date";
 const livekitUrl = required("LIVEKIT_URL");
 const apiKey = required("LIVEKIT_API_KEY");
 const apiSecret = required("LIVEKIT_API_SECRET");
@@ -123,8 +126,18 @@ for (let attempt = 0; attempt < 60 && remoteFrameTimes.length < 5; attempt += 1)
 }
 await sleep(450);
 const interruptionStartedAt = Date.now();
+const targetDate = nextWeekday(new Date(Date.now() + 2 * 86_400_000));
+const spokenTargetDate = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Europe/London",
+  weekday: "long",
+  day: "numeric",
+  month: "long",
+  year: "numeric",
+}).format(targetDate);
 const pcm = await synthesizePcm(
-  "Please stop. I want to book a gentleman's haircut on Monday the twenty-first of September at eleven thirty. Is that available?",
+  scenario === "invalid-date"
+    ? "Please stop. I want to book a gentleman's haircut on the thirty-first of September at eleven thirty. Is that available?"
+    : `Please stop. I want to book a gentleman's haircut on ${spokenTargetDate} at eleven thirty. Is that available?`,
 );
 await publishPcm(source, pcm);
 await publishSilence(source, 1_000);
@@ -159,8 +172,23 @@ const interruptionStop = agentSpeechEvents.find((event) =>
   event.at >= interruptionStartedAt &&
   event.at <= interruptionStartedAt + 1_500);
 const heardCompleteRequest = /gentleman/i.test(callerText) &&
-  /monday/i.test(callerText) &&
   /(eleven|11).*(thirty|30)/i.test(callerText);
+const availabilityTool = newCall?.toolHistory.find((tool) => tool.name === "check_availability");
+const availabilityChecked = Boolean(availabilityTool);
+const availabilitySucceeded = Boolean(
+  availabilityTool?.result &&
+  typeof availabilityTool.result === "object" &&
+  (availabilityTool.result as { ok?: unknown }).ok === true,
+);
+const invalidDateRejected = Boolean(
+  !availabilityTool ||
+  (
+    availabilityTool.result &&
+    typeof availabilityTool.result === "object" &&
+    (availabilityTool.result as { error?: unknown }).error === "invalid_date_range" &&
+    (availabilityTool.result as { recoveryAction?: unknown }).recoveryAction === "clarify_date"
+  ),
+);
 const oneQuestion = (responseText.match(/\?/g) || []).length <= 1;
 const offeredTimes = responseText.match(/\b(?:1[0-2]|[1-9])(?::[0-5]\d)?\s*(?:am|pm)\b/gi) || [];
 const responseWords = responseText.split(/\s+/).filter(Boolean);
@@ -170,11 +198,18 @@ const completeSpokenReply = responseWords.length >= 3 &&
 const naturalResponse = !/how may i assist|please provide|kindly provide|the user|analysis|reasoning|system prompt/i
   .test(responseText);
 const naturalTimeSpeech = !/\ba\s+\d{1,2}:\d{2}\b/i.test(responseText);
+const clarifiedInvalidDate = /september.*(?:30|thirty)|30 days/i.test(responseText) &&
+  /30th|thirtieth|1(?:st)? october|first of october/i.test(responseText);
+const noFalseCalendarOutage = !/diary.*(?:down|unavailable)|schedule.*unavailable|callback|connect.*team/i
+  .test(responseText);
 const respondedAfterCaller = agentTurns.length >= 2;
 const interruptionObserved = Boolean(interruptionStop) || largestInterruptionGapMs >= 200;
 const interruptionStopMs = interruptionStop ? interruptionStop.at - interruptionStartedAt : undefined;
 const ok = agentConnected &&
   heardCompleteRequest &&
+  (scenario === "valid-date"
+    ? availabilityChecked && availabilitySucceeded
+    : invalidDateRejected && clarifiedInvalidDate && noFalseCalendarOutage) &&
   respondedAfterCaller &&
   oneQuestion &&
   conciseResponse &&
@@ -188,10 +223,17 @@ await dispose();
 console.log(JSON.stringify({
   ok,
   environment,
+  scenario,
   clientId,
   roomName,
   agentConnected,
   heardCompleteRequest,
+  requestedDate: scenario === "invalid-date" ? "31 September" : spokenTargetDate,
+  availabilityChecked,
+  availabilitySucceeded,
+  invalidDateRejected,
+  clarifiedInvalidDate,
+  noFalseCalendarOutage,
   respondedAfterCaller,
   oneQuestion,
   conciseResponse,
@@ -207,6 +249,14 @@ console.log(JSON.stringify({
   callId: newCall?.id,
 }));
 if (!ok) process.exitCode = 1;
+
+function nextWeekday(date: Date): Date {
+  const result = new Date(date);
+  while (result.getUTCDay() === 0 || result.getUTCDay() === 6) {
+    result.setUTCDate(result.getUTCDate() + 1);
+  }
+  return result;
+}
 
 async function synthesizePcm(text: string): Promise<Int16Array> {
   const response = await fetch(

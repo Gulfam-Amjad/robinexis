@@ -33,6 +33,11 @@ describe("Cost Saver conversation quality scoring", () => {
         nextAction: "transfer_to_human",
         spokenReply: "Of course, I'll put you through to someone at the salon.",
       },
+      {
+        id: "impossible_date",
+        nextAction: "clarify_date",
+        spokenReply: "September has 30 days. Did you mean the 30th or 1 October?",
+      },
     ]);
 
     expect(scored.passed).toEqual(expect.arrayContaining([
@@ -41,6 +46,7 @@ describe("Cost Saver conversation quality scoring", () => {
       "time_correction:pass",
       "frustrated_caller:pass",
       "human_request:pass",
+      "impossible_date:pass",
     ]));
   });
 
@@ -66,12 +72,20 @@ describe("Cost Saver conversation quality scoring", () => {
         nextAction: "transfer_to_human",
         spokenReply: "Wait.",
       },
+      {
+        id: "impossible_date",
+        nextAction: "clarify_date",
+        spokenReply: "The diary is unavailable, so I'll arrange a callback.",
+      },
     ]);
 
     expect(scored.failed.join("\n")).toMatch(/faq_hours:fail.*not_robotic.*correct_hours/);
     expect(scored.failed.join("\n")).toMatch(/time_correction:fail.*uses_correction.*no_blame/);
     expect(scored.failed.join("\n")).toMatch(/frustrated_caller:fail.*not_robotic.*acknowledges_feeling/);
     expect(scored.failed.join("\n")).toMatch(/human_request:fail.*warm_handoff/);
+    expect(scored.failed.join("\n")).toMatch(
+      /impossible_date:fail.*explains_date.*offers_precise_choices.*no_false_outage/,
+    );
   });
 });
 

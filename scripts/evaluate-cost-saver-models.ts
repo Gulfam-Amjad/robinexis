@@ -92,6 +92,12 @@ export const CASES = [
     context: "The agent has already offered to help with the booking.",
     expectedAction: "transfer_to_human",
   },
+  {
+    id: "impossible_date",
+    input: "Can you book the cut for the thirty-first of September?",
+    context: "Independent new call. The current local date is 30 September 2026.",
+    expectedAction: "clarify_date",
+  },
 ] as const;
 
 function evaluationPrompt() {
@@ -106,7 +112,7 @@ Quality evaluation only: for every case return one decision. Do not execute tool
 The first nine cases through "goodbye" are one continuous conversation in listed order.
 Cases with a context field are independent new calls; use only that case's context and input.
 Return strict JSON: {"cases":[{"id":"...","nextAction":"...","spokenReply":"..."}]}.
-Allowed nextAction values: ask_completion, ask_service, ask_time, check_availability, ask_phone, ask_complete_phone, summarize_confirmation, create_booking, close, answer_fact, accept_correction, acknowledge_and_help, transfer_to_human.
+Allowed nextAction values: ask_completion, ask_service, ask_time, check_availability, ask_phone, ask_complete_phone, summarize_confirmation, create_booking, close, answer_fact, accept_correction, acknowledge_and_help, transfer_to_human, clarify_date.
 Never invent a calendar slot or phone digit. A spokenReply must contain only customer-facing speech.`;
 }
 
@@ -152,6 +158,11 @@ export function scoreDecisions(decisions: Decision[]): Pick<ModelResult, "score"
     }
     if (scenario.id === "human_request") {
       checks.push(["warm_handoff", /of course|certainly|team|connect|put you through|someone/i.test(reply)]);
+    }
+    if (scenario.id === "impossible_date") {
+      checks.push(["explains_date", /september.*30|30 days/i.test(reply)]);
+      checks.push(["offers_precise_choices", /30th|thirtieth/i.test(reply) && /1(?:st)? october|first of october/i.test(reply)]);
+      checks.push(["no_false_outage", !/diary.*(?:down|unavailable)|schedule.*unavailable|callback|connect.*team/i.test(reply)]);
     }
     const failures = checks.filter(([, ok]) => !ok).map(([name]) => name);
     const target = failures.length

@@ -132,9 +132,50 @@ function rememberTool(
 }
 
 function validRange(start: string, end: string): boolean {
-  const from = Date.parse(start);
-  const to = Date.parse(end);
-  return Number.isFinite(from) && Number.isFinite(to) && to > from && to - from <= 14 * 86_400_000;
+  const from = strictIsoInstant(start);
+  const to = strictIsoInstant(end);
+  return from !== undefined &&
+    to !== undefined &&
+    to > from &&
+    to - from <= 14 * 86_400_000;
+}
+
+function strictIsoInstant(value: string): number | undefined {
+  const match = value.match(
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,9})?)?(Z|[+-](\d{2}):(\d{2}))$/,
+  );
+  if (!match) return undefined;
+  const [, rawYear, rawMonth, rawDay, rawHour, rawMinute, rawSecond = "0", , rawOffsetHour, rawOffsetMinute] = match;
+  const year = Number(rawYear);
+  const month = Number(rawMonth);
+  const day = Number(rawDay);
+  const hour = Number(rawHour);
+  const minute = Number(rawMinute);
+  const second = Number(rawSecond);
+  const offsetHour = rawOffsetHour === undefined ? 0 : Number(rawOffsetHour);
+  const offsetMinute = rawOffsetMinute === undefined ? 0 : Number(rawOffsetMinute);
+  if (
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > daysInMonth(year, month) ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59 ||
+    offsetHour > 14 ||
+    offsetMinute > 59 ||
+    (offsetHour === 14 && offsetMinute !== 0)
+  ) return undefined;
+  const instant = Date.parse(value);
+  return Number.isFinite(instant) ? instant : undefined;
+}
+
+function daysInMonth(year: number, month: number): number {
+  if (month === 2) {
+    const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+    return leap ? 29 : 28;
+  }
+  return [4, 6, 9, 11].includes(month) ? 30 : 31;
 }
 
 function phoneDiagnostics(phone: string): Record<string, unknown> {
@@ -258,7 +299,14 @@ export async function runVoiceTool(
     const start = String(input.start || "");
     const end = String(input.end || "");
     if (!validRange(start, end)) {
-      return { status: 400, body: { ok: false, error: "invalid_date_range" } };
+      return {
+        status: 400,
+        body: {
+          ok: false,
+          error: "invalid_date_range",
+          recoveryAction: "clarify_date",
+        },
+      };
     }
     const result = await exec({
       name: "check_availability",

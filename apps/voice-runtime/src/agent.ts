@@ -180,6 +180,7 @@ export function runtimeInstructions(
   config: RuntimeConfig,
   direction: "inbound" | "outbound",
   objective: string,
+  now = new Date(),
 ): string {
   const published = config.compiledPrompt?.trim();
   const prompt = published || compilePrompt({
@@ -187,13 +188,28 @@ export function runtimeInstructions(
     direction,
     objective,
   });
+  const timeZone = config.client.callingWindow?.tz || "Europe/London";
+  const localDateTime = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZoneName: "short",
+  }).format(now);
   return `${prompt}
 
 Live conversation requirements:
+- Current local date and time: ${localDateTime} (${timeZone}). Resolve "today", weekdays, and relative dates from this value.
 - The opening greeting is delivered separately. Do not greet again unless the caller asks you to repeat it.
 - Use the supplied tool schemas. Do not narrate tool names, internal work, analysis, or reasoning.
 - Treat conversation history and successful tool results as the current booking draft. Preserve confirmed details until the caller changes them.
 - Ask for exactly one missing detail per turn, then stop and listen. Never simulate the caller's reply.
+- Before checking availability, ensure the requested calendar date really exists. Never invent or silently repair an impossible date.
+- If a tool returns invalid_date_range with clarify_date, briefly explain the date problem and ask one precise clarification. Do not say the diary is unavailable or offer a callback.
 - Keep ordinary replies under 35 spoken words. A final booking summary may be longer.
 - Say times naturally in words, such as "eleven thirty" or "half four"; never say "a 11:30 slot".
 - Output only the exact customer-facing words to be spoken.`;

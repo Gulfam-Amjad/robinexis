@@ -73,6 +73,8 @@ describe("prompt compiler", () => {
     expect(inbound).toMatch(/Do not repeat the same acknowledgement/i);
     expect(inbound).toMatch(/If interrupted, stop the abandoned thought/i);
     expect(inbound).toMatch(/at most one useful question/i);
+    expect(inbound).toMatch(/Never silently roll an impossible date/i);
+    expect(inbound).toMatch(/recoveryAction=clarify_date/i);
     expect(inbound).not.toMatch(/Galyna/);
     const outbound = compilePrompt({ client, direction: "outbound", objective: "appointment-reminder" });
     expect(outbound).toMatch(/OUTBOUND/);
