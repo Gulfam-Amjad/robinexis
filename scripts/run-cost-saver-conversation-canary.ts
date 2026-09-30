@@ -206,20 +206,15 @@ console.log(JSON.stringify({
 if (!ok) process.exitCode = 1;
 
 async function synthesizePcm(text: string): Promise<Int16Array> {
-  const voiceId = required("ELEVENLABS_VOICE_ID");
   const response = await fetch(
-    `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=pcm_24000`,
+    "https://api.deepgram.com/v1/speak?model=aura-2-aurora-en&encoding=linear16&sample_rate=24000&container=none",
     {
       method: "POST",
       headers: {
+        authorization: `Token ${required("DEEPGRAM_API_KEY")}`,
         "content-type": "application/json",
-        "xi-api-key": required("ELEVENLABS_API_KEY"),
       },
-      body: JSON.stringify({
-        text,
-        model_id: process.env.ELEVENLABS_TTS_MODEL?.trim() || "eleven_flash_v2_5",
-        voice_settings: { stability: 0.65, similarity_boost: 0.75 },
-      }),
+      body: JSON.stringify({ text }),
     },
   );
   if (!response.ok) throw new Error(`canary_tts_failed:${response.status}`);
