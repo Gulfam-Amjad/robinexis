@@ -137,6 +137,7 @@ describe("voice runtime safety contracts", () => {
     expect(instructions).toMatch(/opening greeting is delivered separately/i);
     expect(instructions).toMatch(/exactly one missing detail per turn/i);
     expect(instructions).toMatch(/under 35 spoken words/i);
+    expect(instructions).toMatch(/Say times naturally in words/i);
   });
 
   it("bridges only voice tools without caller-selected tenant fields", async () => {

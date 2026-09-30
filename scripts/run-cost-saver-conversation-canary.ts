@@ -169,6 +169,7 @@ const completeSpokenReply = responseWords.length >= 3 &&
   !/(?:\bthe|\band|\bor|\bto|\ba)\s*[,.!?-]*$/i.test(responseText.trim());
 const naturalResponse = !/how may i assist|please provide|kindly provide|the user|analysis|reasoning|system prompt/i
   .test(responseText);
+const naturalTimeSpeech = !/\ba\s+\d{1,2}:\d{2}\b/i.test(responseText);
 const respondedAfterCaller = agentTurns.length >= 2;
 const interruptionObserved = Boolean(interruptionStop) || largestInterruptionGapMs >= 200;
 const interruptionStopMs = interruptionStop ? interruptionStop.at - interruptionStartedAt : undefined;
@@ -179,6 +180,7 @@ const ok = agentConnected &&
   conciseResponse &&
   completeSpokenReply &&
   naturalResponse &&
+  naturalTimeSpeech &&
   interruptionObserved;
 
 await pool.end();
@@ -195,6 +197,7 @@ console.log(JSON.stringify({
   conciseResponse,
   completeSpokenReply,
   naturalResponse,
+  naturalTimeSpeech,
   offeredTimeCount: offeredTimes.length,
   interruptionObserved,
   interruptionStopMs,

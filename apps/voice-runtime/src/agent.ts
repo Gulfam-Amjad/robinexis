@@ -195,6 +195,7 @@ Live conversation requirements:
 - Treat conversation history and successful tool results as the current booking draft. Preserve confirmed details until the caller changes them.
 - Ask for exactly one missing detail per turn, then stop and listen. Never simulate the caller's reply.
 - Keep ordinary replies under 35 spoken words. A final booking summary may be longer.
+- Say times naturally in words, such as "eleven thirty" or "half four"; never say "a 11:30 slot".
 - Output only the exact customer-facing words to be spoken.`;
 }
 
