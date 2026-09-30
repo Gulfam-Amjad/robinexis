@@ -215,7 +215,11 @@ export const api = {
     request<{
       clientId: string;
       businessName?: string;
-      premium: { ready: boolean; reason?: string };
+      premium: {
+        ready: boolean;
+        reason?: string;
+        speech?: { blocked: boolean; reason?: string };
+      };
       costSaver: { ready: boolean; reason?: string; missing: string[] };
     }>("/api/v1/admin/provider-comparison/readiness"),
   createProviderComparisonSession: () =>
@@ -239,6 +243,7 @@ export const api = {
       ready: boolean;
       reason?: string;
       missing: string[];
+      premiumSpeech?: { blocked: boolean; reason?: string };
     }>(`/api/v1/clients/${encodeURIComponent(clientId)}/cost-saver/readiness`),
   createCostSaverSession: (clientId: string) =>
     request<{

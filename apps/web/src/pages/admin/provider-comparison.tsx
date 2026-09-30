@@ -65,6 +65,7 @@ export default function AdminProviderComparisonPage() {
     greeting: client.data.greeting,
   });
   const costSaverReady = readiness.data?.costSaver.ready === true;
+  const premiumBackup = readiness.data?.premium.speech?.blocked === true && costSaverReady;
   const unavailableReason = readiness.error
     ? "Readiness could not be checked. The Cost Saver call remains disabled."
     : readiness.data?.costSaver.reason;
@@ -92,13 +93,13 @@ export default function AdminProviderComparisonPage() {
 
     <div className="comparison-summary-grid">
       <Card className="comparison-summary-card comparison-premium">
-        <div><span><Sparkles /></span><div><small>Expensive baseline</small><h2>ElevenLabs Premium</h2></div><Badge tone="accent">Ready</Badge></div>
+        <div><span><Sparkles /></span><div><small>Expensive baseline</small><h2>ElevenLabs Premium</h2></div><Badge tone={premiumBackup ? "warning" : "accent"}>{premiumBackup ? "Backup voice" : "Ready"}</Badge></div>
         <p>ElevenLabs handles listening, reasoning, turn-taking and speech end to end.</p>
         <ul><li>Flagship turn-taking and interruption handling</li><li>Single managed conversational provider</li><li>Current Blades production-quality baseline</li></ul>
       </Card>
       <Card className="comparison-summary-card comparison-saver">
         <div><span><Gauge /></span><div><small>Lower-cost candidate</small><h2>Cost Saver</h2></div><Badge tone={costSaverReady ? "success" : "warning"}>{costSaverReady ? "Ready" : "Setup needed"}</Badge></div>
-        <p>Deepgram listens, Groq reasons, and ElevenLabs Flash speaks through LiveKit.</p>
+        <p>Deepgram listens, Groq reasons, and Deepgram Aura speaks through LiveKit.</p>
         <ul><li>Separate component-level cost visibility</li><li>Same Blades prompt and operational tools</li><li>Measure quality and latency before routing customers</li></ul>
       </Card>
     </div>
@@ -111,13 +112,25 @@ export default function AdminProviderComparisonPage() {
     <div className="comparison-agents-grid">
       <Card className="comparison-agent-panel">
         <div className="comparison-agent-label"><Sparkles /><span><small>Test A</small><strong>ElevenLabs Premium</strong></span></div>
-        <ReceptionistCall
+        {premiumBackup ? <>
+          <div className="comparison-readiness" role="status">
+            <strong>ElevenLabs is paused by an unpaid invoice</strong>
+            <p>Premium is using the backup voice until the ElevenLabs invoice is paid. It switches back automatically.</p>
+          </div>
+          <CostSaverCall
+            config={demo}
+            available
+            disabled={activeProvider === "cost-saver"}
+            requestStart={requestPremium}
+            onActiveChange={premiumActive}
+          />
+        </> : <ReceptionistCall
           config={demo}
           compact
           disabled={activeProvider === "cost-saver"}
           requestStart={requestPremium}
           onActiveChange={premiumActive}
-        />
+        />}
       </Card>
       <Card className="comparison-agent-panel">
         <div className="comparison-agent-label"><Gauge /><span><small>Test B</small><strong>Cost Saver</strong></span></div>

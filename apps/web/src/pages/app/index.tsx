@@ -808,10 +808,13 @@ export function PlaygroundPage() {
   const costSaverReadiness = useQuery({
     queryKey: ["cost-saver-readiness", activeClientId],
     queryFn: () => api.costSaverReadiness(activeClientId!),
-    enabled: Boolean(activeClientId && costSaver),
+    enabled: Boolean(activeClientId && client.data),
     retry: false,
   });
-  if (client.isLoading || (costSaver && costSaverReadiness.isLoading)) {
+  const premiumBackup = !costSaver &&
+    costSaverReadiness.data?.premiumSpeech?.blocked === true &&
+    costSaverReadiness.data.ready;
+  if (client.isLoading || costSaverReadiness.isLoading) {
     return <LoadingState label="Loading this workspace’s receptionist…" />;
   }
   if (client.error) return <ErrorState error={client.error} onRetry={() => client.refetch()} />;
@@ -849,7 +852,7 @@ export function PlaygroundPage() {
         actions={!costSaver && demoConfig.sharePath ? <Link className="button button-secondary button-md" to={demoConfig.sharePath} target="_blank">Open public demo <Link2 size={15} /></Link> : undefined}
       />
       <div className="receptionist-test-layout">
-        {costSaver ? <CostSaverCall
+        {costSaver || premiumBackup ? <CostSaverCall
           config={demoConfig}
           available={costSaverReadiness.data?.ready === true}
           unavailableReason={costSaverReadiness.error

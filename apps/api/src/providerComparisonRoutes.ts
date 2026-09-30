@@ -30,10 +30,12 @@ type LiveKitManagement = {
   deleteRoom?(roomName: string): Promise<unknown>;
 };
 
+export type PremiumSpeechStatus = { blocked: boolean; reason?: string };
+
 export type ProviderComparisonReadiness = {
   clientId: string;
   businessName?: string;
-  premium: { ready: boolean; reason?: string };
+  premium: { ready: boolean; reason?: string; speech: PremiumSpeechStatus };
   costSaver: { ready: boolean; reason?: string; missing: string[] };
 };
 
@@ -44,10 +46,57 @@ export type CostSaverReadiness = {
   ready: boolean;
   reason?: string;
   missing: string[];
+  premiumSpeech: PremiumSpeechStatus;
 };
+
+const BLOCKED_SUBSCRIPTION_STATUSES = new Set([
+  "past_due",
+  "unpaid",
+  "incomplete",
+  "incomplete_expired",
+]);
+const SPEECH_STATUS_TTL_MS = 60_000;
+let cachedSpeechStatus: { at: number; status: PremiumSpeechStatus } | undefined;
+
+export function resetPremiumSpeechStatusCache() {
+  cachedSpeechStatus = undefined;
+}
+
+// Reads the subscription (free, no credits) rather than synthesising audio.
+// Unknown or unreachable states never block Premium.
+export async function premiumSpeechStatus(
+  fetchImpl: typeof fetch = fetch,
+  now = Date.now(),
+): Promise<PremiumSpeechStatus> {
+  if (cachedSpeechStatus && now - cachedSpeechStatus.at < SPEECH_STATUS_TTL_MS) {
+    return cachedSpeechStatus.status;
+  }
+  const apiKey = process.env.ELEVENLABS_API_KEY?.trim();
+  if (!apiKey) return { blocked: false };
+  let status: PremiumSpeechStatus = { blocked: false };
+  try {
+    const response = await fetchImpl("https://api.elevenlabs.io/v1/user/subscription", {
+      headers: { "xi-api-key": apiKey },
+      signal: AbortSignal.timeout(4_000),
+    });
+    if (response.ok) {
+      const body = await response.json() as { status?: string };
+      if (body.status && BLOCKED_SUBSCRIPTION_STATUSES.has(body.status)) {
+        status = { blocked: true, reason: "payment_issue" };
+      }
+    } else if (response.status === 402) {
+      status = { blocked: true, reason: "payment_required" };
+    }
+  } catch {
+    return { blocked: false };
+  }
+  cachedSpeechStatus = { at: now, status };
+  return status;
+}
 
 export async function providerComparisonReadiness(
   store: PlatformStore,
+  fetchImpl?: typeof fetch,
 ): Promise<ProviderComparisonReadiness> {
   const client = await store.getPublishedClient(BLADES_HAIR_ID);
   const missing = liveKitMissingConfiguration();
@@ -61,6 +110,7 @@ export async function providerComparisonReadiness(
         : !client.elevenlabsAgentId
           ? { reason: "The Blades Hair ElevenLabs agent is not connected." }
           : {}),
+      speech: await premiumSpeechStatus(fetchImpl),
     },
     costSaver: {
       ready: Boolean(client && missing.length === 0),
@@ -77,6 +127,7 @@ export async function providerComparisonReadiness(
 export async function costSaverReadiness(
   store: PlatformStore,
   clientId: string,
+  fetchImpl?: typeof fetch,
 ): Promise<CostSaverReadiness> {
   const client = await store.getPublishedClient(clientId);
   const missing = liveKitMissingConfiguration();
@@ -94,6 +145,7 @@ export async function costSaverReadiness(
         ? { reason: "The Cost Saver browser runtime is not fully configured." }
         : {}),
     missing,
+    premiumSpeech: await premiumSpeechStatus(fetchImpl),
   };
 }
 

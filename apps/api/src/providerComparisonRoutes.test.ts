@@ -1,14 +1,57 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BLADES_HAIR_ID, MemoryStore, seedStore } from "@robinexis/database";
 import {
   createClientCostSaverSession,
   createProviderComparisonSession,
   handleProviderComparisonRoute,
+  premiumSpeechStatus,
   providerComparisonReadiness,
+  resetPremiumSpeechStatusCache,
 } from "./providerComparisonRoutes.js";
 import type { ProductRouteContext } from "./productRoutes.js";
 
-afterEach(() => vi.unstubAllEnvs());
+beforeEach(() => {
+  resetPremiumSpeechStatusCache();
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ status: "active" })));
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+});
+
+describe("premium speech status", () => {
+  it("reports a blocked Premium voice when the ElevenLabs subscription is past due", async () => {
+    vi.stubEnv("ELEVENLABS_API_KEY", "eleven-key");
+    const fetchImpl = vi.fn(async () => Response.json({ status: "past_due" }));
+    await expect(premiumSpeechStatus(fetchImpl as unknown as typeof fetch, 1_000))
+      .resolves.toEqual({ blocked: true, reason: "payment_issue" });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://api.elevenlabs.io/v1/user/subscription",
+      expect.objectContaining({ headers: { "xi-api-key": "eleven-key" } }),
+    );
+  });
+
+  it("keeps Premium on ElevenLabs when the account is active or the check fails", async () => {
+    vi.stubEnv("ELEVENLABS_API_KEY", "eleven-key");
+    const active = vi.fn(async () => Response.json({ status: "active" }));
+    await expect(premiumSpeechStatus(active as unknown as typeof fetch, 1_000))
+      .resolves.toEqual({ blocked: false });
+    resetPremiumSpeechStatusCache();
+    const failing = vi.fn(async () => { throw new Error("network"); });
+    await expect(premiumSpeechStatus(failing as unknown as typeof fetch, 1_000))
+      .resolves.toEqual({ blocked: false });
+  });
+
+  it("caches the subscription check for a minute", async () => {
+    vi.stubEnv("ELEVENLABS_API_KEY", "eleven-key");
+    const fetchImpl = vi.fn(async () => Response.json({ status: "past_due" }));
+    await premiumSpeechStatus(fetchImpl as unknown as typeof fetch, 1_000);
+    await premiumSpeechStatus(fetchImpl as unknown as typeof fetch, 30_000);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    await premiumSpeechStatus(fetchImpl as unknown as typeof fetch, 62_000);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+});
 
 describe("provider comparison routes", () => {
   it("rejects tenant users before inspecting runtime configuration", async () => {
@@ -38,6 +81,7 @@ describe("provider comparison routes", () => {
     await seedStore(store);
     const result = await providerComparisonReadiness(store);
     expect(result.premium.ready).toBe(true);
+    expect(result.premium.speech).toEqual({ blocked: false });
     expect(result.costSaver.ready).toBe(false);
     expect(result.costSaver.missing).toContain("VOICE_RUNTIME_ENABLED");
     expect(result.costSaver.reason).toMatch(/not fully configured/i);
