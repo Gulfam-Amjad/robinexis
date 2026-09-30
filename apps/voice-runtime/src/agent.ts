@@ -51,7 +51,12 @@ export default defineAgent({
         model: env.deepgramModel,
         language: "en-GB",
         interimResults: true,
-        smartFormat: true,
+        // Smart formatting rewrites spoken dates as US "10/15/2026", which the
+        // model then misreads as day/month. Punctuation and numerals keep
+        // "the 15th of October at 11:30" unambiguous.
+        smartFormat: false,
+        punctuate: true,
+        numerals: true,
         endpointing: env.deepgramEndpointingMs,
         fillerWords: true,
         keyterm: voiceKeyterms(config.client),

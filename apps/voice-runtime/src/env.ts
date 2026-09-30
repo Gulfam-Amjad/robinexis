@@ -81,11 +81,11 @@ export function loadVoiceRuntimeEnv(env: NodeJS.ProcessEnv = process.env): Voice
     geminiModel: env.GEMINI_LLM_MODEL?.trim() || "gemini-3.6-flash",
     llmMaxCompletionTokens: boundedInteger(
       env.VOICE_LLM_MAX_COMPLETION_TOKENS,
-      320,
+      480,
       120,
       1_000,
     ),
-    llmTemperature: boundedNumber(env.VOICE_LLM_TEMPERATURE, 0.22, 0, 0.8),
+    llmTemperature: boundedNumber(env.VOICE_LLM_TEMPERATURE, 0.28, 0, 0.8),
     ttsProvider,
     deepgramTtsModel: env.DEEPGRAM_TTS_MODEL?.trim() || "aura-2-pandora-en",
     elevenLabsTtsModel: env.ELEVENLABS_TTS_MODEL?.trim() || "eleven_flash_v2_5",
