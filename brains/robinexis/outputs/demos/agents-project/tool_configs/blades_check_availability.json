@@ -15,7 +15,7 @@
   },
   "api_schema": {
     "kind": "webhook",
-    "url": "https://api.robinexis.com/api/v1/voice-tools/check-availability",
+    "url": "https://robinexisapi-production-cef9.up.railway.app/api/v1/voice-tools/check-availability",
     "method": "POST",
     "request_headers": {
       "Content-Type": "application/json",
